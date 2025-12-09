@@ -1,0 +1,13 @@
+{
+  "name": "pdfviewer",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Web PDF Viewer with PDFium",
+  "scripts": {
+    "build:pdfium": "pnpm --filter @pdfviewer/pdfium-wasm build"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3"
+  },
+  "packageManager": "pnpm@8.12.0"
+}

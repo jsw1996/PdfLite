@@ -1,0 +1,45 @@
+{
+  "name": "@pdfviewer/pdfium-wasm",
+  "version": "1.0.0",
+  "description": "PDFium compiled to WebAssembly using Emscripten",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./pdfium": {
+      "import": "./dist/pdfium-esm.js",
+      "types": "./wasm/pdfium.d.ts"
+    },
+    "./pdfium.wasm": "./wasm/pdfium.wasm",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "wasm"
+  ],
+  "scripts": {
+    "build": "pnpm run build:wasm && pnpm run build:ts",
+    "build:wasm": "powershell -ExecutionPolicy Bypass -File ./build.ps1",
+    "build:ts": "tsc",
+    "build:docker": "docker build -t pdfium-wasm-builder ./build",
+    "run:docker": "docker run --rm -v \"%cd%/wasm:/build/output\" pdfium-wasm-builder",
+    "docker": "pnpm run build:docker && pnpm run run:docker",
+    "clean": "rimraf dist wasm"
+  },
+  "devDependencies": {
+    "rimraf": "^5.0.5",
+    "typescript": "^5.3.0"
+  },
+  "keywords": [
+    "pdfium",
+    "wasm",
+    "webassembly",
+    "pdf",
+    "emscripten"
+  ],
+  "license": "Apache-2.0"
+}
