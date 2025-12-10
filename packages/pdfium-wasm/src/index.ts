@@ -25,7 +25,12 @@ export interface PDFiumModule {
   _PDFium_GetPageHeight(page: number): number;
   
   // Rendering
-  _PDFium_RenderPageBitmap(page: number, width: number, height: number, rotate: number): number;
+  _PDFium_RenderPageBitmap(bitmap: number, page: number, start_x: number, start_y: number, size_x: number, size_y: number, rotate: number, flags: number): void;
+  _PDFium_BitmapCreate(width: number, height: number, alpha: number): number;
+  _PDFium_BitmapDestroy(bitmap: number): void;
+  _PDFium_BitmapFillRect(bitmap: number, left: number, top: number, width: number, height: number, color: number): void;
+  _PDFium_BitmapGetBuffer(bitmap: number): number;
+  _PDFium_BitmapGetStride(bitmap: number): number;
   _PDFium_FreeBuffer(buffer: number): void;
   
   // Text extraction

@@ -112,35 +112,36 @@ double PDFium_GetPageHeight(FPDF_PAGE page) {
 }
 
 EMSCRIPTEN_KEEPALIVE
-uint8_t* PDFium_RenderPageBitmap(FPDF_PAGE page, int width, int height, int rotate) {
-    FPDF_BITMAP bitmap = FPDFBitmap_Create(width, height, 1);
-    if (!bitmap) {
-        return nullptr;
+void PDFium_RenderPageBitmap(FPDF_BITMAP bitmap, FPDF_PAGE page, int start_x, int start_y, 
+                              int size_x, int size_y, int rotate, int flags) {
+    FPDF_RenderPageBitmap(bitmap, page, start_x, start_y, size_x, size_y, rotate, flags);
+}
+
+EMSCRIPTEN_KEEPALIVE
+FPDF_BITMAP PDFium_BitmapCreate(int width, int height, int alpha) {
+    return FPDFBitmap_Create(width, height, alpha);
+}
+
+EMSCRIPTEN_KEEPALIVE
+void PDFium_BitmapDestroy(FPDF_BITMAP bitmap) {
+    if (bitmap) {
+        FPDFBitmap_Destroy(bitmap);
     }
-    
-    FPDFBitmap_FillRect(bitmap, 0, 0, width, height, 0xFFFFFFFF);
-    
-    FPDF_RenderPageBitmap(bitmap, page, 0, 0, width, height, rotate, 
-                          FPDF_ANNOT | FPDF_LCD_TEXT);
-    
-    void* buffer = FPDFBitmap_GetBuffer(bitmap);
-    int stride = FPDFBitmap_GetStride(bitmap);
-    int bufferSize = stride * height;
-    
-    uint8_t* output = (uint8_t*)malloc(bufferSize);
-    if (output) {
-        memcpy(output, buffer, bufferSize);
-        
-        // Convert BGRA to RGBA
-        for (int i = 0; i < bufferSize; i += 4) {
-            uint8_t b = output[i];
-            output[i] = output[i + 2];
-            output[i + 2] = b;
-        }
-    }
-    
-    FPDFBitmap_Destroy(bitmap);
-    return output;
+}
+
+EMSCRIPTEN_KEEPALIVE
+void PDFium_BitmapFillRect(FPDF_BITMAP bitmap, int left, int top, int width, int height, unsigned long color) {
+    FPDFBitmap_FillRect(bitmap, left, top, width, height, color);
+}
+
+EMSCRIPTEN_KEEPALIVE
+void* PDFium_BitmapGetBuffer(FPDF_BITMAP bitmap) {
+    return FPDFBitmap_GetBuffer(bitmap);
+}
+
+EMSCRIPTEN_KEEPALIVE
+int PDFium_BitmapGetStride(FPDF_BITMAP bitmap) {
+    return FPDFBitmap_GetStride(bitmap);
 }
 
 EMSCRIPTEN_KEEPALIVE

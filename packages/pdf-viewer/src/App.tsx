@@ -5,6 +5,7 @@ import './App.css'
 interface DocumentHandle {
   ptr: number
   pageCount: number
+  dataPtr: number
 }
 
 function App() {
@@ -51,6 +52,7 @@ function App() {
       // Close previous document
       if (documentRef.current) {
         module._PDFium_CloseDocument(documentRef.current.ptr)
+        module._free(documentRef.current.dataPtr)
         documentRef.current = null
       }
 
@@ -62,17 +64,27 @@ function App() {
       const dataPtr = module._malloc(data.length)
       module.HEAPU8.set(data, dataPtr)
 
+      // Allocate memory for password string (empty password for now)
+      const password = '' // TODO: Add password input support if needed
+      const encoder = new TextEncoder()
+      const passwordBytes = encoder.encode(password)
+      const passwordBytesSize = passwordBytes.length + 1 // +1 for null terminator
+      const passwordPtr = module._malloc(passwordBytesSize)
+      module.HEAPU8.set(passwordBytes, passwordPtr)
+      module.HEAPU8[passwordPtr + passwordBytes.length] = 0 // null terminator
+      
       // Load the document
-      const docPtr = module._PDFium_LoadMemDocument(dataPtr, data.length, 0)
-      module._free(dataPtr)
+      const docPtr = module._PDFium_LoadMemDocument(dataPtr, data.length, passwordPtr)
+      module._free(passwordPtr)
 
       if (!docPtr) {
+        module._free(dataPtr)
         const errorCode = module._PDFium_GetLastError()
         throw new Error(`Failed to load PDF (error code: ${errorCode})`)
       }
 
       const pages = module._PDFium_GetPageCount(docPtr)
-      documentRef.current = { ptr: docPtr, pageCount: pages }
+      documentRef.current = { ptr: docPtr, pageCount: pages, dataPtr }
       
       setPageCount(pages)
       setCurrentPage(1)
@@ -104,20 +116,44 @@ function App() {
       const renderWidth = Math.floor(width * scale)
       const renderHeight = Math.floor(height * scale)
 
-      // Render page to RGBA buffer using simplified API
-      const bufferPtr = module._PDFium_RenderPageBitmap(pagePtr, renderWidth, renderHeight, 0)
-      if (!bufferPtr) {
+      // Create bitmap with alpha channel
+      const bitmap = module._PDFium_BitmapCreate(renderWidth, renderHeight, 1)
+      if (!bitmap) {
         module._PDFium_ClosePage(pagePtr)
-        throw new Error('Failed to render page')
+        throw new Error('Failed to create bitmap')
       }
 
-      // Copy pixel data (already in RGBA format from wrapper)
-      const bufferSize = renderWidth * renderHeight * 4
-      const pixelData = new Uint8ClampedArray(bufferSize)
-      pixelData.set(module.HEAPU8.subarray(bufferPtr, bufferPtr + bufferSize))
+      // Fill with white background (0xFFFFFFFF = white with full alpha)
+      module._PDFium_BitmapFillRect(bitmap, 0, 0, renderWidth, renderHeight, 0xFFFFFFFF)
 
-      // Free the buffer
-      module._PDFium_FreeBuffer(bufferPtr)
+      // Render page to bitmap (flags: FPDF_ANNOT = 0x01)
+      module._PDFium_RenderPageBitmap(bitmap, pagePtr, 0, 0, renderWidth, renderHeight, 0, 0x01)
+
+      // Get buffer pointer and stride
+      const bufferPtr = module._PDFium_BitmapGetBuffer(bitmap)
+      const stride = module._PDFium_BitmapGetStride(bitmap)
+
+      // Copy pixel data and convert BGRA to RGBA
+      const rowBytes = renderWidth * 4
+      const pixelData = new Uint8ClampedArray(rowBytes * renderHeight)
+      
+      for (let y = 0; y < renderHeight; y++) {
+        const srcOffset = bufferPtr + y * stride
+        const dstOffset = y * rowBytes
+        
+        for (let x = 0; x < renderWidth; x++) {
+          const srcIdx = srcOffset + x * 4
+          const dstIdx = dstOffset + x * 4
+          // BGRA to RGBA: swap B and R channels
+          pixelData[dstIdx + 0] = module.HEAPU8[srcIdx + 2] // R <- B
+          pixelData[dstIdx + 1] = module.HEAPU8[srcIdx + 1] // G <- G
+          pixelData[dstIdx + 2] = module.HEAPU8[srcIdx + 0] // B <- R
+          pixelData[dstIdx + 3] = module.HEAPU8[srcIdx + 3] // A <- A
+        }
+      }
+
+      // Destroy the bitmap
+      module._PDFium_BitmapDestroy(bitmap)
 
       // Create ImageData and draw to canvas
       const imageData = new ImageData(pixelData, renderWidth, renderHeight)
