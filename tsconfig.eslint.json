@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "allowJs": true
+  },
+  "include": [
+    "apps/**/*",
+    "packages/**/*",
+    "eslint.config.js",
+    "commitlint.config.js",
+    "lint-staged.config.js"
+  ]
+}
