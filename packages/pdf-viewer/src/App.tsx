@@ -1,6 +1,5 @@
-import './App.css';
-
 import { createPdfiumModule, type PDFiumModule } from '@pdfviewer/pdfium-wasm';
+import { Button } from '@pdfviewer/ui/components/button';
 import { useCallback, useRef, useState } from 'react';
 
 interface DocumentHandle {
@@ -205,15 +204,15 @@ function App() {
 
       {pageCount > 0 && (
         <div className="navigation">
-          <button onClick={() => goToPage(currentPage - 1)} disabled={currentPage <= 1}>
+          <Button onClick={() => goToPage(currentPage - 1)} disabled={currentPage <= 1}>
             ← Previous
-          </button>
+          </Button>
           <span>
             Page {currentPage} of {pageCount}
           </span>
-          <button onClick={() => goToPage(currentPage + 1)} disabled={currentPage >= pageCount}>
+          <Button onClick={() => goToPage(currentPage + 1)} disabled={currentPage >= pageCount}>
             Next →
-          </button>
+          </Button>
         </div>
       )}
 

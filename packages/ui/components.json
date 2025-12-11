@@ -1,0 +1,20 @@
+{
+  "$schema": "https://ui.shadcn.com/schema.json",
+  "style": "new-york",
+  "rsc": true,
+  "tsx": true,
+  "tailwind": {
+    "config": "",
+    "css": "src/styles/globals.css",
+    "baseColor": "neutral",
+    "cssVariables": true
+  },
+  "iconLibrary": "lucide",
+  "aliases": {
+    "components": "@pdfviewer/ui/components",
+    "utils": "@pdfviewer/ui/lib/utils",
+    "hooks": "@pdfviewer/ui/hooks",
+    "lib": "@pdfviewer/ui/lib",
+    "ui": "@pdfviewer/ui/components"
+  }
+}

@@ -1,3 +1,4 @@
+import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import fs from 'fs';
 import path from 'path';
@@ -13,6 +14,7 @@ const pdfiumWasmPath = path.resolve(__dirname, 'node_modules/@pdfviewer/pdfium-w
 export default defineConfig({
   plugins: [
     react(),
+    tailwindcss(),
     {
       name: 'serve-pdfium-wasm',
       configureServer(server) {
