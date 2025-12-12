@@ -6,8 +6,7 @@
 import { useState } from 'react';
 import { LandingPage } from './components/LandingPage';
 import { PdfEditor } from './components/PdfEditor';
-import { SidebarInset, SidebarProvider } from '@pdfviewer/ui/components/sidebar';
-import { AppSidebar } from './components/SideBar/SideBar';
+import { SidebarProvider } from '@pdfviewer/ui/components/sidebar';
 import type { CSSProperties } from 'react';
 import { PdfControllerContextProvider } from './providers/PdfControllerContextProvider';
 
@@ -32,15 +31,7 @@ function App() {
   ) : (
     <PdfControllerContextProvider>
       <SidebarProvider style={{ '--sidebar-width': '12rem' } as CSSProperties}>
-        <AppSidebar
-          currentPage={1}
-          onPageClick={(page) => {
-            console.log(page);
-          }}
-        />
-        <SidebarInset>
-          <PdfEditor file={file!} />
-        </SidebarInset>
+        <PdfEditor file={file!} />
       </SidebarProvider>
     </PdfControllerContextProvider>
   );

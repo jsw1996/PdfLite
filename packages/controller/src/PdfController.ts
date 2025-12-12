@@ -8,7 +8,7 @@ export interface IRenderOptions {
 
 export interface IPdfController {
   ensureInitialized(): Promise<void>;
-  loadFile(file: File): Promise<void>;
+  loadFile(file: File, opts?: { signal?: AbortSignal }): Promise<void>;
   renderPdf(canvas: HTMLCanvasElement, options?: IRenderOptions): void;
   getPageCount(): number;
   destroy(): void;
@@ -18,62 +18,99 @@ export class PdfController implements IPdfController {
   private pdfiumModule: PDFiumModule | null = null;
   private docPtr: number | null = null;
   private dataPtr: number | null = null;
+  private initPromise: Promise<void> | null = null;
+  private loadSeq = 0;
 
-  public async ensureInitialized(): Promise<void> {
-    if (!this.pdfiumModule) {
+  // single-flight pattern to ensure only one instance of the PDFium module is created
+  public ensureInitialized(): Promise<void> {
+    if (this.pdfiumModule) return Promise.resolve();
+    this.initPromise ??= (async () => {
       this.pdfiumModule = await createPdfiumModule();
       this.pdfiumModule._PDFium_Init();
+    })();
+    return this.initPromise;
+  }
+
+  private closeCurrentDocument(): void {
+    if (!this.pdfiumModule) return;
+    if (this.docPtr) {
+      this.pdfiumModule._PDFium_CloseDocument(this.docPtr);
+      this.docPtr = null;
+    }
+    if (this.dataPtr) {
+      this.pdfiumModule._free(this.dataPtr);
+      this.dataPtr = null;
     }
   }
 
   public destroy(): void {
-    if (this.pdfiumModule) {
-      if (this.docPtr) {
-        this.pdfiumModule._PDFium_CloseDocument(this.docPtr);
-        this.docPtr = null;
-      }
-      if (this.dataPtr) {
-        this.pdfiumModule._free(this.dataPtr);
-        this.dataPtr = null;
-      }
-    }
+    // invalidate any in-flight loads
+    this.loadSeq++;
+    this.closeCurrentDocument();
   }
 
-  public async loadFile(file: File): Promise<void> {
+  public async loadFile(file: File, opts?: { signal?: AbortSignal }): Promise<void> {
     await this.ensureInitialized();
+    const pdfium = this.pdfiumModule;
+    if (!pdfium) {
+      throw new Error('PDFium module not initialized');
+    }
+
+    const mySeq = ++this.loadSeq;
+    const signal = opts?.signal;
+    if (signal?.aborted) {
+      throw new DOMException('Aborted', 'AbortError');
+    }
+
     // Read file as ArrayBuffer
     const arrayBuffer = await file.arrayBuffer();
     const data = new Uint8Array(arrayBuffer);
 
-    // Allocate memory and copy PDF data
-    if (this.pdfiumModule) {
-      const dataPtr = this.pdfiumModule._malloc(data.length);
-      this.pdfiumModule.HEAPU8.set(data, dataPtr);
-
-      // Allocate memory for password string (empty password for now)
-      const password = ''; // TODO: Add password input support if needed
-      const encoder = new TextEncoder();
-      const passwordBytes = encoder.encode(password);
-      const passwordBytesSize = passwordBytes.length + 1; // +1 for null terminator
-      const passwordPtr = this.pdfiumModule._malloc(passwordBytesSize);
-      this.pdfiumModule.HEAPU8.set(passwordBytes, passwordPtr);
-      this.pdfiumModule.HEAPU8[passwordPtr + passwordBytes.length] = 0; // null terminator
-
-      // Load the document
-      const docPtr = this.pdfiumModule._PDFium_LoadMemDocument(dataPtr, data.length, passwordPtr);
-      this.pdfiumModule._free(passwordPtr);
-
-      if (!docPtr) {
-        this.pdfiumModule._free(dataPtr);
-        const errorCode = this.pdfiumModule._PDFium_GetLastError();
-        throw new Error(`Failed to load PDF (error code: ${errorCode})`);
-      }
-
-      // Store pointers for later use
-      this.docPtr = docPtr;
-      this.dataPtr = dataPtr;
-      return Promise.resolve();
+    // If a newer load started while we were awaiting, ignore this one.
+    if (signal?.aborted) {
+      throw new DOMException('Aborted', 'AbortError');
     }
+    if (mySeq !== this.loadSeq) {
+      return;
+    }
+
+    // Close any previously loaded document before loading a new one.
+    this.closeCurrentDocument();
+
+    // Allocate memory and copy PDF data
+    const dataPtr = pdfium._malloc(data.length);
+    pdfium.HEAPU8.set(data, dataPtr);
+
+    // Allocate memory for password string (empty password for now)
+    const password = ''; // TODO: Add password input support if needed
+    const encoder = new TextEncoder();
+    const passwordBytes = encoder.encode(password);
+    const passwordBytesSize = passwordBytes.length + 1; // +1 for null terminator
+    const passwordPtr = pdfium._malloc(passwordBytesSize);
+    pdfium.HEAPU8.set(passwordBytes, passwordPtr);
+    pdfium.HEAPU8[passwordPtr + passwordBytes.length] = 0; // null terminator
+
+    // Load the document
+    const docPtr = pdfium._PDFium_LoadMemDocument(dataPtr, data.length, passwordPtr);
+    pdfium._free(passwordPtr);
+
+    if (!docPtr) {
+      pdfium._free(dataPtr);
+      const errorCode = pdfium._PDFium_GetLastError();
+      throw new Error(`Failed to load PDF (error code: ${errorCode})`);
+    }
+
+    // If aborted or superseded after we loaded docPtr, cleanup and exit.
+    if (signal?.aborted || mySeq !== this.loadSeq) {
+      pdfium._PDFium_CloseDocument(docPtr);
+      pdfium._free(dataPtr);
+      return;
+    }
+
+    // Store pointers for later use (commit last, to avoid race conditions).
+    this.docPtr = docPtr;
+    this.dataPtr = dataPtr;
+    return;
   }
 
   public getPageCount(): number {
@@ -94,7 +131,7 @@ export class PdfController implements IPdfController {
     // Load the page
     const pagePtr = pdfium._PDFium_LoadPage(this.docPtr, pageIndex);
     if (!pagePtr) {
-      throw new Error(`Failed to load page ${pageIndex}`);
+      throw new Error(`Failed to load page ${pageIndex} - docPtr: ${this.docPtr}`);
     }
 
     try {
