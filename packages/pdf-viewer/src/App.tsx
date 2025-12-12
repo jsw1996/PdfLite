@@ -9,6 +9,8 @@ import { PdfEditor } from './components/PdfEditor';
 import { SidebarInset, SidebarProvider } from '@pdfviewer/ui/components/sidebar';
 import { AppSidebar } from './components/SideBar/SideBar';
 import type { CSSProperties } from 'react';
+import { PdfControllerContextProvider } from './providers/PdfControllerContextProvider';
+
 // interface IDocumentHandle {
 //   ptr: number;
 //   pageCount: number;
@@ -17,27 +19,31 @@ import type { CSSProperties } from 'react';
 
 function App() {
   const [isFileOpened, setIsFileOpened] = useState<boolean>(false);
+  const [file, setFile] = useState<File | null>(null);
 
   const onFileSelected = (file: File) => {
     console.log('File selected:', file);
+    setFile(file);
     setIsFileOpened(true);
   };
 
   return !isFileOpened ? (
     <LandingPage onFileSelect={onFileSelected} />
   ) : (
-    <SidebarProvider style={{ '--sidebar-width': '12rem' } as CSSProperties}>
-      <AppSidebar
-        numPages={10}
-        currentPage={2}
-        onPageClick={(page) => {
-          console.log(page);
-        }}
-      />
-      <SidebarInset>
-        <PdfEditor />
-      </SidebarInset>
-    </SidebarProvider>
+    <PdfControllerContextProvider>
+      <SidebarProvider style={{ '--sidebar-width': '12rem' } as CSSProperties}>
+        <AppSidebar
+          numPages={10}
+          currentPage={2}
+          onPageClick={(page) => {
+            console.log(page);
+          }}
+        />
+        <SidebarInset>
+          <PdfEditor file={file!} />
+        </SidebarInset>
+      </SidebarProvider>
+    </PdfControllerContextProvider>
   );
 
   // const [loading, setLoading] = useState(false);
