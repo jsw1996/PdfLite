@@ -6,6 +6,9 @@
 import { useState } from 'react';
 import { LandingPage } from './components/LandingPage';
 import { PdfEditor } from './components/PdfEditor';
+import { SidebarInset, SidebarProvider } from '@pdfviewer/ui/components/sidebar';
+import { AppSidebar } from './components/SideBar/SideBar';
+import type { CSSProperties } from 'react';
 // interface IDocumentHandle {
 //   ptr: number;
 //   pageCount: number;
@@ -20,7 +23,22 @@ function App() {
     setIsFileOpened(true);
   };
 
-  return <>{!isFileOpened ? <LandingPage onFileSelect={onFileSelected} /> : <PdfEditor />}</>;
+  return !isFileOpened ? (
+    <LandingPage onFileSelect={onFileSelected} />
+  ) : (
+    <SidebarProvider style={{ '--sidebar-width': '12rem' } as CSSProperties}>
+      <AppSidebar
+        numPages={10}
+        currentPage={2}
+        onPageClick={(page) => {
+          console.log(page);
+        }}
+      />
+      <SidebarInset>
+        <PdfEditor />
+      </SidebarInset>
+    </SidebarProvider>
+  );
 
   // const [loading, setLoading] = useState(false);
   // const [error, setError] = useState<string | null>(null);
