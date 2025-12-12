@@ -1,5 +1,5 @@
-import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
+import { Button } from '@pdfviewer/ui/components/button';
+import { cn } from '@pdfviewer/ui/lib/utils';
 import type { IToolButton } from './ToolButton.type';
 
 export type ToolButtonProps = IToolButton & {

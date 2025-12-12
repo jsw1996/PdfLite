@@ -1,6 +1,6 @@
 import type { IToolButton } from '../ToolButtons/ToolButton.type';
 import { ToolGroup } from './ToolGroup';
-import { Separator } from '@/components/ui/separator';
+import { Separator } from '@pdfviewer/ui/components/separator';
 import { useState } from 'react';
 
 export interface IToobarProps {
