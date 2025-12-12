@@ -31,8 +31,8 @@ export default defineConfig([
       ecmaVersion: 2020,
       globals: globals.browser,
       parserOptions: {
-        project: ['./tsconfig.eslint.json'],
         tsconfigRootDir: __dirname,
+        projectService: true,
       },
     },
     plugins: {
@@ -49,10 +49,18 @@ export default defineConfig([
     rules: {
       ...reactHooks.configs.recommended.rules,
       'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
-      'simple-import-sort/imports': 'error',
-      'simple-import-sort/exports': 'error',
+      'simple-import-sort/imports': 'off',
+      'simple-import-sort/exports': 'off',
       ...react.configs.recommended.rules,
       ...react.configs['jsx-runtime'].rules,
+      '@typescript-eslint/naming-convention': [
+        'error',
+        {
+          selector: 'interface',
+          format: ['PascalCase'],
+          prefix: ['I'],
+        },
+      ],
     },
   },
   prettier,
