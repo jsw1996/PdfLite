@@ -33,8 +33,7 @@ function App() {
     <PdfControllerContextProvider>
       <SidebarProvider style={{ '--sidebar-width': '12rem' } as CSSProperties}>
         <AppSidebar
-          numPages={10}
-          currentPage={2}
+          currentPage={1}
           onPageClick={(page) => {
             console.log(page);
           }}

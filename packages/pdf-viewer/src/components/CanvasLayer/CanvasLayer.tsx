@@ -2,12 +2,16 @@ import React, { useEffect } from 'react';
 
 import { usePdfController } from '../../providers/PdfControllerContextProvider';
 
-export interface ICanvasLayerProps {
+export interface ICanvasLayerProps extends React.ComponentProps<'canvas'> {
   pageIndex?: number;
   scale?: number;
 }
 
-export const CanvasLayer: React.FC<ICanvasLayerProps> = ({ pageIndex = 0, scale = 1.0 }) => {
+export const CanvasLayer: React.FC<ICanvasLayerProps> = ({
+  pageIndex = 0,
+  scale = 1.0,
+  ...props
+}) => {
   const canvas = React.useRef<HTMLCanvasElement | null>(null);
   const { controller, isInitialized } = usePdfController();
 
@@ -28,5 +32,5 @@ export const CanvasLayer: React.FC<ICanvasLayerProps> = ({ pageIndex = 0, scale 
     renderPdfCanvas();
   }, [renderPdfCanvas]);
 
-  return <canvas ref={canvas} className="pdf-canvas-layer mx-auto mt-8" />;
+  return <canvas ref={canvas} className="pdf-canvas-layer mx-auto mt-8" {...props} />;
 };

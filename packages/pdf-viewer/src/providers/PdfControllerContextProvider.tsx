@@ -17,6 +17,8 @@ export interface IPdfControllerContextValue {
   isInitialized: boolean;
   error: Error | null;
   initialize: () => Promise<void>;
+  isLoaded: boolean;
+  setIsLoaded: (isLoaded: boolean) => void;
 }
 
 const PdfControllerContext = createContext<IPdfControllerContextValue | null>(null);
@@ -42,6 +44,7 @@ export function PdfControllerContextProvider({
   controllerRef.current ??= new PdfControllerClass();
 
   const [isInitialized, setIsInitialized] = useState(false);
+  const [isLoaded, setIsLoaded] = useState(false);
   const [error, setError] = useState<Error | null>(null);
 
   const initialize = useCallback(async () => {
@@ -67,10 +70,12 @@ export function PdfControllerContextProvider({
     () => ({
       controller: controllerRef.current!,
       isInitialized,
+      isLoaded,
       error,
       initialize,
+      setIsLoaded,
     }),
-    [error, initialize, isInitialized],
+    [error, initialize, isInitialized, isLoaded],
   );
 
   return <PdfControllerContext.Provider value={value}>{children}</PdfControllerContext.Provider>;

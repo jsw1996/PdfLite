@@ -10,7 +10,7 @@ export interface IPdfEditorProps {
 
 export const PdfEditor: React.FC<IPdfEditorProps> = ({ file }) => {
   const buttons = getButtons();
-  const { controller } = usePdfController();
+  const { controller, setIsLoaded } = usePdfController();
   const [isFileLoaded, setIsFileLoaded] = React.useState(false);
 
   React.useEffect(() => {
@@ -22,7 +22,7 @@ export const PdfEditor: React.FC<IPdfEditorProps> = ({ file }) => {
         setIsFileLoaded(true);
       }
     };
-    void loadPdf();
+    void loadPdf().then(() => setIsLoaded(true));
     return () => {
       abortController.abort();
     };
