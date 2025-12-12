@@ -1,0 +1,30 @@
+{
+  "name": "@pdfviewer/controller",
+  "version": "0.1.0",
+  "description": "Controller utilities for PdfLite",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "clean": "rimraf dist",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@pdfviewer/pdfium-wasm": "workspace:^"
+  },
+  "devDependencies": {
+    "rimraf": "^5.0.5",
+    "typescript": "~5.9.3"
+  }
+}

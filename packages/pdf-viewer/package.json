@@ -10,6 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@pdfviewer/controller": "workspace:^",
     "@pdfviewer/pdfium-wasm": "workspace:^",
     "@pdfviewer/ui": "workspace:*",
     "@radix-ui/react-separator": "^1.1.8",

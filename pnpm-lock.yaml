@@ -63,8 +63,24 @@ importers:
         specifier: ^8.48.1
         version: 8.49.0(eslint@9.39.1)(typescript@5.9.3)
 
+  packages/controller:
+    dependencies:
+      '@pdfviewer/pdfium-wasm':
+        specifier: workspace:^
+        version: link:../pdfium-wasm
+    devDependencies:
+      rimraf:
+        specifier: ^5.0.5
+        version: 5.0.10
+      typescript:
+        specifier: ~5.9.3
+        version: 5.9.3
+
   packages/pdf-viewer:
     dependencies:
+      '@pdfviewer/controller':
+        specifier: workspace:^
+        version: link:../controller
       '@pdfviewer/pdfium-wasm':
         specifier: workspace:^
         version: link:../pdfium-wasm

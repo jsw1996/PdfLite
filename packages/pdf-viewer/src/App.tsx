@@ -6,6 +6,7 @@
 import { useState } from 'react';
 import { LandingPage } from './components/LandingPage';
 import { PdfEditor } from './components/PdfEditor';
+import { PdfControllerContextProvider } from './providers/PdfControllerContextProvider';
 // interface IDocumentHandle {
 //   ptr: number;
 //   pageCount: number;
@@ -14,13 +15,25 @@ import { PdfEditor } from './components/PdfEditor';
 
 function App() {
   const [isFileOpened, setIsFileOpened] = useState<boolean>(false);
+  const [file, setFile] = useState<File | null>(null);
 
   const onFileSelected = (file: File) => {
     console.log('File selected:', file);
+    setFile(file);
     setIsFileOpened(true);
   };
 
-  return <>{!isFileOpened ? <LandingPage onFileSelect={onFileSelected} /> : <PdfEditor />}</>;
+  return (
+    <>
+      {!isFileOpened ? (
+        <LandingPage onFileSelect={onFileSelected} />
+      ) : (
+        <PdfControllerContextProvider>
+          <PdfEditor file={file!} />
+        </PdfControllerContextProvider>
+      )}
+    </>
+  );
 
   // const [loading, setLoading] = useState(false);
   // const [error, setError] = useState<string | null>(null);

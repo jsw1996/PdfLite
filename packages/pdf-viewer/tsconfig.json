@@ -4,7 +4,9 @@
   "compilerOptions": {
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@pdfviewer/controller": ["../controller/src/index.ts"],
+      "@pdfviewer/pdfium-wasm": ["../pdfium-wasm/src/index.ts"]
     }
   }
 }

@@ -2,7 +2,13 @@
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
     "noEmit": true,
-    "allowJs": true
+    "allowJs": true,
+    "baseUrl": ".",
+    "paths": {
+      "@pdfviewer/controller": ["./packages/controller/src/index.ts"],
+      "@pdfviewer/pdfium-wasm": ["./packages/pdfium-wasm/src/index.ts"],
+      "@pdfviewer/ui": ["./packages/ui/src/index.ts"]
+    }
   },
   "include": [
     "apps/**/*",
