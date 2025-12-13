@@ -19,6 +19,11 @@ export interface IPdfControllerContextValue {
   initialize: () => Promise<void>;
   isLoaded: boolean;
   setIsLoaded: (isLoaded: boolean) => void;
+  currentPage: number;
+  goToPage: (
+    page: number,
+    options?: { scrollIntoView?: boolean; scrollIntoPreview?: boolean },
+  ) => void;
 }
 
 const PdfControllerContext = createContext<IPdfControllerContextValue | null>(null);
@@ -46,7 +51,37 @@ export function PdfControllerContextProvider({
   const [isInitialized, setIsInitialized] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
   const [error, setError] = useState<Error | null>(null);
+  const [currentPage, setCurrentPage] = useState(0);
 
+  const goToPage = useCallback(
+    (page: number, options?: { scrollIntoView?: boolean; scrollIntoPreview?: boolean }) => {
+      const { scrollIntoView = true, scrollIntoPreview = true } = options ?? {};
+      setCurrentPage(page);
+      console.log('[goToPage] Set currentPage to:', page);
+
+      const isInViewport = (element: Element | null) => {
+        if (!element) return false;
+        const rect = element.getBoundingClientRect();
+        return (
+          rect.top >= 0 &&
+          rect.left >= 0 &&
+          rect.bottom <= (window.innerHeight || document.documentElement.clientHeight) &&
+          rect.right <= (window.innerWidth || document.documentElement.clientWidth)
+        );
+      };
+
+      // if not in viewport, scroll into view
+      const previewCanvas = document.querySelector(`[data-preview-index="${page}"]`);
+      if (scrollIntoPreview && !isInViewport(previewCanvas)) {
+        previewCanvas?.scrollIntoView({ behavior: 'smooth' });
+      }
+      const viewerCanvas = document.querySelector(`[data-page-index="${page}"]`);
+      if (scrollIntoView && !isInViewport(viewerCanvas)) {
+        viewerCanvas?.scrollIntoView({ behavior: 'instant', block: 'center', inline: 'center' });
+      }
+    },
+    [],
+  );
   const initialize = useCallback(async () => {
     if (isInitialized) return;
 
@@ -74,8 +109,10 @@ export function PdfControllerContextProvider({
       error,
       initialize,
       setIsLoaded,
+      currentPage,
+      goToPage,
     }),
-    [error, initialize, isInitialized, isLoaded],
+    [currentPage, error, initialize, isInitialized, isLoaded, goToPage],
   );
 
   return <PdfControllerContext.Provider value={value}>{children}</PdfControllerContext.Provider>;

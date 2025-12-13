@@ -1,6 +1,8 @@
 import React from 'react';
 import { CanvasLayer } from '../CanvasLayer/CanvasLayer';
 import { useLazyPageLoader } from '../../hooks/useLazyPageLoader';
+import { useCurrentPageTracker } from '../../hooks/useCurrentPageTracker';
+import { usePdfController } from '@/providers/PdfControllerContextProvider';
 
 export interface IViewerProps {
   /** Total number of pages in the PDF document */
@@ -32,11 +34,25 @@ export const Viewer: React.FC<IViewerProps> = ({
     pageLoadIncrement,
   });
 
+  const { goToPage } = usePdfController();
+  const { registerPageElement } = useCurrentPageTracker({
+    pageCount: loadedPages,
+    onPageChange: (page) => goToPage(page, { scrollIntoView: false, scrollIntoPreview: true }),
+    rootMargin: '0px',
+    threshold: 0.7,
+  });
+
   return (
     <>
       {/* Render only the loaded pages */}
       {Array.from({ length: loadedPages }, (_, index) => (
-        <CanvasLayer key={index} pageIndex={index} scale={scale} />
+        <div
+          key={index}
+          ref={(el) => registerPageElement(index, el)}
+          data-slot={`viewer-page-container-${index}`}
+        >
+          <CanvasLayer data-slot={`viewer-canvas-${index}`} pageIndex={index} scale={scale} />
+        </div>
       ))}
 
       {/* Sentinel element - when this becomes visible, load more pages */}

@@ -40,13 +40,7 @@ export const PdfEditor: React.FC<IPdfEditorProps> = ({ file }) => {
 
   return (
     <>
-      <AppSidebar
-        currentPage={1}
-        onPageClick={(page) => {
-          console.log(page);
-        }}
-      />
-
+      <AppSidebar />
       <SidebarInset className="bg-zinc-300">
         {/* <div className="sticky top-0 z-10 bg-white py-2 border-b-1 border-gray-200"> */}
         <Header fileName={file.name} buttons={buttons} />

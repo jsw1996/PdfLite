@@ -1,7 +1,5 @@
 'use client';
 
-import * as React from 'react';
-
 import {
   Sidebar,
   SidebarContent,
@@ -12,11 +10,7 @@ import { usePdfController } from '@/providers/PdfControllerContextProvider';
 import { PagePreview } from './PagePreview';
 import { useLazyPageLoader } from '../../hooks/useLazyPageLoader';
 
-interface IAppSidebarProps extends React.ComponentProps<typeof Sidebar> {
-  currentPage: number;
-  onPageClick: (page: number) => void;
-}
-export function AppSidebar({ currentPage, onPageClick }: IAppSidebarProps) {
+export function AppSidebar() {
   const { controller } = usePdfController();
   const pageCount = controller.getPageCount();
   const { loadedPages, sentinelRef, hasMorePages } = useLazyPageLoader({
@@ -30,13 +24,8 @@ export function AppSidebar({ currentPage, onPageClick }: IAppSidebarProps) {
       <SidebarContent>
         <SidebarGroup>
           <SidebarGroupContent>
-            {Array.from({ length: loadedPages }, (_, i) => i + 1).map((page) => (
-              <PagePreview
-                key={`page-preview-${page}`}
-                page={page}
-                currentPage={currentPage}
-                onPageClick={onPageClick}
-              />
+            {Array.from({ length: loadedPages }, (_, i) => i).map((page) => (
+              <PagePreview key={`page-preview-${page}`} page={page} />
             ))}
             {hasMorePages && (
               <div
