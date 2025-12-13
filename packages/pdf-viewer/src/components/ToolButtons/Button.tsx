@@ -4,7 +4,7 @@ import type { IToolButton } from './ToolButton.type';
 
 export type ToolButtonProps = IToolButton & {
   isActive: boolean;
-  onActivate: (toolId: string) => void;
+  onActivate: (toolId: string | null) => void;
 };
 
 export const ToolButton: React.FC<ToolButtonProps> = (props: ToolButtonProps) => {
@@ -20,7 +20,13 @@ export const ToolButton: React.FC<ToolButtonProps> = (props: ToolButtonProps) =>
         aria-pressed={props.isActive}
         disabled={props.isEnabled === false}
         onClick={() => {
-          props.onActivate(toolId);
+          if (props.isActive) {
+            props.onActivate(null);
+            return;
+          }
+          if (props.type === 'toggle') {
+            props.onActivate(toolId);
+          }
           props.onClick?.();
         }}
       >

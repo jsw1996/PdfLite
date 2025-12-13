@@ -11,10 +11,7 @@ export interface IToobarProps {
 export const ToolBar: React.FC<IToobarProps> = (props: IToobarProps) => {
   const { buttons } = props;
 
-  const [activeToolId, setActiveToolId] = useState<string | null>(() => {
-    const first = buttons[0];
-    return first ? (first.id ?? first.name) : null;
-  });
+  const [activeToolId, setActiveToolId] = useState<string | null>(null);
 
   const buttonsByGroup: IToolButton[][] = buttons.reduce(
     (groups: IToolButton[][], button) => {
