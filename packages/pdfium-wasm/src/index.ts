@@ -6,72 +6,450 @@
 import * as pdfiumModule from '../wasm/pdfium.js';
 
 /**
+ * Annotation subtype constants
+ */
+export enum FPDF_ANNOTATION_SUBTYPE {
+  UNKNOWN = 0,
+  TEXT = 1,
+  LINK = 2,
+  FREETEXT = 3,
+  LINE = 4,
+  SQUARE = 5,
+  CIRCLE = 6,
+  POLYGON = 7,
+  POLYLINE = 8,
+  HIGHLIGHT = 9,
+  UNDERLINE = 10,
+  SQUIGGLY = 11,
+  STRIKEOUT = 12,
+  STAMP = 13,
+  CARET = 14,
+  INK = 15,
+  POPUP = 16,
+  FILEATTACHMENT = 17,
+  SOUND = 18,
+  MOVIE = 19,
+  WIDGET = 20,
+  SCREEN = 21,
+  PRINTERMARK = 22,
+  TRAPNET = 23,
+  WATERMARK = 24,
+  THREED = 25,
+  RICHMEDIA = 26,
+  XFAWIDGET = 27,
+  REDACT = 28,
+}
+
+/**
+ * Annotation color type constants
+ */
+export enum FPDFANNOT_COLORTYPE {
+  COLOR = 0,
+  INTERIORCOLOR = 1,
+}
+
+/**
+ * Annotation appearance mode constants
+ */
+export enum FPDF_ANNOT_APPEARANCEMODE {
+  NORMAL = 0,
+  ROLLOVER = 1,
+  DOWN = 2,
+}
+
+/**
+ * Annotation object type constants
+ */
+export enum FPDF_OBJECT_TYPE {
+  UNKNOWN = 0,
+  BOOLEAN = 1,
+  NUMBER = 2,
+  STRING = 3,
+  NAME = 4,
+  ARRAY = 5,
+  DICTIONARY = 6,
+  STREAM = 7,
+  NULLOBJ = 8,
+  REFERENCE = 9,
+}
+
+/**
+ * Annotation flag constants
+ */
+export enum FPDF_ANNOT_FLAG {
+  NONE = 0,
+  INVISIBLE = 1 << 0,
+  HIDDEN = 1 << 1,
+  PRINT = 1 << 2,
+  NOZOOM = 1 << 3,
+  NOROTATE = 1 << 4,
+  NOVIEW = 1 << 5,
+  READONLY = 1 << 6,
+  LOCKED = 1 << 7,
+  TOGGLENOVIEW = 1 << 8,
+  LOCKEDCONTENTS = 1 << 9,
+}
+
+/**
  * PDFium Module interface - the raw WASM module exports
  */
 export interface PDFiumModule {
-  // Lifecycle
+  // ============================================================================
+  // Core Document Functions
+  // ============================================================================
   _PDFium_Init(): number;
   _PDFium_Destroy(): void;
-  
-  // Document operations
   _PDFium_LoadMemDocument(dataPtr: number, size: number, passwordPtr: number): number;
   _PDFium_CloseDocument(doc: number): void;
   _PDFium_GetPageCount(doc: number): number;
-  
-  // Page operations
   _PDFium_LoadPage(doc: number, pageIndex: number): number;
   _PDFium_ClosePage(page: number): void;
   _PDFium_GetPageWidth(page: number): number;
   _PDFium_GetPageHeight(page: number): number;
-  
-  // Rendering
-  _PDFium_RenderPageBitmap(bitmap: number, page: number, start_x: number, start_y: number, size_x: number, size_y: number, rotate: number, flags: number): void;
+
+  // ============================================================================
+  // Bitmap/Rendering Functions
+  // ============================================================================
+  _PDFium_RenderPageBitmap(
+    bitmap: number,
+    page: number,
+    startX: number,
+    startY: number,
+    sizeX: number,
+    sizeY: number,
+    rotate: number,
+    flags: number
+  ): void;
   _PDFium_BitmapCreate(width: number, height: number, alpha: number): number;
   _PDFium_BitmapDestroy(bitmap: number): void;
-  _PDFium_BitmapFillRect(bitmap: number, left: number, top: number, width: number, height: number, color: number): void;
+  _PDFium_BitmapFillRect(
+    bitmap: number,
+    left: number,
+    top: number,
+    width: number,
+    height: number,
+    color: number
+  ): void;
   _PDFium_BitmapGetBuffer(bitmap: number): number;
   _PDFium_BitmapGetStride(bitmap: number): number;
   _PDFium_FreeBuffer(buffer: number): void;
-  
-  // Text extraction
+
+  // ============================================================================
+  // Text Functions
+  // ============================================================================
   _PDFium_LoadPageText(page: number): number;
   _PDFium_ClosePageText(textPage: number): void;
   _PDFium_GetPageCharCount(textPage: number): number;
   _PDFium_GetPageText(textPage: number, buffer: number, bufferLen: number): number;
-  
-  // Error handling
+
+  // ============================================================================
+  // Metadata & Error Functions
+  // ============================================================================
   _PDFium_GetLastError(): number;
-  
-  // Metadata
   _PDFium_GetMetaText(doc: number, tag: number, buffer: number, bufferLen: number): number;
-  
-  // Bookmarks
+
+  // ============================================================================
+  // Bookmark Functions
+  // ============================================================================
   _PDFium_GetFirstBookmark(doc: number): number;
   _PDFium_GetNextBookmark(doc: number, bookmark: number): number;
   _PDFium_GetFirstChildBookmark(doc: number, bookmark: number): number;
   _PDFium_GetBookmarkTitle(bookmark: number, buffer: number, bufferLen: number): number;
   _PDFium_GetBookmarkDest(doc: number, bookmark: number): number;
   _PDFium_GetDestPageIndex(doc: number, dest: number): number;
-  
-  // Memory management
+
+  // ============================================================================
+  // Memory Functions
+  // ============================================================================
   _PDFium_Malloc(size: number): number;
   _PDFium_Free(ptr: number): void;
   _malloc(size: number): number;
   _free(ptr: number): void;
-  
-  // Emscripten runtime
+
+  // ============================================================================
+  // Annotation API - Page-level functions
+  // ============================================================================
+  /** Get the number of annotations on a page */
+  _FPDFPage_GetAnnotCount_W(page: number): number;
+  /** Get annotation at the specified index */
+  _FPDFPage_GetAnnot_W(page: number, index: number): number;
+  /** Get the index of an annotation */
+  _FPDFPage_GetAnnotIndex_W(page: number, annot: number): number;
+  /** Close an annotation handle */
+  _FPDFPage_CloseAnnot_W(annot: number): void;
+  /** Create a new annotation on a page */
+  _FPDFPage_CreateAnnot_W(page: number, subtype: number): number;
+  /** Remove an annotation from a page */
+  _FPDFPage_RemoveAnnot_W(page: number, index: number): number;
+
+  // ============================================================================
+  // Annotation API - Subtype and support
+  // ============================================================================
+  /** Get the subtype of an annotation */
+  _FPDFAnnot_GetSubtype_W(annot: number): number;
+  /** Check if an object subtype is supported */
+  _FPDFAnnot_IsObjectSupportedSubtype_W(subtype: number): number;
+  /** Check if a subtype is supported */
+  _FPDFAnnot_IsSupportedSubtype_W(subtype: number): number;
+
+  // ============================================================================
+  // Annotation API - Rectangle
+  // ============================================================================
+  /** Get annotation rectangle (rectPtr points to FS_RECTF: left, bottom, right, top as floats) */
+  _FPDFAnnot_GetRect_W(annot: number, rectPtr: number): number;
+  /** Set annotation rectangle */
+  _FPDFAnnot_SetRect_W(annot: number, rectPtr: number): number;
+
+  // ============================================================================
+  // Annotation API - Color
+  // ============================================================================
+  /** Get annotation color (R, G, B, A are pointers to unsigned int) */
+  _FPDFAnnot_GetColor_W(
+    annot: number,
+    type: number,
+    rPtr: number,
+    gPtr: number,
+    bPtr: number,
+    aPtr: number
+  ): number;
+  /** Set annotation color */
+  _FPDFAnnot_SetColor_W(
+    annot: number,
+    type: number,
+    r: number,
+    g: number,
+    b: number,
+    a: number
+  ): number;
+
+  // ============================================================================
+  // Annotation API - Flags
+  // ============================================================================
+  /** Get annotation flags */
+  _FPDFAnnot_GetFlags_W(annot: number): number;
+  /** Set annotation flags */
+  _FPDFAnnot_SetFlags_W(annot: number, flags: number): number;
+
+  // ============================================================================
+  // Annotation API - Dictionary key/value
+  // ============================================================================
+  /** Check if annotation has a key */
+  _FPDFAnnot_HasKey_W(annot: number, keyPtr: number): number;
+  /** Get the value type for a key */
+  _FPDFAnnot_GetValueType_W(annot: number, keyPtr: number): number;
+  /** Get string value for a key */
+  _FPDFAnnot_GetStringValue_W(
+    annot: number,
+    keyPtr: number,
+    buffer: number,
+    bufferLen: number
+  ): number;
+  /** Set string value for a key */
+  _FPDFAnnot_SetStringValue_W(annot: number, keyPtr: number, valuePtr: number): number;
+  /** Get number value for a key */
+  _FPDFAnnot_GetNumberValue_W(annot: number, keyPtr: number, valuePtr: number): number;
+
+  // ============================================================================
+  // Annotation API - Appearance
+  // ============================================================================
+  /** Set annotation appearance stream */
+  _FPDFAnnot_SetAP_W(annot: number, appearanceMode: number, valuePtr: number): number;
+  /** Get annotation appearance stream */
+  _FPDFAnnot_GetAP_W(
+    annot: number,
+    appearanceMode: number,
+    buffer: number,
+    bufferLen: number
+  ): number;
+
+  // ============================================================================
+  // Annotation API - Attachment points (QuadPoints for markup annotations)
+  // ============================================================================
+  /** Check if annotation has attachment points */
+  _FPDFAnnot_HasAttachmentPoints_W(annot: number): number;
+  /** Count attachment points */
+  _FPDFAnnot_CountAttachmentPoints_W(annot: number): number;
+  /** Get attachment points at index (quadPointsPtr points to FS_QUADPOINTSF) */
+  _FPDFAnnot_GetAttachmentPoints_W(
+    annot: number,
+    quadIndex: number,
+    quadPointsPtr: number
+  ): number;
+  /** Set attachment points at index */
+  _FPDFAnnot_SetAttachmentPoints_W(
+    annot: number,
+    quadIndex: number,
+    quadPointsPtr: number
+  ): number;
+  /** Append attachment points */
+  _FPDFAnnot_AppendAttachmentPoints_W(annot: number, quadPointsPtr: number): number;
+
+  // ============================================================================
+  // Annotation API - Ink annotations
+  // ============================================================================
+  /** Add an ink stroke (pointsPtr points to array of FS_POINTF) */
+  _FPDFAnnot_AddInkStroke_W(annot: number, pointsPtr: number, pointCount: number): number;
+  /** Remove all ink strokes */
+  _FPDFAnnot_RemoveInkList_W(annot: number): number;
+  /** Get ink list count */
+  _FPDFAnnot_GetInkListCount_W(annot: number): number;
+  /** Get ink list path (buffer points to array of FS_POINTF) */
+  _FPDFAnnot_GetInkListPath_W(
+    annot: number,
+    pathIndex: number,
+    buffer: number,
+    length: number
+  ): number;
+
+  // ============================================================================
+  // Annotation API - Line annotations
+  // ============================================================================
+  /** Get line annotation endpoints (start and end point to FS_POINTF) */
+  _FPDFAnnot_GetLine_W(annot: number, startPtr: number, endPtr: number): number;
+
+  // ============================================================================
+  // Annotation API - Border
+  // ============================================================================
+  /** Get annotation border */
+  _FPDFAnnot_GetBorder_W(
+    annot: number,
+    horizontalRadiusPtr: number,
+    verticalRadiusPtr: number,
+    borderWidthPtr: number
+  ): number;
+  /** Set annotation border */
+  _FPDFAnnot_SetBorder_W(
+    annot: number,
+    horizontalRadius: number,
+    verticalRadius: number,
+    borderWidth: number
+  ): number;
+
+  // ============================================================================
+  // Annotation API - Annotation objects (for stamp, freetext, etc.)
+  // ============================================================================
+  /** Get count of page objects in annotation */
+  _FPDFAnnot_GetObjectCount_W(annot: number): number;
+  /** Get page object at index */
+  _FPDFAnnot_GetObject_W(annot: number, index: number): number;
+  /** Append page object to annotation */
+  _FPDFAnnot_AppendObject_W(annot: number, obj: number): number;
+  /** Update page object in annotation */
+  _FPDFAnnot_UpdateObject_W(annot: number, obj: number): number;
+  /** Remove page object from annotation */
+  _FPDFAnnot_RemoveObject_W(annot: number, index: number): number;
+
+  // ============================================================================
+  // Annotation API - Linked annotation (popup)
+  // ============================================================================
+  /** Get linked annotation */
+  _FPDFAnnot_GetLinkedAnnot_W(annot: number, keyPtr: number): number;
+
+  // ============================================================================
+  // Annotation API - Vertices (polygon/polyline)
+  // ============================================================================
+  /** Get vertices for polygon/polyline annotation */
+  _FPDFAnnot_GetVertices_W(annot: number, buffer: number, length: number): number;
+
+  // ============================================================================
+  // Annotation API - Form field functions
+  // ============================================================================
+  /** Initialize form fill environment */
+  _FPDFDOC_InitFormFillEnvironment_W(document: number, formInfoPtr: number): number;
+  /** Exit form fill environment */
+  _FPDFDOC_ExitFormFillEnvironment_W(hHandle: number): void;
+  /** Get form field name */
+  _FPDFAnnot_GetFormFieldName_W(
+    hHandle: number,
+    annot: number,
+    buffer: number,
+    bufferLen: number
+  ): number;
+  /** Get form field type */
+  _FPDFAnnot_GetFormFieldType_W(hHandle: number, annot: number): number;
+  /** Get form field value */
+  _FPDFAnnot_GetFormFieldValue_W(
+    hHandle: number,
+    annot: number,
+    buffer: number,
+    bufferLen: number
+  ): number;
+  /** Get form field flags */
+  _FPDFAnnot_GetFormFieldFlags_W(hHandle: number, annot: number): number;
+  /** Get option count for list/combo box */
+  _FPDFAnnot_GetOptionCount_W(hHandle: number, annot: number): number;
+  /** Get option label */
+  _FPDFAnnot_GetOptionLabel_W(
+    hHandle: number,
+    annot: number,
+    index: number,
+    buffer: number,
+    bufferLen: number
+  ): number;
+  /** Check if option is selected */
+  _FPDFAnnot_IsOptionSelected_W(hHandle: number, annot: number, index: number): number;
+  /** Get font size */
+  _FPDFAnnot_GetFontSize_W(hHandle: number, annot: number, valuePtr: number): number;
+  /** Check if checkbox/radio button is checked */
+  _FPDFAnnot_IsChecked_W(hHandle: number, annot: number): number;
+  /** Get form control count */
+  _FPDFAnnot_GetFormControlCount_W(hHandle: number, annot: number): number;
+  /** Get form control index */
+  _FPDFAnnot_GetFormControlIndex_W(hHandle: number, annot: number): number;
+  /** Get form field export value */
+  _FPDFAnnot_GetFormFieldExportValue_W(
+    hHandle: number,
+    annot: number,
+    buffer: number,
+    bufferLen: number
+  ): number;
+
+  // ============================================================================
+  // Annotation API - Focus
+  // ============================================================================
+  /** Set focusable annotation subtypes */
+  _FPDFAnnot_SetFocusableSubtypes_W(
+    hHandle: number,
+    subtypesPtr: number,
+    count: number
+  ): number;
+  /** Get focusable subtypes count */
+  _FPDFAnnot_GetFocusableSubtypesCount_W(hHandle: number): number;
+  /** Get focusable subtypes */
+  _FPDFAnnot_GetFocusableSubtypes_W(
+    hHandle: number,
+    subtypesPtr: number,
+    count: number
+  ): number;
+
+  // ============================================================================
+  // Annotation API - Link and URI
+  // ============================================================================
+  /** Get link from annotation */
+  _FPDFAnnot_GetLink_W(annot: number): number;
+  /** Set URI for link annotation */
+  _FPDFAnnot_SetURI_W(annot: number, uriPtr: number): number;
+
+  // ============================================================================
+  // Emscripten Runtime
+  // ============================================================================
   HEAPU8: Uint8Array;
   HEAP16: Int16Array;
+  HEAP32: Int32Array;
+  HEAPF32: Float32Array;
+  HEAPF64: Float64Array;
   ccall(name: string, returnType: string, argTypes: string[], args: unknown[]): unknown;
   cwrap(name: string, returnType: string, argTypes: string[]): (...args: unknown[]) => unknown;
   getValue(ptr: number, type: string): number;
   setValue(ptr: number, value: number, type: string): void;
+  UTF8ToString(ptr: number): string;
   UTF16ToString(ptr: number): string;
+  stringToUTF8(str: string, buffer: number, maxBytes: number): void;
   stringToUTF16(str: string, buffer: number, maxBytes: number): void;
 }
 
 // Get the factory function from the module (handles ESM/CJS interop)
-const createPDFiumModuleFactory = (pdfiumModule as { default?: () => Promise<PDFiumModule> }).default ?? pdfiumModule;
+const createPDFiumModuleFactory = (pdfiumModule as unknown as { default?: () => Promise<PDFiumModule> }).default ?? pdfiumModule;
 
 /**
  * Create and initialize a PDFium WASM module instance
