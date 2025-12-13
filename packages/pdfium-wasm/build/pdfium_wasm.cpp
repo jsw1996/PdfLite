@@ -228,4 +228,350 @@ void PDFium_Free(void* ptr) {
     }
 }
 
+// ============================================================================
+// Annotation API - Direct PDFium function wrappers
+// ============================================================================
+
+// Page-level annotation functions
+EMSCRIPTEN_KEEPALIVE
+int FPDFPage_GetAnnotCount_W(FPDF_PAGE page) {
+    return FPDFPage_GetAnnotCount(page);
+}
+
+EMSCRIPTEN_KEEPALIVE
+FPDF_ANNOTATION FPDFPage_GetAnnot_W(FPDF_PAGE page, int index) {
+    return FPDFPage_GetAnnot(page, index);
+}
+
+EMSCRIPTEN_KEEPALIVE
+int FPDFPage_GetAnnotIndex_W(FPDF_PAGE page, FPDF_ANNOTATION annot) {
+    return FPDFPage_GetAnnotIndex(page, annot);
+}
+
+EMSCRIPTEN_KEEPALIVE
+void FPDFPage_CloseAnnot_W(FPDF_ANNOTATION annot) {
+    FPDFPage_CloseAnnot(annot);
+}
+
+EMSCRIPTEN_KEEPALIVE
+FPDF_ANNOTATION FPDFPage_CreateAnnot_W(FPDF_PAGE page, FPDF_ANNOTATION_SUBTYPE subtype) {
+    return FPDFPage_CreateAnnot(page, subtype);
+}
+
+EMSCRIPTEN_KEEPALIVE
+FPDF_BOOL FPDFPage_RemoveAnnot_W(FPDF_PAGE page, int index) {
+    return FPDFPage_RemoveAnnot(page, index);
+}
+
+// Annotation subtype and support
+EMSCRIPTEN_KEEPALIVE
+FPDF_ANNOTATION_SUBTYPE FPDFAnnot_GetSubtype_W(FPDF_ANNOTATION annot) {
+    return FPDFAnnot_GetSubtype(annot);
+}
+
+EMSCRIPTEN_KEEPALIVE
+FPDF_BOOL FPDFAnnot_IsObjectSupportedSubtype_W(FPDF_ANNOTATION_SUBTYPE subtype) {
+    return FPDFAnnot_IsObjectSupportedSubtype(subtype);
+}
+
+EMSCRIPTEN_KEEPALIVE
+FPDF_BOOL FPDFAnnot_IsSupportedSubtype_W(FPDF_ANNOTATION_SUBTYPE subtype) {
+    return FPDFAnnot_IsSupportedSubtype(subtype);
+}
+
+// Annotation rectangle
+EMSCRIPTEN_KEEPALIVE
+FPDF_BOOL FPDFAnnot_GetRect_W(FPDF_ANNOTATION annot, FS_RECTF* rect) {
+    return FPDFAnnot_GetRect(annot, rect);
+}
+
+EMSCRIPTEN_KEEPALIVE
+FPDF_BOOL FPDFAnnot_SetRect_W(FPDF_ANNOTATION annot, const FS_RECTF* rect) {
+    return FPDFAnnot_SetRect(annot, rect);
+}
+
+// Annotation color
+EMSCRIPTEN_KEEPALIVE
+FPDF_BOOL FPDFAnnot_GetColor_W(FPDF_ANNOTATION annot, FPDFANNOT_COLORTYPE type,
+                                unsigned int* R, unsigned int* G, 
+                                unsigned int* B, unsigned int* A) {
+    return FPDFAnnot_GetColor(annot, type, R, G, B, A);
+}
+
+EMSCRIPTEN_KEEPALIVE
+FPDF_BOOL FPDFAnnot_SetColor_W(FPDF_ANNOTATION annot, FPDFANNOT_COLORTYPE type,
+                                unsigned int R, unsigned int G, 
+                                unsigned int B, unsigned int A) {
+    return FPDFAnnot_SetColor(annot, type, R, G, B, A);
+}
+
+// Annotation flags
+EMSCRIPTEN_KEEPALIVE
+int FPDFAnnot_GetFlags_W(FPDF_ANNOTATION annot) {
+    return FPDFAnnot_GetFlags(annot);
+}
+
+EMSCRIPTEN_KEEPALIVE
+FPDF_BOOL FPDFAnnot_SetFlags_W(FPDF_ANNOTATION annot, int flags) {
+    return FPDFAnnot_SetFlags(annot, flags);
+}
+
+// Annotation dictionary key/value
+EMSCRIPTEN_KEEPALIVE
+FPDF_BOOL FPDFAnnot_HasKey_W(FPDF_ANNOTATION annot, FPDF_BYTESTRING key) {
+    return FPDFAnnot_HasKey(annot, key);
+}
+
+EMSCRIPTEN_KEEPALIVE
+FPDF_OBJECT_TYPE FPDFAnnot_GetValueType_W(FPDF_ANNOTATION annot, FPDF_BYTESTRING key) {
+    return FPDFAnnot_GetValueType(annot, key);
+}
+
+EMSCRIPTEN_KEEPALIVE
+unsigned long FPDFAnnot_GetStringValue_W(FPDF_ANNOTATION annot, FPDF_BYTESTRING key,
+                                          FPDF_WCHAR* buffer, unsigned long bufferLen) {
+    return FPDFAnnot_GetStringValue(annot, key, buffer, bufferLen);
+}
+
+EMSCRIPTEN_KEEPALIVE
+FPDF_BOOL FPDFAnnot_SetStringValue_W(FPDF_ANNOTATION annot, FPDF_BYTESTRING key,
+                                      FPDF_WIDESTRING value) {
+    return FPDFAnnot_SetStringValue(annot, key, value);
+}
+
+EMSCRIPTEN_KEEPALIVE
+FPDF_BOOL FPDFAnnot_GetNumberValue_W(FPDF_ANNOTATION annot, FPDF_BYTESTRING key, float* value) {
+    return FPDFAnnot_GetNumberValue(annot, key, value);
+}
+
+EMSCRIPTEN_KEEPALIVE
+FPDF_BOOL FPDFAnnot_SetAP_W(FPDF_ANNOTATION annot, FPDF_ANNOT_APPEARANCEMODE appearanceMode,
+                             FPDF_WIDESTRING value) {
+    return FPDFAnnot_SetAP(annot, appearanceMode, value);
+}
+
+EMSCRIPTEN_KEEPALIVE
+unsigned long FPDFAnnot_GetAP_W(FPDF_ANNOTATION annot, FPDF_ANNOT_APPEARANCEMODE appearanceMode,
+                                 FPDF_WCHAR* buffer, unsigned long bufferLen) {
+    return FPDFAnnot_GetAP(annot, appearanceMode, buffer, bufferLen);
+}
+
+// Attachment points (QuadPoints) for markup annotations
+EMSCRIPTEN_KEEPALIVE
+FPDF_BOOL FPDFAnnot_HasAttachmentPoints_W(FPDF_ANNOTATION annot) {
+    return FPDFAnnot_HasAttachmentPoints(annot);
+}
+
+EMSCRIPTEN_KEEPALIVE
+size_t FPDFAnnot_CountAttachmentPoints_W(FPDF_ANNOTATION annot) {
+    return FPDFAnnot_CountAttachmentPoints(annot);
+}
+
+EMSCRIPTEN_KEEPALIVE
+FPDF_BOOL FPDFAnnot_GetAttachmentPoints_W(FPDF_ANNOTATION annot, size_t quad_index, 
+                                           FS_QUADPOINTSF* quad_points) {
+    return FPDFAnnot_GetAttachmentPoints(annot, quad_index, quad_points);
+}
+
+EMSCRIPTEN_KEEPALIVE
+FPDF_BOOL FPDFAnnot_SetAttachmentPoints_W(FPDF_ANNOTATION annot, size_t quad_index,
+                                           const FS_QUADPOINTSF* quad_points) {
+    return FPDFAnnot_SetAttachmentPoints(annot, quad_index, quad_points);
+}
+
+EMSCRIPTEN_KEEPALIVE
+FPDF_BOOL FPDFAnnot_AppendAttachmentPoints_W(FPDF_ANNOTATION annot, 
+                                              const FS_QUADPOINTSF* quad_points) {
+    return FPDFAnnot_AppendAttachmentPoints(annot, quad_points);
+}
+
+// Ink annotation
+EMSCRIPTEN_KEEPALIVE
+int FPDFAnnot_AddInkStroke_W(FPDF_ANNOTATION annot, const FS_POINTF* points, 
+                              size_t point_count) {
+    return FPDFAnnot_AddInkStroke(annot, points, point_count);
+}
+
+EMSCRIPTEN_KEEPALIVE
+FPDF_BOOL FPDFAnnot_RemoveInkList_W(FPDF_ANNOTATION annot) {
+    return FPDFAnnot_RemoveInkList(annot);
+}
+
+// Line annotation
+EMSCRIPTEN_KEEPALIVE
+FPDF_BOOL FPDFAnnot_GetLine_W(FPDF_ANNOTATION annot, FS_POINTF* start, FS_POINTF* end) {
+    return FPDFAnnot_GetLine(annot, start, end);
+}
+
+// Border
+EMSCRIPTEN_KEEPALIVE
+FPDF_BOOL FPDFAnnot_GetBorder_W(FPDF_ANNOTATION annot, float* horizontal_radius,
+                                 float* vertical_radius, float* border_width) {
+    return FPDFAnnot_GetBorder(annot, horizontal_radius, vertical_radius, border_width);
+}
+
+EMSCRIPTEN_KEEPALIVE
+FPDF_BOOL FPDFAnnot_SetBorder_W(FPDF_ANNOTATION annot, float horizontal_radius, 
+                                 float vertical_radius, float border_width) {
+    return FPDFAnnot_SetBorder(annot, horizontal_radius, vertical_radius, border_width);
+}
+
+// Annotation objects (for stamp, freetext, etc.)
+EMSCRIPTEN_KEEPALIVE
+int FPDFAnnot_GetObjectCount_W(FPDF_ANNOTATION annot) {
+    return FPDFAnnot_GetObjectCount(annot);
+}
+
+EMSCRIPTEN_KEEPALIVE
+FPDF_PAGEOBJECT FPDFAnnot_GetObject_W(FPDF_ANNOTATION annot, int index) {
+    return FPDFAnnot_GetObject(annot, index);
+}
+
+EMSCRIPTEN_KEEPALIVE
+FPDF_BOOL FPDFAnnot_AppendObject_W(FPDF_ANNOTATION annot, FPDF_PAGEOBJECT obj) {
+    return FPDFAnnot_AppendObject(annot, obj);
+}
+
+EMSCRIPTEN_KEEPALIVE
+FPDF_BOOL FPDFAnnot_UpdateObject_W(FPDF_ANNOTATION annot, FPDF_PAGEOBJECT obj) {
+    return FPDFAnnot_UpdateObject(annot, obj);
+}
+
+EMSCRIPTEN_KEEPALIVE
+FPDF_BOOL FPDFAnnot_RemoveObject_W(FPDF_ANNOTATION annot, int index) {
+    return FPDFAnnot_RemoveObject(annot, index);
+}
+
+// Linked annotation (popup)
+EMSCRIPTEN_KEEPALIVE
+FPDF_ANNOTATION FPDFAnnot_GetLinkedAnnot_W(FPDF_ANNOTATION annot, FPDF_BYTESTRING key) {
+    return FPDFAnnot_GetLinkedAnnot(annot, key);
+}
+
+// Vertices for polygon/polyline annotations
+EMSCRIPTEN_KEEPALIVE
+unsigned long FPDFAnnot_GetVertices_W(FPDF_ANNOTATION annot, FS_POINTF* buffer, 
+                                       unsigned long length) {
+    return FPDFAnnot_GetVertices(annot, buffer, length);
+}
+
+// Ink list paths
+EMSCRIPTEN_KEEPALIVE
+unsigned long FPDFAnnot_GetInkListCount_W(FPDF_ANNOTATION annot) {
+    return FPDFAnnot_GetInkListCount(annot);
+}
+
+EMSCRIPTEN_KEEPALIVE
+unsigned long FPDFAnnot_GetInkListPath_W(FPDF_ANNOTATION annot, unsigned long path_index,
+                                          FS_POINTF* buffer, unsigned long length) {
+    return FPDFAnnot_GetInkListPath(annot, path_index, buffer, length);
+}
+
+// Form field related
+EMSCRIPTEN_KEEPALIVE
+FPDF_FORMHANDLE FPDFDOC_InitFormFillEnvironment_W(FPDF_DOCUMENT document, 
+                                                   FPDF_FORMFILLINFO* formInfo) {
+    return FPDFDOC_InitFormFillEnvironment(document, formInfo);
+}
+
+EMSCRIPTEN_KEEPALIVE
+void FPDFDOC_ExitFormFillEnvironment_W(FPDF_FORMHANDLE hHandle) {
+    FPDFDOC_ExitFormFillEnvironment(hHandle);
+}
+
+EMSCRIPTEN_KEEPALIVE
+unsigned long FPDFAnnot_GetFormFieldName_W(FPDF_FORMHANDLE hHandle, FPDF_ANNOTATION annot,
+                                            FPDF_WCHAR* buffer, unsigned long bufferLen) {
+    return FPDFAnnot_GetFormFieldName(hHandle, annot, buffer, bufferLen);
+}
+
+EMSCRIPTEN_KEEPALIVE
+int FPDFAnnot_GetFormFieldType_W(FPDF_FORMHANDLE hHandle, FPDF_ANNOTATION annot) {
+    return FPDFAnnot_GetFormFieldType(hHandle, annot);
+}
+
+EMSCRIPTEN_KEEPALIVE
+unsigned long FPDFAnnot_GetFormFieldValue_W(FPDF_FORMHANDLE hHandle, FPDF_ANNOTATION annot,
+                                             FPDF_WCHAR* buffer, unsigned long bufferLen) {
+    return FPDFAnnot_GetFormFieldValue(hHandle, annot, buffer, bufferLen);
+}
+
+EMSCRIPTEN_KEEPALIVE
+int FPDFAnnot_GetFormFieldFlags_W(FPDF_FORMHANDLE hHandle, FPDF_ANNOTATION annot) {
+    return FPDFAnnot_GetFormFieldFlags(hHandle, annot);
+}
+
+EMSCRIPTEN_KEEPALIVE
+int FPDFAnnot_GetOptionCount_W(FPDF_FORMHANDLE hHandle, FPDF_ANNOTATION annot) {
+    return FPDFAnnot_GetOptionCount(hHandle, annot);
+}
+
+EMSCRIPTEN_KEEPALIVE
+unsigned long FPDFAnnot_GetOptionLabel_W(FPDF_FORMHANDLE hHandle, FPDF_ANNOTATION annot,
+                                          int index, FPDF_WCHAR* buffer, unsigned long bufferLen) {
+    return FPDFAnnot_GetOptionLabel(hHandle, annot, index, buffer, bufferLen);
+}
+
+EMSCRIPTEN_KEEPALIVE
+FPDF_BOOL FPDFAnnot_IsOptionSelected_W(FPDF_FORMHANDLE hHandle, FPDF_ANNOTATION annot, int index) {
+    return FPDFAnnot_IsOptionSelected(hHandle, annot, index);
+}
+
+EMSCRIPTEN_KEEPALIVE
+FPDF_BOOL FPDFAnnot_GetFontSize_W(FPDF_FORMHANDLE hHandle, FPDF_ANNOTATION annot, float* value) {
+    return FPDFAnnot_GetFontSize(hHandle, annot, value);
+}
+
+EMSCRIPTEN_KEEPALIVE
+FPDF_BOOL FPDFAnnot_IsChecked_W(FPDF_FORMHANDLE hHandle, FPDF_ANNOTATION annot) {
+    return FPDFAnnot_IsChecked(hHandle, annot);
+}
+
+// Focus annotation
+EMSCRIPTEN_KEEPALIVE
+FPDF_BOOL FPDFAnnot_SetFocusableSubtypes_W(FPDF_FORMHANDLE hHandle, 
+                                            const FPDF_ANNOTATION_SUBTYPE* subtypes, 
+                                            size_t count) {
+    return FPDFAnnot_SetFocusableSubtypes(hHandle, subtypes, count);
+}
+
+EMSCRIPTEN_KEEPALIVE
+int FPDFAnnot_GetFocusableSubtypesCount_W(FPDF_FORMHANDLE hHandle) {
+    return FPDFAnnot_GetFocusableSubtypesCount(hHandle);
+}
+
+EMSCRIPTEN_KEEPALIVE
+FPDF_BOOL FPDFAnnot_GetFocusableSubtypes_W(FPDF_FORMHANDLE hHandle,
+                                            FPDF_ANNOTATION_SUBTYPE* subtypes,
+                                            size_t count) {
+    return FPDFAnnot_GetFocusableSubtypes(hHandle, subtypes, count);
+}
+
+// URI actions
+EMSCRIPTEN_KEEPALIVE
+FPDF_LINK FPDFAnnot_GetLink_W(FPDF_ANNOTATION annot) {
+    return FPDFAnnot_GetLink(annot);
+}
+
+EMSCRIPTEN_KEEPALIVE
+int FPDFAnnot_GetFormControlCount_W(FPDF_FORMHANDLE hHandle, FPDF_ANNOTATION annot) {
+    return FPDFAnnot_GetFormControlCount(hHandle, annot);
+}
+
+EMSCRIPTEN_KEEPALIVE
+int FPDFAnnot_GetFormControlIndex_W(FPDF_FORMHANDLE hHandle, FPDF_ANNOTATION annot) {
+    return FPDFAnnot_GetFormControlIndex(hHandle, annot);
+}
+
+EMSCRIPTEN_KEEPALIVE
+unsigned long FPDFAnnot_GetFormFieldExportValue_W(FPDF_FORMHANDLE hHandle, FPDF_ANNOTATION annot,
+                                                   FPDF_WCHAR* buffer, unsigned long bufferLen) {
+    return FPDFAnnot_GetFormFieldExportValue(hHandle, annot, buffer, bufferLen);
+}
+
+EMSCRIPTEN_KEEPALIVE
+FPDF_BOOL FPDFAnnot_SetURI_W(FPDF_ANNOTATION annot, const char* uri) {
+    return FPDFAnnot_SetURI(annot, uri);
+}
+
 } // extern "C"
