@@ -48,11 +48,12 @@ export default defineConfig([
     },
     rules: {
       ...reactHooks.configs.recommended.rules,
+      ...react.configs.recommended.rules,
+      ...react.configs['jsx-runtime'].rules,
       'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
       'simple-import-sort/imports': 'off',
       'simple-import-sort/exports': 'off',
-      ...react.configs.recommended.rules,
-      ...react.configs['jsx-runtime'].rules,
+      'react/prop-types': 'off',
       '@typescript-eslint/naming-convention': [
         'error',
         {

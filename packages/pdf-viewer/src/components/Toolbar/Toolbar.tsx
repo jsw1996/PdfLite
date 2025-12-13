@@ -23,10 +23,7 @@ export const ToolBar: React.FC<IToobarProps> = (props: IToobarProps) => {
   );
 
   return (
-    <div
-      className="flex flex-row items-center bg-gray-50
- w-96 mx-auto mt-[30px] rounded-sm p-[5px] shadow-xl border-1 border-gray-100"
-    >
+    <div className="flex flex-row p-[5px]">
       {buttonsByGroup.map((groupButtons, index) => (
         <div key={index} className="flex flex-row items-center">
           <ToolGroup

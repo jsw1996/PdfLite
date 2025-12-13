@@ -1,10 +1,10 @@
 import React from 'react';
-import { ToolBar } from './Toolbar/Toolbar';
 import { getButtons } from '../utils/getButtons';
 import { usePdfController } from '@/providers/PdfControllerContextProvider';
 import { CanvasLayer } from './CanvasLayer/CanvasLayer';
 import { SidebarInset } from '@pdfviewer/ui/components/sidebar';
 import { AppSidebar } from './SideBar/SideBar';
+import { Header } from './Header/Header';
 
 export interface IPdfEditorProps {
   file: File;
@@ -44,8 +44,10 @@ export const PdfEditor: React.FC<IPdfEditorProps> = ({ file }) => {
         }}
       />
 
-      <SidebarInset>
-        <ToolBar buttons={buttons} />
+      <SidebarInset className="bg-zinc-300">
+        {/* <div className="sticky top-0 z-10 bg-white py-2 border-b-1 border-gray-200"> */}
+        <Header fileName={file.name} buttons={buttons} />
+        {/* </div> */}
         {!isFileLoaded ? <div>Loading PDF...</div> : <CanvasLayer pageIndex={0} scale={1.5} />}
       </SidebarInset>
     </>

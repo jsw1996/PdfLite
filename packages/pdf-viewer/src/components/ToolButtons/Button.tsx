@@ -30,7 +30,7 @@ export const ToolButton: React.FC<ToolButtonProps> = (props: ToolButtonProps) =>
           props.onClick?.();
         }}
       >
-        {props.icon}
+        <props.icon className="w-[24px] h-[24px]" />
       </Button>
     </>
   );

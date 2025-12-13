@@ -5,7 +5,7 @@ import { ToolButton } from '../ToolButtons/Button';
 interface IToolGroupProps {
   buttons: IToolButton[];
   activeToolId: string | null;
-  onActivate: (toolId: string) => void;
+  onActivate: (toolId: string | null) => void;
 }
 export const ToolGroup: React.FC<IToolGroupProps> = (props) => {
   const { buttons, activeToolId, onActivate } = props;

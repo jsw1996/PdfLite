@@ -7,7 +7,7 @@ export const SidebarTriggerButton: () => IToolButton = () => {
 
   return {
     name: 'SidebarTrigger',
-    icon: <PanelLeft />,
+    icon: PanelLeft,
     type: 'button',
     groupIndex: 0,
     onClick: toggleSidebar,

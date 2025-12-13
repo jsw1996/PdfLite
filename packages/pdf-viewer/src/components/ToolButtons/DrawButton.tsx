@@ -4,7 +4,7 @@ import { Brush } from 'lucide-react';
 export const DrawButton: () => IToolButton = () => {
   return {
     name: 'Draw',
-    icon: <Brush />,
+    icon: Brush,
     type: 'button',
     groupIndex: 1,
   };

@@ -4,7 +4,7 @@ import type { IToolButton } from './ToolButton.type';
 export const HighlightButton: () => IToolButton = () => {
   return {
     name: 'Highlight',
-    icon: <Highlighter />,
+    icon: Highlighter,
     type: 'button',
     groupIndex: 1,
   };

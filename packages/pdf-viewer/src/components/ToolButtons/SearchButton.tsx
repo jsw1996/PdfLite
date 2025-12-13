@@ -4,7 +4,7 @@ import { Search } from 'lucide-react';
 export const SearchButton: () => IToolButton = () => {
   return {
     name: 'Search',
-    icon: <Search />,
+    icon: Search,
     type: 'button',
     groupIndex: 0,
   };

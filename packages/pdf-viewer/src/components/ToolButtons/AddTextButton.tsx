@@ -4,7 +4,7 @@ import { PenLine } from 'lucide-react';
 export const AddTextButton: () => IToolButton = () => {
   return {
     name: 'Add Text',
-    icon: <PenLine />,
+    icon: PenLine,
     type: 'button',
     groupIndex: 1,
   };
