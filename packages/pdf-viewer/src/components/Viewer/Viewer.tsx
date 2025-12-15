@@ -1,5 +1,5 @@
 import React from 'react';
-import { CanvasLayer } from '../CanvasLayer/CanvasLayer';
+import { ViewerPage } from './ViewerPage';
 import { useLazyPageLoader } from '../../hooks/useLazyPageLoader';
 import { useCurrentPageTracker } from '../../hooks/useCurrentPageTracker';
 import { usePdfController } from '@/providers/PdfControllerContextProvider';
@@ -46,13 +46,12 @@ export const Viewer: React.FC<IViewerProps> = ({
     <>
       {/* Render only the loaded pages */}
       {Array.from({ length: loadedPages }, (_, index) => (
-        <div
+        <ViewerPage
           key={index}
-          ref={(el) => registerPageElement(index, el)}
-          data-slot={`viewer-page-container-${index}`}
-        >
-          <CanvasLayer data-slot={`viewer-canvas-${index}`} pageIndex={index} scale={scale} />
-        </div>
+          pageIndex={index}
+          scale={scale}
+          registerPageElement={registerPageElement}
+        />
       ))}
 
       {/* Sentinel element - when this becomes visible, load more pages */}

@@ -3,9 +3,12 @@ import type { IToolButton } from './ToolButton.type';
 
 export const HighlightButton: () => IToolButton = () => {
   return {
+    id: 'highlight',
     name: 'Highlight',
     icon: Highlighter,
-    type: 'button',
+    type: 'toggle',
     groupIndex: 1,
   };
 };
+
+export const HighlightButtonId = 'highlight';

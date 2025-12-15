@@ -1,6 +1,7 @@
 import React from 'react';
 import { getButtons } from '../utils/getButtons';
 import { usePdfController } from '@/providers/PdfControllerContextProvider';
+import { AnnotationContextProvider } from '../providers/AnnotationContextProvider';
 import { Viewer } from './Viewer/Viewer';
 import { SidebarInset } from '@pdfviewer/ui/components/sidebar';
 import { AppSidebar } from './SideBar/SideBar';
@@ -39,7 +40,7 @@ export const PdfEditor: React.FC<IPdfEditorProps> = ({ file }) => {
   }, [controller, file]);
 
   return (
-    <>
+    <AnnotationContextProvider>
       <AppSidebar />
       <SidebarInset className="bg-zinc-300">
         {/* <div className="sticky top-0 z-10 bg-white py-2 border-b-1 border-gray-200"> */}
@@ -47,6 +48,6 @@ export const PdfEditor: React.FC<IPdfEditorProps> = ({ file }) => {
         {/* </div> */}
         {!isFileLoaded ? <div>Loading PDF...</div> : <Viewer pageCount={pageCount} scale={1.5} />}
       </SidebarInset>
-    </>
+    </AnnotationContextProvider>
   );
 };

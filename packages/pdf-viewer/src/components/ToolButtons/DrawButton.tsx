@@ -3,9 +3,12 @@ import { Brush } from 'lucide-react';
 
 export const DrawButton: () => IToolButton = () => {
   return {
+    id: 'draw',
     name: 'Draw',
     icon: Brush,
-    type: 'button',
+    type: 'toggle',
     groupIndex: 1,
   };
 };
+
+export const DrawButtonId = 'draw';
