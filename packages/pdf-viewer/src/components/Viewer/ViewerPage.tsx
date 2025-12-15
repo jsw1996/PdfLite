@@ -5,6 +5,8 @@ import { usePdfController } from '../../providers/PdfControllerContextProvider';
 import { useAnnotation } from '../../providers/AnnotationContextProvider';
 import { AnnotationType, type IAnnotation } from '../../types/annotation';
 
+const DEFAULT_HIGHLIGHT_COLOR = 'rgb(248, 196, 72)';
+
 export interface IViewerPageProps {
   pageIndex: number;
   scale: number;
@@ -41,7 +43,7 @@ export const ViewerPage: React.FC<IViewerPageProps> = ({
       // 默认显示颜色：黄色（避免部分 PDF 高亮颜色存储在 CA/其它键里导致读出来发灰）
       color:
         a.subtype === 9 || a.subtype === 15
-          ? '#facc15'
+          ? DEFAULT_HIGHLIGHT_COLOR
           : `rgba(${a.color.r}, ${a.color.g}, ${a.color.b}, ${Math.min(1, Math.max(0, a.color.a / 255))})`,
       strokeWidth: a.strokeWidth,
       createdAt: Date.now(),
