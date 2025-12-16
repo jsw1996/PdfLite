@@ -27,19 +27,22 @@ export interface IRenderOptions {
   pixelRatio?: number;
 }
 
-/** Represents a single character with its position and properties */
-export interface ITextChar {
-  char: string;
-  left: number;
-  right: number;
-  top: number;
-  bottom: number;
-  fontSize: number;
-  fontFamily?: string;
-  /** Character origin (baseline) in page coordinates converted to top-left origin */
-  originX?: number;
-  /** Character origin (baseline) in page coordinates converted to top-left origin */
-  originY?: number;
+/** Represents a text rectangle with its content and font properties */
+export interface ITextRect {
+  /** The actual text content within this rect */
+  content: string;
+  /** Rect position in page coordinates (top-left origin, unscaled) */
+  rect: {
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+  };
+  /** Font information */
+  font: {
+    family: string;
+    size: number;
+  };
 }
 
 /** Represents text content for a page */
@@ -47,7 +50,7 @@ export interface IPageTextContent {
   pageIndex: number;
   pageWidth: number;
   pageHeight: number;
-  chars: ITextChar[];
+  textRects: ITextRect[];
 }
 
 export interface IPdfController {
@@ -303,8 +306,9 @@ export class PdfController implements IPdfController {
   }
 
   /**
-   * Get text content with character positions for a page.
-   * Used by the TextLayer component for text selection and search.
+   * Get text content as layout-aware rectangles for a page.
+   * Uses FPDFText_CountRects / FPDFText_GetRect / FPDFText_GetBoundedText.
+   * Merges adjacent rects on the same line into larger spans.
    */
   public getPageTextContent(pageIndex: number): IPageTextContent | null {
     if (!this.pdfiumModule || !this.docPtr) {
@@ -313,7 +317,6 @@ export class PdfController implements IPdfController {
 
     const pdfium = this.pdfiumModule;
 
-    // Load the page
     const pagePtr = pdfium._PDFium_LoadPage(this.docPtr, pageIndex);
     if (!pagePtr) {
       return null;
@@ -323,129 +326,235 @@ export class PdfController implements IPdfController {
       const pageWidth = pdfium._PDFium_GetPageWidth(pagePtr);
       const pageHeight = pdfium._PDFium_GetPageHeight(pagePtr);
 
-      // Load text page
       const textPagePtr = pdfium._PDFium_LoadPageText(pagePtr);
       if (!textPagePtr) {
-        return {
-          pageIndex,
-          pageWidth,
-          pageHeight,
-          chars: [],
-        };
+        return { pageIndex, pageWidth, pageHeight, textRects: [] };
       }
 
       try {
-        const charCount = pdfium._PDFium_GetPageCharCount(textPagePtr);
-        const chars: ITextChar[] = [];
+        // Build rect list for entire page
+        const rectsCount = pdfium._PDFium_CountRects(textPagePtr, 0, -1);
 
-        // Allocate memory for double values (8 bytes each)
+        const textRects: ITextRect[] = [];
+
+        // Allocate output pointers for rect coords (doubles)
         const leftPtr = pdfium._malloc(8);
+        const topPtr = pdfium._malloc(8);
         const rightPtr = pdfium._malloc(8);
         const bottomPtr = pdfium._malloc(8);
-        const topPtr = pdfium._malloc(8);
 
-        const originXPtr = pdfium._malloc(8);
-        const originYPtr = pdfium._malloc(8);
+        // Allocate output pointers for device coords (ints)
+        const deviceXPtr = pdfium._malloc(4);
+        const deviceYPtr = pdfium._malloc(4);
 
-        // Allocate memory for font info
-        const fontNameBufferLen = 512;
-        const fontNameBuffer = pdfium._malloc(fontNameBufferLen);
-        const flagsPtr = pdfium._malloc(4);
+        // Use page dimensions as device size (1:1 mapping, no scaling here)
+        const deviceWidth = Math.round(pageWidth);
+        const deviceHeight = Math.round(pageHeight);
 
         try {
-          for (let i = 0; i < charCount; i++) {
-            // Get Unicode character
-            const unicode = pdfium._PDFium_GetUnicode(textPagePtr, i);
-
-            // Skip control characters and invalid characters
-            if (unicode < 32 && unicode !== 9 && unicode !== 10 && unicode !== 13) {
+          for (let i = 0; i < rectsCount; i++) {
+            const ok = pdfium._PDFium_GetRect(textPagePtr, i, leftPtr, topPtr, rightPtr, bottomPtr);
+            if (!ok) {
               continue;
             }
 
-            // Get character bounding box
-            const success = pdfium._PDFium_GetCharBox(
-              textPagePtr,
-              i,
-              leftPtr,
-              rightPtr,
-              bottomPtr,
-              topPtr,
-            );
-
-            if (!success) {
-              continue;
-            }
-
-            // Read double values from memory
             const left = pdfium.getValue(leftPtr, 'double');
+            const top = pdfium.getValue(topPtr, 'double');
             const right = pdfium.getValue(rightPtr, 'double');
             const bottom = pdfium.getValue(bottomPtr, 'double');
-            const top = pdfium.getValue(topPtr, 'double');
 
-            // Get character origin (baseline). This improves HTML text-layer alignment.
-            const hasOrigin = pdfium._PDFium_GetCharOrigin(textPagePtr, i, originXPtr, originYPtr);
-            const originX = hasOrigin ? pdfium.getValue(originXPtr, 'double') : left;
-            const originY = hasOrigin ? pdfium.getValue(originYPtr, 'double') : bottom;
+            // Convert top-left corner from page to device coordinates
+            pdfium._PDFium_PageToDevice(
+              pagePtr,
+              0,
+              0,
+              deviceWidth,
+              deviceHeight,
+              0, // rotate = 0
+              left,
+              top,
+              deviceXPtr,
+              deviceYPtr,
+            );
+            const deviceLeft = pdfium.getValue(deviceXPtr, 'i32');
+            const deviceTop = pdfium.getValue(deviceYPtr, 'i32');
 
-            // Get font size
-            const fontSize = pdfium._PDFium_GetFontSize(textPagePtr, i);
+            // Convert bottom-right corner from page to device coordinates
+            pdfium._PDFium_PageToDevice(
+              pagePtr,
+              0,
+              0,
+              deviceWidth,
+              deviceHeight,
+              0,
+              right,
+              bottom,
+              deviceXPtr,
+              deviceYPtr,
+            );
+            const deviceRight = pdfium.getValue(deviceXPtr, 'i32');
+            const deviceBottom = pdfium.getValue(deviceYPtr, 'i32');
 
-            // Get font info
-            const bytesWritten = pdfium._PDFium_GetFontInfo(
+            // Get the text content within this rect (using original page coords)
+            const utf16Length = pdfium._PDFium_GetBoundedText(
               textPagePtr,
-              i,
-              fontNameBuffer,
-              fontNameBufferLen,
-              flagsPtr,
+              left,
+              top,
+              right,
+              bottom,
+              0,
+              0,
             );
 
-            let fontFamily = '';
-            if (bytesWritten > 0 && bytesWritten <= fontNameBufferLen) {
-              const nameBytes = pdfium.HEAPU8.subarray(
-                fontNameBuffer,
-                fontNameBuffer + bytesWritten - 1,
-              );
-              fontFamily = new TextDecoder().decode(nameBytes);
-              // Remove PDF font subset prefix (6 uppercase letters followed by +)
-              fontFamily = fontFamily.replace(/^[A-Z]{6}\+/, '');
+            if (utf16Length <= 0) {
+              continue;
             }
 
-            chars.push({
-              char: String.fromCodePoint(unicode),
+            // Allocate buffer for UTF-16 text (+1 for null terminator, *2 for UTF-16)
+            const bytesCount = (utf16Length + 1) * 2;
+            const textBuffer = pdfium._malloc(bytesCount);
+
+            pdfium._PDFium_GetBoundedText(
+              textPagePtr,
               left,
+              top,
               right,
-              // PDF coordinates have origin at bottom-left, convert to top-left
-              top: pageHeight - top,
-              bottom: pageHeight - bottom,
-              fontSize,
-              fontFamily,
-              originX,
-              originY: pageHeight - originY,
+              bottom,
+              textBuffer,
+              utf16Length,
+            );
+
+            // Decode UTF-16LE to string
+            const u16Array = new Uint16Array(pdfium.HEAPU8.buffer, textBuffer, utf16Length);
+            const content = String.fromCharCode(...u16Array);
+            pdfium._free(textBuffer);
+
+            if (!content.trim()) {
+              continue;
+            }
+
+            // Get font info via char index at this position
+            const charIndex = pdfium._PDFium_GetCharIndexAtPos(textPagePtr, left, top, 2, 2);
+
+            let fontFamily = '';
+            let fontSize = Math.abs(top - bottom);
+
+            if (charIndex >= 0) {
+              fontSize = pdfium._PDFium_GetFontSize(textPagePtr, charIndex);
+
+              // Get font name length first
+              const fontNameLength = pdfium._PDFium_GetFontInfo(textPagePtr, charIndex, 0, 0, 0);
+
+              if (fontNameLength > 0) {
+                const fontBufSize = fontNameLength + 1;
+                const fontNameBuffer = pdfium._malloc(fontBufSize);
+                const flagsPtr = pdfium._malloc(4);
+
+                pdfium._PDFium_GetFontInfo(
+                  textPagePtr,
+                  charIndex,
+                  fontNameBuffer,
+                  fontBufSize,
+                  flagsPtr,
+                );
+
+                const nameBytes = pdfium.HEAPU8.subarray(
+                  fontNameBuffer,
+                  fontNameBuffer + fontNameLength,
+                );
+                fontFamily = new TextDecoder().decode(nameBytes);
+                // Remove PDF font subset prefix (e.g., "ABCDEF+")
+                fontFamily = fontFamily.replace(/^[A-Z]{6}\+/, '');
+
+                pdfium._free(fontNameBuffer);
+                pdfium._free(flagsPtr);
+              }
+            }
+
+            // Convert to device coordinates using PageToDevice result
+            textRects.push({
+              content,
+              rect: {
+                left: deviceLeft,
+                top: deviceTop,
+                width: Math.abs(deviceRight - deviceLeft),
+                height: Math.abs(deviceBottom - deviceTop),
+              },
+              font: {
+                family: fontFamily,
+                size: fontSize,
+              },
             });
           }
         } finally {
           pdfium._free(leftPtr);
+          pdfium._free(topPtr);
           pdfium._free(rightPtr);
           pdfium._free(bottomPtr);
-          pdfium._free(topPtr);
-          pdfium._free(originXPtr);
-          pdfium._free(originYPtr);
-          pdfium._free(fontNameBuffer);
-          pdfium._free(flagsPtr);
+          pdfium._free(deviceXPtr);
+          pdfium._free(deviceYPtr);
         }
 
-        return {
-          pageIndex,
-          pageWidth,
-          pageHeight,
-          chars,
-        };
+        // Merge adjacent rects on the same line with similar font properties
+        const mergedRects = this.mergeAdjacentTextRects(textRects);
+
+        return { pageIndex, pageWidth, pageHeight, textRects: mergedRects };
       } finally {
         pdfium._PDFium_ClosePageText(textPagePtr);
       }
     } finally {
       pdfium._PDFium_ClosePage(pagePtr);
     }
+  }
+
+  /**
+   * Merge adjacent text rects that are on the same line and have similar font properties.
+   * This handles PDFs where text is stored character-by-character.
+   */
+  private mergeAdjacentTextRects(rects: ITextRect[]): ITextRect[] {
+    if (rects.length === 0) return [];
+
+    const merged: ITextRect[] = [];
+    let current = { ...rects[0] };
+
+    for (let i = 1; i < rects.length; i++) {
+      const next = rects[i];
+
+      // Check if rects are on the same line (similar top position)
+      const sameBaseline = Math.abs(current.rect.top - next.rect.top) < current.rect.height * 0.5;
+
+      // Check if font properties match
+      const sameFont =
+        current.font.family === next.font.family &&
+        Math.abs(current.font.size - next.font.size) < current.font.size * 0.1;
+
+      // Check if horizontally adjacent (with small tolerance for spacing)
+      const currentRight = current.rect.left + current.rect.width;
+      const gap = next.rect.left - currentRight;
+      const isAdjacent = gap < current.font.size * 0.5;
+
+      if (sameBaseline && sameFont && isAdjacent) {
+        // Merge: extend current rect and append content
+        current.content += next.content;
+        current.rect.width = next.rect.left + next.rect.width - current.rect.left;
+        // Extend height to cover both rects
+        const currentBottom = current.rect.top + current.rect.height;
+        const nextBottom = next.rect.top + next.rect.height;
+        const minTop = Math.min(current.rect.top, next.rect.top);
+        const maxBottom = Math.max(currentBottom, nextBottom);
+        current.rect.top = minTop;
+        current.rect.height = maxBottom - minTop;
+      } else {
+        // Push current and start new
+        merged.push(current);
+        current = { ...next };
+      }
+    }
+
+    // Don't forget the last one
+    merged.push(current);
+
+    return merged;
   }
 
   public listNativeAnnotations(pageIndex: number, opts: { scale: number }): INativeAnnotation[] {

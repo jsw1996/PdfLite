@@ -111,6 +111,17 @@ double PDFium_GetPageHeight(FPDF_PAGE page) {
     return FPDF_GetPageHeight(page);
 }
 
+// Convert page coordinates to device coordinates
+EMSCRIPTEN_KEEPALIVE
+void PDFium_PageToDevice(FPDF_PAGE page,
+                         int start_x, int start_y,
+                         int size_x, int size_y,
+                         int rotate,
+                         double page_x, double page_y,
+                         int* device_x, int* device_y) {
+    FPDF_PageToDevice(page, start_x, start_y, size_x, size_y, rotate, page_x, page_y, device_x, device_y);
+}
+
 EMSCRIPTEN_KEEPALIVE
 void PDFium_RenderPageBitmap(FPDF_BITMAP bitmap, FPDF_PAGE page, int start_x, int start_y, 
                               int size_x, int size_y, int rotate, int flags) {

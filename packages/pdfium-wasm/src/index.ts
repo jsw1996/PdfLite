@@ -106,6 +106,19 @@ export interface PDFiumModule {
   _PDFium_ClosePage(page: number): void;
   _PDFium_GetPageWidth(page: number): number;
   _PDFium_GetPageHeight(page: number): number;
+  /** Convert page coordinates to device coordinates */
+  _PDFium_PageToDevice(
+    page: number,
+    startX: number,
+    startY: number,
+    sizeX: number,
+    sizeY: number,
+    rotate: number,
+    pageX: number,
+    pageY: number,
+    deviceXPtr: number,
+    deviceYPtr: number
+  ): void;
 
   // ============================================================================
   // Bitmap/Rendering Functions

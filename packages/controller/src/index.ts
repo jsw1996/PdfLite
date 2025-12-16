@@ -6,6 +6,6 @@ export {
   PdfController,
   type IPdfController,
   type IRenderOptions,
-  type ITextChar,
+  type ITextRect,
   type IPageTextContent,
 } from './PdfController';
