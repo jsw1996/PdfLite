@@ -20,6 +20,7 @@ export const ViewerPage: React.FC<IViewerPageProps> = ({
   registerPageElement,
 }) => {
   const [pdfCanvas, setPdfCanvas] = useState<HTMLCanvasElement | null>(null);
+  const [containerEl, setContainerEl] = useState<HTMLDivElement | null>(null);
   const { controller } = usePdfController();
   const {
     setNativeAnnotationsForPage,
@@ -67,7 +68,10 @@ export const ViewerPage: React.FC<IViewerPageProps> = ({
 
   return (
     <div
-      ref={(el) => registerPageElement(pageIndex, el)}
+      ref={(el) => {
+        setContainerEl(el);
+        registerPageElement(pageIndex, el);
+      }}
       data-slot={`viewer-page-container-${pageIndex}`}
       className="relative z-0 w-fit mx-auto mb-4"
     >
@@ -81,6 +85,7 @@ export const ViewerPage: React.FC<IViewerPageProps> = ({
       <AnnotationLayer
         pageIndex={pageIndex}
         pdfCanvas={pdfCanvas}
+        containerEl={containerEl}
         onCommitHighlight={onCommitHighlight}
       />
     </div>

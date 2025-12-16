@@ -6,6 +6,8 @@ export interface IAnnotationLayerProps {
   pageIndex: number;
   /** PDF 主画布，用于对齐位置/尺寸 */
   pdfCanvas: HTMLCanvasElement | null;
+  /** ViewerPage 的容器，用于计算相对偏移，避免 offsetTop/Left 在 margin/scroll 下错位 */
+  containerEl: HTMLElement | null;
   onCommitHighlight?: (args: { pageIndex: number; canvasPoints: IPoint[] }) => void;
 }
 
@@ -27,6 +29,7 @@ const DEFAULT_HIGHLIGHT_COLOR = 'rgb(248, 196, 72)';
 export const AnnotationLayer: React.FC<IAnnotationLayerProps> = ({
   pageIndex,
   pdfCanvas,
+  containerEl,
   onCommitHighlight,
 }) => {
   const { selectedTool, addAnnotation, getAnnotationsForPage } = useAnnotation();
@@ -39,11 +42,12 @@ export const AnnotationLayer: React.FC<IAnnotationLayerProps> = ({
   const [currentPath, setCurrentPath] = useState<IPoint[]>([]);
 
   const updateMetrics = useCallback(() => {
-    if (!pdfCanvas) return;
+    if (!pdfCanvas || !containerEl) return;
     const rect = pdfCanvas.getBoundingClientRect();
-    // offsetTop/Left 相对于最近的 position: relative 祖先（我们会在 ViewerPage 上加 relative）
-    const top = pdfCanvas.offsetTop;
-    const left = pdfCanvas.offsetLeft;
+    const containerRect = containerEl.getBoundingClientRect();
+    // 用 rect 差值算相对 container 的偏移（更稳：不受 margin/scroll/offsetParent 影响）
+    const top = rect.top - containerRect.top;
+    const left = rect.left - containerRect.left;
 
     setMetrics({
       top: clampFinite(top, 0),
@@ -53,14 +57,15 @@ export const AnnotationLayer: React.FC<IAnnotationLayerProps> = ({
       pixelWidth: pdfCanvas.width,
       pixelHeight: pdfCanvas.height,
     });
-  }, [pdfCanvas]);
+  }, [containerEl, pdfCanvas]);
 
   // 首次渲染时直接计算一次（避免 useEffect 中同步 setState 的 lint 报错）
-  if (metrics === null && pdfCanvas) {
+  if (metrics === null && pdfCanvas && containerEl) {
     const rect = pdfCanvas.getBoundingClientRect();
+    const containerRect = containerEl.getBoundingClientRect();
     setMetrics({
-      top: clampFinite(pdfCanvas.offsetTop, 0),
-      left: clampFinite(pdfCanvas.offsetLeft, 0),
+      top: clampFinite(rect.top - containerRect.top, 0),
+      left: clampFinite(rect.left - containerRect.left, 0),
       cssWidth: clampFinite(rect.width, 0),
       cssHeight: clampFinite(rect.height, 0),
       pixelWidth: pdfCanvas.width,
@@ -119,11 +124,11 @@ export const AnnotationLayer: React.FC<IAnnotationLayerProps> = ({
           : drawCanvasRef.current;
       if (!c || !metrics) return null;
       const rect = c.getBoundingClientRect();
+      // 返回“CSS 像素坐标”（逻辑坐标），避免 devicePixelRatio 造成的坐标错位
+      // 实际绘制时在 redraw 里通过 ctx.setTransform(pixelRatio,...) 映射到物理像素
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
-      const sx = c.width / rect.width;
-      const sy = c.height / rect.height;
-      return { x: x * sx, y: y * sy };
+      return { x, y };
     },
     [metrics, selectedTool],
   );
@@ -180,8 +185,17 @@ export const AnnotationLayer: React.FC<IAnnotationLayerProps> = ({
     const hctx = hc.getContext('2d');
     const dctx = dc.getContext('2d');
     if (!hctx || !dctx) return;
+    // 清理（用单位矩阵清理物理像素）
+    hctx.setTransform(1, 0, 0, 1, 0, 0);
+    dctx.setTransform(1, 0, 0, 1, 0, 0);
     hctx.clearRect(0, 0, hc.width, hc.height);
     dctx.clearRect(0, 0, dc.width, dc.height);
+
+    // 让绘制 API 接收“逻辑坐标”，内部统一映射到物理像素
+    const sx = metrics.cssWidth > 0 ? metrics.pixelWidth / metrics.cssWidth : 1;
+    const sy = metrics.cssHeight > 0 ? metrics.pixelHeight / metrics.cssHeight : 1;
+    hctx.setTransform(sx, 0, 0, sy, 0, 0);
+    dctx.setTransform(sx, 0, 0, sy, 0, 0);
 
     for (const a of annotations) {
       if (a.shape === 'polygon') {
