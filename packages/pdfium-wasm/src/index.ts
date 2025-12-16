@@ -143,6 +143,109 @@ export interface PDFiumModule {
   _PDFium_GetPageText(textPage: number, buffer: number, bufferLen: number): number;
 
   // ============================================================================
+  // Text Layer APIs - Character positioning
+  // ============================================================================
+  /** Get the bounding box of a character */
+  _PDFium_GetCharBox(
+    textPage: number,
+    charIndex: number,
+    leftPtr: number,
+    rightPtr: number,
+    bottomPtr: number,
+    topPtr: number
+  ): number;
+  /** Get the origin point of a character */
+  _PDFium_GetCharOrigin(textPage: number, charIndex: number, xPtr: number, yPtr: number): number;
+  /** Get the Unicode value of a character */
+  _PDFium_GetUnicode(textPage: number, charIndex: number): number;
+  /** Get the font size of a character */
+  _PDFium_GetFontSize(textPage: number, charIndex: number): number;
+  /** Get the rotation angle of a character in degrees */
+  _PDFium_GetCharAngle(textPage: number, charIndex: number): number;
+  /** Get character index at a specific position */
+  _PDFium_GetCharIndexAtPos(
+    textPage: number,
+    x: number,
+    y: number,
+    xTolerance: number,
+    yTolerance: number
+  ): number;
+  /** Get font information for a character */
+  _PDFium_GetFontInfo(
+    textPage: number,
+    charIndex: number,
+    buffer: number,
+    bufferLen: number,
+    flagsPtr: number
+  ): number;
+  /** Get font weight for a character */
+  _PDFium_GetFontWeight(textPage: number, charIndex: number): number;
+  /** Get text fill color */
+  _PDFium_GetFillColor(
+    textPage: number,
+    charIndex: number,
+    rPtr: number,
+    gPtr: number,
+    bPtr: number,
+    aPtr: number
+  ): number;
+  /** Get text stroke color */
+  _PDFium_GetStrokeColor(
+    textPage: number,
+    charIndex: number,
+    rPtr: number,
+    gPtr: number,
+    bPtr: number,
+    aPtr: number
+  ): number;
+
+  // ============================================================================
+  // Text Selection APIs
+  // ============================================================================
+  /** Count selection rectangles for a range of characters */
+  _PDFium_CountRects(textPage: number, startIndex: number, count: number): number;
+  /** Get a specific selection rectangle */
+  _PDFium_GetRect(
+    textPage: number,
+    rectIndex: number,
+    leftPtr: number,
+    topPtr: number,
+    rightPtr: number,
+    bottomPtr: number
+  ): number;
+  /** Get text within a bounding rectangle */
+  _PDFium_GetBoundedText(
+    textPage: number,
+    left: number,
+    top: number,
+    right: number,
+    bottom: number,
+    buffer: number,
+    bufferLen: number
+  ): number;
+
+  // ============================================================================
+  // Text Search APIs
+  // ============================================================================
+  /** Start a text search */
+  _PDFium_FindStart(
+    textPage: number,
+    findWhat: number,
+    flags: number,
+    startIndex: number
+  ): number;
+  /** Find next occurrence */
+  _PDFium_FindNext(searchHandle: number): number;
+  /** Find previous occurrence */
+  _PDFium_FindPrev(searchHandle: number): number;
+  /** Get the character index of the search result */
+  _PDFium_GetSchResultIndex(searchHandle: number): number;
+  /** Get the number of characters in the search result */
+  _PDFium_GetSchCount(searchHandle: number): number;
+  /** Close the search handle */
+  _PDFium_FindClose(searchHandle: number): void;
+
+  // ============================================================================
   // Metadata & Error Functions
   // ============================================================================
   _PDFium_GetLastError(): number;

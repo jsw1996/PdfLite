@@ -46,7 +46,7 @@ export const PdfEditor: React.FC<IPdfEditorProps> = ({ file }) => {
         {/* <div className="sticky top-0 z-10 bg-white py-2 border-b-1 border-gray-200"> */}
         <Header fileName={file.name} buttons={buttons} />
         {/* </div> */}
-        {!isFileLoaded ? <div>Loading PDF...</div> : <Viewer pageCount={pageCount} scale={1.5} />}
+        {!isFileLoaded ? <div>Loading PDF...</div> : <Viewer pageCount={pageCount} scale={1} />}
       </SidebarInset>
     </AnnotationContextProvider>
   );

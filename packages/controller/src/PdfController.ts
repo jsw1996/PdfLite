@@ -24,6 +24,30 @@ export interface INativeAnnotation {
 export interface IRenderOptions {
   pageIndex?: number;
   scale?: number;
+  pixelRatio?: number;
+}
+
+/** Represents a single character with its position and properties */
+export interface ITextChar {
+  char: string;
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+  fontSize: number;
+  fontFamily?: string;
+  /** Character origin (baseline) in page coordinates converted to top-left origin */
+  originX?: number;
+  /** Character origin (baseline) in page coordinates converted to top-left origin */
+  originY?: number;
+}
+
+/** Represents text content for a page */
+export interface IPageTextContent {
+  pageIndex: number;
+  pageWidth: number;
+  pageHeight: number;
+  chars: ITextChar[];
 }
 
 export interface IPdfController {
@@ -34,7 +58,9 @@ export interface IPdfController {
   addInkHighlight(pageIndex: number, opts: { scale: number; canvasPoints: IPoint[] }): void;
   exportPdfBytes(): Uint8Array;
   getPageCount(): number;
+  getPageTextContent(pageIndex: number): IPageTextContent | null;
   destroy(): void;
+  setFontMap(map: Record<string, string>): void;
 }
 
 export class PdfController implements IPdfController {
@@ -43,6 +69,13 @@ export class PdfController implements IPdfController {
   private dataPtr: number | null = null;
   private initPromise: Promise<void> | null = null;
   private loadSeq = 0;
+  private fontMap = new Map<string, string>();
+
+  public setFontMap(map: Record<string, string>): void {
+    Object.entries(map).forEach(([family, url]) => {
+      this.fontMap.set(family, url);
+    });
+  }
 
   private requireDoc(): { pdfium: PDFiumModule; docPtr: number } {
     const pdfium = this.pdfiumModule;
@@ -65,7 +98,7 @@ export class PdfController implements IPdfController {
   }
 
   private pageToCanvasPoint(
-    pageW: number,
+    _pageW: number,
     pageH: number,
     scale: number,
     x: number,
@@ -76,7 +109,7 @@ export class PdfController implements IPdfController {
   }
 
   private canvasToPagePoint(
-    pageW: number,
+    _pageW: number,
     pageH: number,
     scale: number,
     x: number,
@@ -189,7 +222,7 @@ export class PdfController implements IPdfController {
       throw new Error('PDF not loaded. Call loadFile() first.');
     }
 
-    const { pageIndex = 0, scale = 1.0 } = options;
+    const { pageIndex = 0, scale = 1.0, pixelRatio = 1.0 } = options;
     const pdfium = this.pdfiumModule;
 
     // Load the page
@@ -203,13 +236,23 @@ export class PdfController implements IPdfController {
       const pageWidth = pdfium._PDFium_GetPageWidth(pagePtr);
       const pageHeight = pdfium._PDFium_GetPageHeight(pagePtr);
 
-      // Calculate scaled dimensions
-      const width = Math.floor(pageWidth * scale);
-      const height = Math.floor(pageHeight * scale);
+      // Calculate logical dimensions (CSS pixels)
+      // IMPORTANT: avoid rounding here; rounding changes the effective scale and causes
+      // selection/text-layer drift that increases with distance down the page.
+      const logicalWidth = pageWidth * scale;
+      const logicalHeight = pageHeight * scale;
 
-      // Set canvas size
+      // Calculate physical dimensions (Device pixels)
+      const width = Math.max(1, Math.round(logicalWidth * pixelRatio));
+      const height = Math.max(1, Math.round(logicalHeight * pixelRatio));
+
+      // Set canvas size (physical pixels)
       canvas.width = width;
       canvas.height = height;
+
+      // Set canvas CSS size (logical pixels)
+      canvas.style.width = `${logicalWidth}px`;
+      canvas.style.height = `${logicalHeight}px`;
 
       // Create bitmap
       const bitmapPtr = pdfium._PDFium_BitmapCreate(width, height, 1);
@@ -253,6 +296,152 @@ export class PdfController implements IPdfController {
         ctx.putImageData(imageData, 0, 0);
       } finally {
         pdfium._PDFium_BitmapDestroy(bitmapPtr);
+      }
+    } finally {
+      pdfium._PDFium_ClosePage(pagePtr);
+    }
+  }
+
+  /**
+   * Get text content with character positions for a page.
+   * Used by the TextLayer component for text selection and search.
+   */
+  public getPageTextContent(pageIndex: number): IPageTextContent | null {
+    if (!this.pdfiumModule || !this.docPtr) {
+      return null;
+    }
+
+    const pdfium = this.pdfiumModule;
+
+    // Load the page
+    const pagePtr = pdfium._PDFium_LoadPage(this.docPtr, pageIndex);
+    if (!pagePtr) {
+      return null;
+    }
+
+    try {
+      const pageWidth = pdfium._PDFium_GetPageWidth(pagePtr);
+      const pageHeight = pdfium._PDFium_GetPageHeight(pagePtr);
+
+      // Load text page
+      const textPagePtr = pdfium._PDFium_LoadPageText(pagePtr);
+      if (!textPagePtr) {
+        return {
+          pageIndex,
+          pageWidth,
+          pageHeight,
+          chars: [],
+        };
+      }
+
+      try {
+        const charCount = pdfium._PDFium_GetPageCharCount(textPagePtr);
+        const chars: ITextChar[] = [];
+
+        // Allocate memory for double values (8 bytes each)
+        const leftPtr = pdfium._malloc(8);
+        const rightPtr = pdfium._malloc(8);
+        const bottomPtr = pdfium._malloc(8);
+        const topPtr = pdfium._malloc(8);
+
+        const originXPtr = pdfium._malloc(8);
+        const originYPtr = pdfium._malloc(8);
+
+        // Allocate memory for font info
+        const fontNameBufferLen = 512;
+        const fontNameBuffer = pdfium._malloc(fontNameBufferLen);
+        const flagsPtr = pdfium._malloc(4);
+
+        try {
+          for (let i = 0; i < charCount; i++) {
+            // Get Unicode character
+            const unicode = pdfium._PDFium_GetUnicode(textPagePtr, i);
+
+            // Skip control characters and invalid characters
+            if (unicode < 32 && unicode !== 9 && unicode !== 10 && unicode !== 13) {
+              continue;
+            }
+
+            // Get character bounding box
+            const success = pdfium._PDFium_GetCharBox(
+              textPagePtr,
+              i,
+              leftPtr,
+              rightPtr,
+              bottomPtr,
+              topPtr,
+            );
+
+            if (!success) {
+              continue;
+            }
+
+            // Read double values from memory
+            const left = pdfium.getValue(leftPtr, 'double');
+            const right = pdfium.getValue(rightPtr, 'double');
+            const bottom = pdfium.getValue(bottomPtr, 'double');
+            const top = pdfium.getValue(topPtr, 'double');
+
+            // Get character origin (baseline). This improves HTML text-layer alignment.
+            const hasOrigin = pdfium._PDFium_GetCharOrigin(textPagePtr, i, originXPtr, originYPtr);
+            const originX = hasOrigin ? pdfium.getValue(originXPtr, 'double') : left;
+            const originY = hasOrigin ? pdfium.getValue(originYPtr, 'double') : bottom;
+
+            // Get font size
+            const fontSize = pdfium._PDFium_GetFontSize(textPagePtr, i);
+
+            // Get font info
+            const bytesWritten = pdfium._PDFium_GetFontInfo(
+              textPagePtr,
+              i,
+              fontNameBuffer,
+              fontNameBufferLen,
+              flagsPtr,
+            );
+
+            let fontFamily = '';
+            if (bytesWritten > 0 && bytesWritten <= fontNameBufferLen) {
+              const nameBytes = pdfium.HEAPU8.subarray(
+                fontNameBuffer,
+                fontNameBuffer + bytesWritten - 1,
+              );
+              fontFamily = new TextDecoder().decode(nameBytes);
+              // Remove PDF font subset prefix (6 uppercase letters followed by +)
+              fontFamily = fontFamily.replace(/^[A-Z]{6}\+/, '');
+            }
+
+            chars.push({
+              char: String.fromCodePoint(unicode),
+              left,
+              right,
+              // PDF coordinates have origin at bottom-left, convert to top-left
+              top: pageHeight - top,
+              bottom: pageHeight - bottom,
+              fontSize,
+              fontFamily,
+              originX,
+              originY: pageHeight - originY,
+            });
+          }
+        } finally {
+          pdfium._free(leftPtr);
+          pdfium._free(rightPtr);
+          pdfium._free(bottomPtr);
+          pdfium._free(topPtr);
+          pdfium._free(originXPtr);
+          pdfium._free(originYPtr);
+          pdfium._free(fontNameBuffer);
+          pdfium._free(flagsPtr);
+        }
+
+        return {
+          pageIndex,
+          pageWidth,
+          pageHeight,
+          chars,
+        };
+      } finally {
+        pdfium._PDFium_ClosePageText(textPagePtr);
       }
     } finally {
       pdfium._PDFium_ClosePage(pagePtr);

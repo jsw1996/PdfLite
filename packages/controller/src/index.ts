@@ -2,4 +2,10 @@ export type ControllerVersion = '0.1.0';
 
 export const CONTROLLER_VERSION: ControllerVersion = '0.1.0';
 
-export { PdfController, type IPdfController, type IRenderOptions } from './PdfController';
+export {
+  PdfController,
+  type IPdfController,
+  type IRenderOptions,
+  type ITextChar,
+  type IPageTextContent,
+} from './PdfController';

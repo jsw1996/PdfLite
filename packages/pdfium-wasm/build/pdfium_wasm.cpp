@@ -174,6 +174,146 @@ int PDFium_GetPageText(FPDF_TEXTPAGE textPage, unsigned short* buffer, int buffe
     return FPDFText_GetText(textPage, 0, charCount, buffer);
 }
 
+// ============================================================================
+// Text Layer API - Character positioning, selection, and search
+// ============================================================================
+
+// Get the bounding box of a character
+EMSCRIPTEN_KEEPALIVE
+FPDF_BOOL PDFium_GetCharBox(FPDF_TEXTPAGE textPage, int charIndex, 
+                             double* left, double* right, 
+                             double* bottom, double* top) {
+    return FPDFText_GetCharBox(textPage, charIndex, left, right, bottom, top);
+}
+
+// Get the origin point of a character
+EMSCRIPTEN_KEEPALIVE
+FPDF_BOOL PDFium_GetCharOrigin(FPDF_TEXTPAGE textPage, int charIndex, 
+                                double* x, double* y) {
+    return FPDFText_GetCharOrigin(textPage, charIndex, x, y);
+}
+
+// Get the Unicode value of a character
+EMSCRIPTEN_KEEPALIVE
+unsigned int PDFium_GetUnicode(FPDF_TEXTPAGE textPage, int charIndex) {
+    return FPDFText_GetUnicode(textPage, charIndex);
+}
+
+// Get the font size of a character
+EMSCRIPTEN_KEEPALIVE
+double PDFium_GetFontSize(FPDF_TEXTPAGE textPage, int charIndex) {
+    return FPDFText_GetFontSize(textPage, charIndex);
+}
+
+// Get the rotation angle of a character in degrees
+EMSCRIPTEN_KEEPALIVE
+float PDFium_GetCharAngle(FPDF_TEXTPAGE textPage, int charIndex) {
+    return FPDFText_GetCharAngle(textPage, charIndex);
+}
+
+// Get character index at a specific position
+EMSCRIPTEN_KEEPALIVE
+int PDFium_GetCharIndexAtPos(FPDF_TEXTPAGE textPage, double x, double y, 
+                              double xTolerance, double yTolerance) {
+    return FPDFText_GetCharIndexAtPos(textPage, x, y, xTolerance, yTolerance);
+}
+
+// Get font information for a character
+EMSCRIPTEN_KEEPALIVE
+unsigned long PDFium_GetFontInfo(FPDF_TEXTPAGE textPage, int charIndex,
+                                  void* buffer, unsigned long bufferLen, int* flags) {
+    return FPDFText_GetFontInfo(textPage, charIndex, buffer, bufferLen, flags);
+}
+
+// Get font weight for a character
+EMSCRIPTEN_KEEPALIVE
+int PDFium_GetFontWeight(FPDF_TEXTPAGE textPage, int charIndex) {
+    return FPDFText_GetFontWeight(textPage, charIndex);
+}
+
+// Get text fill color
+EMSCRIPTEN_KEEPALIVE
+FPDF_BOOL PDFium_GetFillColor(FPDF_TEXTPAGE textPage, int charIndex,
+                               unsigned int* R, unsigned int* G, 
+                               unsigned int* B, unsigned int* A) {
+    return FPDFText_GetFillColor(textPage, charIndex, R, G, B, A);
+}
+
+// Get text stroke color
+EMSCRIPTEN_KEEPALIVE
+FPDF_BOOL PDFium_GetStrokeColor(FPDF_TEXTPAGE textPage, int charIndex,
+                                 unsigned int* R, unsigned int* G, 
+                                 unsigned int* B, unsigned int* A) {
+    return FPDFText_GetStrokeColor(textPage, charIndex, R, G, B, A);
+}
+
+// ============================================================================
+// Text Selection API - Rectangle-based text selection
+// ============================================================================
+
+// Count selection rectangles for a range of characters
+EMSCRIPTEN_KEEPALIVE
+int PDFium_CountRects(FPDF_TEXTPAGE textPage, int startIndex, int count) {
+    return FPDFText_CountRects(textPage, startIndex, count);
+}
+
+// Get a specific selection rectangle
+EMSCRIPTEN_KEEPALIVE
+FPDF_BOOL PDFium_GetRect(FPDF_TEXTPAGE textPage, int rectIndex,
+                          double* left, double* top, 
+                          double* right, double* bottom) {
+    return FPDFText_GetRect(textPage, rectIndex, left, top, right, bottom);
+}
+
+// Get text within a bounding rectangle
+EMSCRIPTEN_KEEPALIVE
+int PDFium_GetBoundedText(FPDF_TEXTPAGE textPage, double left, double top,
+                           double right, double bottom,
+                           unsigned short* buffer, int bufferLen) {
+    return FPDFText_GetBoundedText(textPage, left, top, right, bottom, buffer, bufferLen);
+}
+
+// ============================================================================
+// Text Search API - Find text within a page
+// ============================================================================
+
+// Start a text search
+EMSCRIPTEN_KEEPALIVE
+FPDF_SCHHANDLE PDFium_FindStart(FPDF_TEXTPAGE textPage, const unsigned short* findWhat,
+                                 unsigned long flags, int startIndex) {
+    return FPDFText_FindStart(textPage, findWhat, flags, startIndex);
+}
+
+// Find next occurrence
+EMSCRIPTEN_KEEPALIVE
+FPDF_BOOL PDFium_FindNext(FPDF_SCHHANDLE searchHandle) {
+    return FPDFText_FindNext(searchHandle);
+}
+
+// Find previous occurrence
+EMSCRIPTEN_KEEPALIVE
+FPDF_BOOL PDFium_FindPrev(FPDF_SCHHANDLE searchHandle) {
+    return FPDFText_FindPrev(searchHandle);
+}
+
+// Get the character index of the search result
+EMSCRIPTEN_KEEPALIVE
+int PDFium_GetSchResultIndex(FPDF_SCHHANDLE searchHandle) {
+    return FPDFText_GetSchResultIndex(searchHandle);
+}
+
+// Get the number of characters in the search result
+EMSCRIPTEN_KEEPALIVE
+int PDFium_GetSchCount(FPDF_SCHHANDLE searchHandle) {
+    return FPDFText_GetSchCount(searchHandle);
+}
+
+// Close the search handle
+EMSCRIPTEN_KEEPALIVE
+void PDFium_FindClose(FPDF_SCHHANDLE searchHandle) {
+    FPDFText_FindClose(searchHandle);
+}
+
 EMSCRIPTEN_KEEPALIVE
 unsigned long PDFium_GetLastError() {
     return FPDF_GetLastError();

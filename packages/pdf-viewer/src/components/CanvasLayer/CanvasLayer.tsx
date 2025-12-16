@@ -23,7 +23,11 @@ export const CanvasLayer: React.FC<ICanvasLayerProps> = ({
     }
 
     try {
-      controller.renderPdf(canvas.current, { pageIndex, scale });
+      controller.renderPdf(canvas.current, {
+        pageIndex,
+        scale,
+        pixelRatio: window.devicePixelRatio || 1,
+      });
       onCanvasReady?.(canvas.current);
     } catch (error) {
       console.warn('Failed to render PDF on canvas.', error);
@@ -35,5 +39,5 @@ export const CanvasLayer: React.FC<ICanvasLayerProps> = ({
     renderPdfCanvas();
   }, [renderPdfCanvas]);
 
-  return <canvas ref={canvas} className="pdf-canvas-layer mx-auto mt-8 z-0" {...props} />;
+  return <canvas ref={canvas} className="pdf-canvas-layer z-0" {...props} />;
 };

@@ -3,7 +3,6 @@ import { ViewerPage } from './ViewerPage';
 import { useLazyPageLoader } from '../../hooks/useLazyPageLoader';
 import { useCurrentPageTracker } from '../../hooks/useCurrentPageTracker';
 import { usePdfController } from '@/providers/PdfControllerContextProvider';
-
 export interface IViewerProps {
   /** Total number of pages in the PDF document */
   pageCount: number;
@@ -53,7 +52,6 @@ export const Viewer: React.FC<IViewerProps> = ({
           registerPageElement={registerPageElement}
         />
       ))}
-
       {/* Sentinel element - when this becomes visible, load more pages */}
       {hasMorePages && (
         <div ref={sentinelRef} className="h-10 flex items-center justify-center text-gray-500">

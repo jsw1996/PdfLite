@@ -4,6 +4,7 @@ import { AnnotationLayer } from '../AnnotationLayer/AnnotationLayer';
 import { usePdfController } from '../../providers/PdfControllerContextProvider';
 import { useAnnotation } from '../../providers/AnnotationContextProvider';
 import { AnnotationType, type IAnnotation } from '../../types/annotation';
+import { TextLayer } from '../TextLayer/TextLayer';
 
 export interface IViewerPageProps {
   pageIndex: number;
@@ -66,7 +67,7 @@ export const ViewerPage: React.FC<IViewerPageProps> = ({
     <div
       ref={(el) => registerPageElement(pageIndex, el)}
       data-slot={`viewer-page-container-${pageIndex}`}
-      className="relative z-0"
+      className="relative z-0 w-fit mx-auto mb-4"
     >
       <CanvasLayer
         data-slot={`viewer-canvas-${pageIndex}`}
@@ -74,6 +75,7 @@ export const ViewerPage: React.FC<IViewerPageProps> = ({
         scale={scale}
         onCanvasReady={onCanvasReady}
       />
+      <TextLayer pageIndex={pageIndex} scale={scale} />
       <AnnotationLayer
         pageIndex={pageIndex}
         pdfCanvas={pdfCanvas}

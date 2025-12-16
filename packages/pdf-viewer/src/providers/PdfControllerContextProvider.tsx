@@ -1,12 +1,6 @@
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+/* eslint-disable react-refresh/only-export-components */
+
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 
 import type { PdfController } from '@pdfviewer/controller';
@@ -45,8 +39,10 @@ export function PdfControllerContextProvider({
   children,
   autoInitialize = true,
 }: IPdfControllerContextProviderProps) {
-  const controllerRef = useRef<PdfController | null>(null);
-  controllerRef.current ??= new PdfControllerClass();
+  const [controller] = useState<PdfController>(() => {
+    const instance = new PdfControllerClass();
+    return instance;
+  });
 
   const [isInitialized, setIsInitialized] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
@@ -87,23 +83,24 @@ export function PdfControllerContextProvider({
 
     setError(null);
     try {
-      await controllerRef.current!.ensureInitialized();
+      await controller.ensureInitialized();
       setIsInitialized(true);
     } catch (e) {
       const err = e instanceof Error ? e : new Error(String(e));
       setError(err);
       throw err;
     }
-  }, [isInitialized]);
+  }, [controller, isInitialized]);
 
   useEffect(() => {
     if (!autoInitialize) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- auto-initialize intentionally updates state after async init
     void initialize();
   }, [autoInitialize, initialize]);
 
   const value = useMemo<IPdfControllerContextValue>(
     () => ({
-      controller: controllerRef.current!,
+      controller,
       isInitialized,
       isLoaded,
       error,
@@ -112,7 +109,7 @@ export function PdfControllerContextProvider({
       currentPage,
       goToPage,
     }),
-    [currentPage, error, initialize, isInitialized, isLoaded, goToPage],
+    [controller, currentPage, error, initialize, isInitialized, isLoaded, goToPage],
   );
 
   return <PdfControllerContext.Provider value={value}>{children}</PdfControllerContext.Provider>;
