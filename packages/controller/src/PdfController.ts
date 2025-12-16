@@ -712,8 +712,8 @@ export class PdfController implements IPdfController {
       if (!annot) throw new Error('Failed to create INK annotation');
 
       try {
-        // yellow
-        pdfium._FPDFAnnot_SetColor_W(annot, FPDFANNOT_COLORTYPE.COLOR, 250, 204, 21, 255);
+        // yellow (rgb 248,196,72)
+        pdfium._FPDFAnnot_SetColor_W(annot, FPDFANNOT_COLORTYPE.COLOR, 248, 196, 72, 255);
         // border width in page units: roughly map pixels->page by /scale
         pdfium._FPDFAnnot_SetBorder_W(annot, 0, 0, 14 / scale);
 

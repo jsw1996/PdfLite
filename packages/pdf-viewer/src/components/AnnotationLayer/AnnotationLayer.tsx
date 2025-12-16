@@ -22,9 +22,7 @@ function clampFinite(n: number, fallback = 0): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
-function isRgbaColor(color: string): boolean {
-  return color.trim().toLowerCase().startsWith('rgba(');
-}
+const DEFAULT_HIGHLIGHT_COLOR = 'rgb(248, 196, 72)';
 
 export const AnnotationLayer: React.FC<IAnnotationLayerProps> = ({
   pageIndex,
@@ -34,7 +32,8 @@ export const AnnotationLayer: React.FC<IAnnotationLayerProps> = ({
   const { selectedTool, addAnnotation, getAnnotationsForPage } = useAnnotation();
   const annotations = getAnnotationsForPage(pageIndex);
 
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const highlightCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const drawCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const [metrics, setMetrics] = useState<ICanvasMetrics | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [currentPath, setCurrentPath] = useState<IPoint[]>([]);
@@ -91,13 +90,33 @@ export const AnnotationLayer: React.FC<IAnnotationLayerProps> = ({
       width: metrics.cssWidth,
       height: metrics.cssHeight,
       zIndex: 10,
-      pointerEvents: canInteract ? 'auto' : 'none',
+      // pointerEvents 由具体 canvas 控制
     };
-  }, [canInteract, metrics]);
+  }, [metrics]);
+
+  const highlightCanvasStyle = useMemo<React.CSSProperties>(() => {
+    return {
+      ...style,
+      // 关键：让高亮与底下 PDF 画面混合（不需要透明度也不会盖住文字）
+      mixBlendMode: 'multiply',
+      pointerEvents: canInteract && selectedTool === AnnotationType.HIGHLIGHT ? 'auto' : 'none',
+    };
+  }, [canInteract, selectedTool, style]);
+
+  const drawCanvasStyle = useMemo<React.CSSProperties>(() => {
+    return {
+      ...style,
+      mixBlendMode: 'normal',
+      pointerEvents: canInteract && selectedTool === AnnotationType.DRAW ? 'auto' : 'none',
+    };
+  }, [canInteract, selectedTool, style]);
 
   const getPoint = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>): IPoint | null => {
-      const c = canvasRef.current;
+      const c =
+        selectedTool === AnnotationType.HIGHLIGHT
+          ? highlightCanvasRef.current
+          : drawCanvasRef.current;
       if (!c || !metrics) return null;
       const rect = c.getBoundingClientRect();
       const x = e.clientX - rect.left;
@@ -106,7 +125,7 @@ export const AnnotationLayer: React.FC<IAnnotationLayerProps> = ({
       const sy = c.height / rect.height;
       return { x: x * sx, y: y * sy };
     },
-    [metrics],
+    [metrics, selectedTool],
   );
 
   const drawStroke = useCallback(
@@ -125,8 +144,8 @@ export const AnnotationLayer: React.FC<IAnnotationLayerProps> = ({
       ctx.lineWidth = w;
 
       if (type === AnnotationType.HIGHLIGHT) {
-        // 如果 color 已经是 rgba(...)（自带 alpha），就不要再叠加 globalAlpha，否则会发灰
-        ctx.globalAlpha = isRgbaColor(color) ? 1 : 0.55;
+        // 透明度固定为 1，交给 CSS mix-blend-mode 去实现“高亮不遮字”
+        ctx.globalAlpha = 1;
       }
 
       ctx.beginPath();
@@ -142,8 +161,7 @@ export const AnnotationLayer: React.FC<IAnnotationLayerProps> = ({
     (ctx: CanvasRenderingContext2D, points: IPoint[], fill: string) => {
       if (points.length < 3) return;
       ctx.save();
-      // 同上：rgba(...) 已包含透明度，避免二次叠加导致发灰
-      ctx.globalAlpha = isRgbaColor(fill) ? 1 : 0.35;
+      ctx.globalAlpha = 1;
       ctx.fillStyle = fill;
       ctx.beginPath();
       ctx.moveTo(points[0].x, points[0].y);
@@ -156,25 +174,37 @@ export const AnnotationLayer: React.FC<IAnnotationLayerProps> = ({
   );
 
   const redraw = useCallback(() => {
-    const c = canvasRef.current;
-    if (!c || !metrics) return;
-    const ctx = c.getContext('2d');
-    if (!ctx) return;
-    ctx.clearRect(0, 0, c.width, c.height);
+    const hc = highlightCanvasRef.current;
+    const dc = drawCanvasRef.current;
+    if (!hc || !dc || !metrics) return;
+    const hctx = hc.getContext('2d');
+    const dctx = dc.getContext('2d');
+    if (!hctx || !dctx) return;
+    hctx.clearRect(0, 0, hc.width, hc.height);
+    dctx.clearRect(0, 0, dc.width, dc.height);
 
     for (const a of annotations) {
       if (a.shape === 'polygon') {
-        drawPolygon(ctx, a.points, a.color);
+        // polygon 目前只用于原生 highlight quadpoints，画在高亮层
+        drawPolygon(hctx, a.points, a.color);
       } else {
-        drawStroke(ctx, a.points, a.type, a.color, a.strokeWidth);
+        if (a.type === AnnotationType.HIGHLIGHT) {
+          drawStroke(hctx, a.points, a.type, a.color, a.strokeWidth);
+        } else {
+          drawStroke(dctx, a.points, a.type, a.color, a.strokeWidth);
+        }
       }
     }
 
     if (selectedTool && currentPath.length) {
       // 默认颜色：黄色
-      const color = '#facc15';
+      const color = DEFAULT_HIGHLIGHT_COLOR;
       const strokeWidth = selectedTool === AnnotationType.HIGHLIGHT ? 14 : 2;
-      drawStroke(ctx, currentPath, selectedTool, color, strokeWidth);
+      if (selectedTool === AnnotationType.HIGHLIGHT) {
+        drawStroke(hctx, currentPath, selectedTool, color, strokeWidth);
+      } else {
+        drawStroke(dctx, currentPath, selectedTool, color, strokeWidth);
+      }
     }
   }, [annotations, currentPath, drawPolygon, drawStroke, metrics, selectedTool]);
 
@@ -212,7 +242,7 @@ export const AnnotationLayer: React.FC<IAnnotationLayerProps> = ({
     }
 
     // 默认颜色：黄色
-    const color = '#facc15';
+    const color = DEFAULT_HIGHLIGHT_COLOR;
     const strokeWidth = selectedTool === AnnotationType.HIGHLIGHT ? 14 : 2;
     const ann: IAnnotation = {
       id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -239,16 +269,29 @@ export const AnnotationLayer: React.FC<IAnnotationLayerProps> = ({
   if (!metrics) return null;
 
   return (
-    <canvas
-      ref={canvasRef}
-      width={metrics.pixelWidth}
-      height={metrics.pixelHeight}
-      style={style}
-      className="annotation-layer"
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
-      onPointerCancel={onPointerCancel}
-    />
+    <>
+      <canvas
+        ref={highlightCanvasRef}
+        width={metrics.pixelWidth}
+        height={metrics.pixelHeight}
+        style={highlightCanvasStyle}
+        className="annotation-layer annotation-layer-highlight"
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerCancel}
+      />
+      <canvas
+        ref={drawCanvasRef}
+        width={metrics.pixelWidth}
+        height={metrics.pixelHeight}
+        style={drawCanvasStyle}
+        className="annotation-layer annotation-layer-draw"
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerCancel}
+      />
+    </>
   );
 };
