@@ -4,6 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "dev": "node -e \"console.log('[@pdfviewer/ui] source-only package (no build step).')\"",
+    "build": "node -e \"console.log('[@pdfviewer/ui] source-only package (no build step).')\"",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

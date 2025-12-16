@@ -40,4 +40,10 @@ export default defineConfig({
     exclude: ['@pdfviewer/pdfium-wasm'],
   },
   assetsInclude: ['**/*.wasm'],
+  server: {
+    // 避免在部分环境中默认绑定到 IPv6 (::1) 导致 EPERM
+    host: '127.0.0.1',
+    port: 5173,
+    strictPort: false,
+  },
 });
