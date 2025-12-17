@@ -54,6 +54,7 @@ export default defineConfig([
       'simple-import-sort/imports': 'off',
       'simple-import-sort/exports': 'off',
       'react/prop-types': 'off',
+      '@typescript-eslint/no-unsafe-assignment': 'off',
       '@typescript-eslint/naming-convention': [
         'error',
         {

@@ -3,11 +3,10 @@ import { ViewerPage } from './ViewerPage';
 import { useLazyPageLoader } from '../../hooks/useLazyPageLoader';
 import { useCurrentPageTracker } from '../../hooks/useCurrentPageTracker';
 import { usePdfController } from '@/providers/PdfControllerContextProvider';
+import { PageControlBar } from '../PageControlBar/PageControlBar';
 export interface IViewerProps {
   /** Total number of pages in the PDF document */
   pageCount: number;
-  /** Scale factor for rendering pages (default: 1.5) */
-  scale?: number;
   /** Number of pages to render initially (default: 10) */
   initialPageLoad?: number;
   /** Number of additional pages to load when scrolling (default: 10) */
@@ -23,7 +22,6 @@ export interface IViewerProps {
  */
 export const Viewer: React.FC<IViewerProps> = ({
   pageCount,
-  scale = 1.5,
   initialPageLoad = 10,
   pageLoadIncrement = 10,
 }) => {
@@ -32,7 +30,6 @@ export const Viewer: React.FC<IViewerProps> = ({
     initialPageLoad,
     pageLoadIncrement,
   });
-
   const { goToPage } = usePdfController();
   const { registerPageElement } = useCurrentPageTracker({
     pageCount: loadedPages,
@@ -45,13 +42,11 @@ export const Viewer: React.FC<IViewerProps> = ({
     <>
       {/* Render only the loaded pages */}
       {Array.from({ length: loadedPages }, (_, index) => (
-        <ViewerPage
-          key={index}
-          pageIndex={index}
-          scale={scale}
-          registerPageElement={registerPageElement}
-        />
+        <ViewerPage key={index} pageIndex={index} registerPageElement={registerPageElement} />
       ))}
+      <div className="sticky bottom-6 flex justify-center w-full">
+        <PageControlBar />
+      </div>
       {/* Sentinel element - when this becomes visible, load more pages */}
       {hasMorePages && (
         <div ref={sentinelRef} className="h-10 flex items-center justify-center text-gray-500">

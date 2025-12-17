@@ -5,20 +5,16 @@ import { usePdfController } from '../../providers/PdfControllerContextProvider';
 import { useAnnotation } from '../../providers/AnnotationContextProvider';
 import { AnnotationType, type IAnnotation } from '../../types/annotation';
 import { TextLayer } from '../TextLayer/TextLayer';
+import { usePdfState } from '@/providers/PdfStateContextProvider';
 
 const DEFAULT_HIGHLIGHT_COLOR = 'rgb(248, 196, 72)';
 
 export interface IViewerPageProps {
   pageIndex: number;
-  scale: number;
   registerPageElement: (index: number, el: HTMLDivElement | null) => void;
 }
 
-export const ViewerPage: React.FC<IViewerPageProps> = ({
-  pageIndex,
-  scale,
-  registerPageElement,
-}) => {
+export const ViewerPage: React.FC<IViewerPageProps> = ({ pageIndex, registerPageElement }) => {
   const [pdfCanvas, setPdfCanvas] = useState<HTMLCanvasElement | null>(null);
   const { controller } = usePdfController();
   const {
@@ -30,6 +26,8 @@ export const ViewerPage: React.FC<IViewerPageProps> = ({
   const onCanvasReady = useCallback((c: HTMLCanvasElement) => {
     setPdfCanvas(c);
   }, []);
+
+  const { scale } = usePdfState();
 
   const refreshNativeAnnots = useCallback(() => {
     const native = controller.listNativeAnnotations(pageIndex, { scale });

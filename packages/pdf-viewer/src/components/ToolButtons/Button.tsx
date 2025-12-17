@@ -1,6 +1,6 @@
-import { Button } from '@pdfviewer/ui/components/button';
 import { cn } from '@pdfviewer/ui/lib/utils';
 import type { IToolButton } from './ToolButton.type';
+import { TooltipButton } from '@pdfviewer/ui/components/tooltipButton';
 
 export type ToolButtonProps = IToolButton & {
   isActive: boolean;
@@ -13,7 +13,8 @@ export const ToolButton: React.FC<ToolButtonProps> = (props: ToolButtonProps) =>
 
   return (
     <>
-      <Button
+      <TooltipButton
+        title={props.name}
         className={className}
         variant="ghost"
         size="icon"
@@ -31,7 +32,7 @@ export const ToolButton: React.FC<ToolButtonProps> = (props: ToolButtonProps) =>
         }}
       >
         <props.icon className="w-[24px] h-[24px]" />
-      </Button>
+      </TooltipButton>
     </>
   );
 };
