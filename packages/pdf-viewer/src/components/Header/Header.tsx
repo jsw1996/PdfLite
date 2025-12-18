@@ -7,11 +7,12 @@ interface IHeaderProps {
 
 export const Header: React.FC<IHeaderProps> = ({ fileName, buttons }) => {
   return (
-    <div className="sticky top-0 z-50 w-full h-12 bg-white text-black flex items-center px-4 border-b border-gray-200 z-10000">
-      <h1 className="text-lg font-semibold">{fileName}</h1>
-      <div className="ml-auto">
+    <div className="sticky top-0 z-50 w-full h-12 bg-white text-black flex items-center justify-between px-4 border-b border-gray-200 box-content py-[4px] mb-2.5">
+      <h1 className="text-lg font-semibold flex-1">{fileName}</h1>
+      <div className="flex-1 flex justify-center">
         <ToolBar buttons={buttons ?? []} />
       </div>
+      <div className="flex-1"></div>
     </div>
   );
 };

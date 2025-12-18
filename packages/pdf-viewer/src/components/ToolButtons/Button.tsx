@@ -9,7 +9,11 @@ export type ToolButtonProps = IToolButton & {
 
 export const ToolButton: React.FC<ToolButtonProps> = (props: ToolButtonProps) => {
   const toolId = props.id ?? props.name;
-  const className = cn('hover:bg-indigo-100', props.isActive && 'bg-blue-100 text-indigo-700');
+  const className = cn(
+    'hover:bg-indigo-100',
+    'text-[#65758D]',
+    props.isActive && 'bg-blue-100 text-[#4f46e5] bg-white border border-gray-300',
+  );
 
   return (
     <>
@@ -31,7 +35,7 @@ export const ToolButton: React.FC<ToolButtonProps> = (props: ToolButtonProps) =>
           props.onClick?.();
         }}
       >
-        <props.icon className="w-[24px] h-[24px]" />
+        <props.icon className="w-[24px] h-[24px] stroke-2" />
       </TooltipButton>
     </>
   );

@@ -47,7 +47,7 @@ export const ToolBar: React.FC<IToobarProps> = (props: IToobarProps) => {
   );
 
   return (
-    <div className="flex flex-row p-[5px]">
+    <div className="flex flex-row p-[5px] bg-[#f8fafc] border border-gray-300 rounded-[14px] space-x-1">
       {buttonsByGroup.map((groupButtons, index) => (
         <div key={index} className="flex flex-row items-center">
           <ToolGroup
@@ -56,7 +56,7 @@ export const ToolBar: React.FC<IToobarProps> = (props: IToobarProps) => {
             onActivate={handleActivate}
           />
           {index < buttonsByGroup.length - 1 && (
-            <Separator orientation="vertical" className="mx-2 !h-6 bg-gray-300" />
+            <Separator orientation="vertical" className="mx-2 !h-6" />
           )}
         </div>
       ))}

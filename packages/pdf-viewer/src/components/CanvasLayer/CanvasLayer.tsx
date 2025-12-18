@@ -1,5 +1,6 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef, useCallback } from 'react';
 
+import { useInViewport } from '../../hooks/useInViewport';
 import { usePdfController } from '../../providers/PdfControllerContextProvider';
 
 export interface ICanvasLayerProps extends React.ComponentProps<'canvas'> {
@@ -11,13 +12,16 @@ export interface ICanvasLayerProps extends React.ComponentProps<'canvas'> {
 export const CanvasLayer: React.FC<ICanvasLayerProps> = ({
   pageIndex = 0,
   scale = 1.0,
+
   onCanvasReady,
   ...props
 }) => {
-  const canvas = React.useRef<HTMLCanvasElement | null>(null);
+  const canvas = useRef<HTMLCanvasElement | null>(null);
   const { controller, isInitialized } = usePdfController();
+  const isInViewport = useInViewport(canvas);
+  const hasRendered = useRef(false);
 
-  const renderPdfCanvas = React.useCallback(() => {
+  const renderPdfCanvas = useCallback(() => {
     if (!canvas.current || !isInitialized) {
       return;
     }
@@ -28,16 +32,18 @@ export const CanvasLayer: React.FC<ICanvasLayerProps> = ({
         scale,
         pixelRatio: window.devicePixelRatio || 1,
       });
+      hasRendered.current = true;
       onCanvasReady?.(canvas.current);
     } catch (error) {
       console.warn('Failed to render PDF on canvas.', error);
-      // PDF may not be loaded yet, silently ignore
     }
-  }, [controller, isInitialized, onCanvasReady, pageIndex, scale]);
+  }, [controller, isInitialized, pageIndex, scale, onCanvasReady]);
 
   useEffect(() => {
-    renderPdfCanvas();
-  }, [renderPdfCanvas]);
+    if (isInViewport) {
+      renderPdfCanvas();
+    }
+  }, [isInViewport, renderPdfCanvas]);
 
-  return <canvas ref={canvas} className="pdf-canvas-layer z-0" {...props} />;
+  return <canvas ref={canvas} className="pdf-canvas-layer z-0 h-[300px] w-[300px]" {...props} />;
 };

@@ -1,9 +1,10 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { ViewerPage } from './ViewerPage';
 import { useLazyPageLoader } from '../../hooks/useLazyPageLoader';
 import { useCurrentPageTracker } from '../../hooks/useCurrentPageTracker';
 import { usePdfController } from '@/providers/PdfControllerContextProvider';
 import { PageControlBar } from '../PageControlBar/PageControlBar';
+import { usePdfState } from '@/providers/PdfStateContextProvider';
 export interface IViewerProps {
   /** Total number of pages in the PDF document */
   pageCount: number;
@@ -38,21 +39,46 @@ export const Viewer: React.FC<IViewerProps> = ({
     threshold: 0.7,
   });
 
+  const { scale, setScale } = usePdfState();
+
+  const divRef = React.useRef<HTMLDivElement | null>(null);
+
+  // Handle Ctrl + Mouse Wheel for zooming
+  useEffect(() => {
+    const onWheel = (e: WheelEvent) => {
+      if (e.ctrlKey) {
+        e.preventDefault();
+        const newScale = e.deltaY < 0 ? scale * 1.1 : scale / 1.1;
+        setScale(newScale);
+      }
+    };
+    divRef.current?.addEventListener('wheel', onWheel, { passive: false });
+    return () => {
+      divRef.current?.removeEventListener('wheel', onWheel);
+    };
+  }, [scale, setScale]);
+
   return (
-    <>
-      {/* Render only the loaded pages */}
-      {Array.from({ length: loadedPages }, (_, index) => (
-        <ViewerPage key={index} pageIndex={index} registerPageElement={registerPageElement} />
-      ))}
-      <div className="sticky bottom-6 flex justify-center w-full">
-        <PageControlBar />
+    <div className="h-full relative">
+      {/* Scrollable content */}
+      <div className="h-full" ref={divRef}>
+        {/* Render only the loaded pages */}
+        {Array.from({ length: loadedPages }, (_, index) => (
+          <ViewerPage key={index} pageIndex={index} registerPageElement={registerPageElement} />
+        ))}
+        {/* Sentinel element - when this becomes visible, load more pages */}
+        {hasMorePages && (
+          <div ref={sentinelRef} className="h-10 flex items-center justify-center text-gray-500">
+            Loading more pages...
+          </div>
+        )}
       </div>
-      {/* Sentinel element - when this becomes visible, load more pages */}
-      {hasMorePages && (
-        <div ref={sentinelRef} className="h-10 flex items-center justify-center text-gray-500">
-          Loading more pages...
+      {/* Floating page control bar - fixed to viewport bottom, centered on container */}
+      <div className="fixed bottom-6 z-50 pointer-events-none flex justify-center w-[stretch]">
+        <div className="pointer-events-auto margin">
+          <PageControlBar />
         </div>
-      )}
-    </>
+      </div>
+    </div>
   );
 };

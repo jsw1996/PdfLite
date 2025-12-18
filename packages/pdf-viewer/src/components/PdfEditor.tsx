@@ -44,10 +44,8 @@ export const PdfEditor: React.FC<IPdfEditorProps> = ({ file }) => {
     <AnnotationContextProvider>
       <PdfStateContextProvider>
         <AppSidebar />
-        <SidebarInset className="bg-zinc-300">
-          {/* <div className="sticky top-0 z-10 bg-white py-2 border-b-1 border-gray-200"> */}
+        <SidebarInset className="bg-[#e2e8f061]">
           <Header fileName={file.name} buttons={buttons} />
-          {/* </div> */}
           {!isFileLoaded ? <div>Loading PDF...</div> : <Viewer pageCount={pageCount} />}
         </SidebarInset>
       </PdfStateContextProvider>
