@@ -1,5 +1,5 @@
 import React from 'react';
-import { getButtons } from '../utils/getButtons';
+import { getButtons, getRightButtons } from '../utils/getButtons';
 import { usePdfController } from '@/providers/PdfControllerContextProvider';
 import { AnnotationContextProvider } from '../providers/AnnotationContextProvider';
 import { Viewer } from './Viewer/Viewer';
@@ -14,6 +14,7 @@ export interface IPdfEditorProps {
 
 export const PdfEditor: React.FC<IPdfEditorProps> = ({ file }) => {
   const buttons = getButtons();
+  const rightButtons = getRightButtons();
   const { controller } = usePdfController();
   const [isFileLoaded, setIsFileLoaded] = React.useState(false);
   const [pageCount, setPageCount] = React.useState(0);
@@ -45,7 +46,7 @@ export const PdfEditor: React.FC<IPdfEditorProps> = ({ file }) => {
       <PdfStateContextProvider>
         <AppSidebar />
         <SidebarInset className="bg-[#e2e8f061]">
-          <Header fileName={file.name} buttons={buttons} />
+          <Header fileName={file.name} centerButtons={buttons} rightButtons={rightButtons} />
           {!isFileLoaded ? <div>Loading PDF...</div> : <Viewer pageCount={pageCount} />}
         </SidebarInset>
       </PdfStateContextProvider>

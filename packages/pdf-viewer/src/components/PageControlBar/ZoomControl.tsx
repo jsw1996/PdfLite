@@ -14,7 +14,7 @@ export const ZoomControl: React.FC = () => {
     setScale(Math.max(zoomStep, scale - zoomStep));
   };
   return (
-    <div className="bg-white">
+    <div className="bg-white flex items-center">
       <TooltipButton variant="ghost" onClick={handleZoomOut} title="Zoom Out">
         <ZoomOut />
       </TooltipButton>
