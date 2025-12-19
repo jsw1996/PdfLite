@@ -27,6 +27,11 @@ export interface IRenderOptions {
   pixelRatio?: number;
 }
 
+export interface IPageDimension {
+  width: number;
+  height: number;
+}
+
 /** Represents a text rectangle with its content and font properties */
 export interface ITextRect {
   /** The actual text content within this rect */
@@ -57,6 +62,7 @@ export interface IPdfController {
   ensureInitialized(): Promise<void>;
   loadFile(file: File, opts?: { signal?: AbortSignal }): Promise<void>;
   renderPdf(canvas: HTMLCanvasElement, options?: IRenderOptions): void;
+  getPageDimension(pageIndex: number): IPageDimension;
   listNativeAnnotations(pageIndex: number, opts: { scale: number }): INativeAnnotation[];
   addInkHighlight(pageIndex: number, opts: { scale: number; canvasPoints: IPoint[] }): void;
   exportPdfBytes(): Uint8Array;
@@ -220,6 +226,18 @@ export class PdfController implements IPdfController {
     return this.pdfiumModule._PDFium_GetPageCount(this.docPtr);
   }
 
+  public getPageDimension(pageIndex: number): IPageDimension {
+    if (!this.pdfiumModule || !this.docPtr) {
+      throw new Error('PDF not loaded. Call loadFile() first.');
+    }
+
+    return this.withPage(pageIndex, (pdfium, pagePtr) => {
+      const width = pdfium._PDFium_GetPageWidth(pagePtr);
+      const height = pdfium._PDFium_GetPageHeight(pagePtr);
+      return { width, height };
+    });
+  }
+
   public renderPdf(canvas: HTMLCanvasElement, options: IRenderOptions = {}): void {
     if (!this.pdfiumModule || !this.docPtr) {
       throw new Error('PDF not loaded. Call loadFile() first.');
@@ -252,10 +270,6 @@ export class PdfController implements IPdfController {
       // Set canvas size (physical pixels)
       canvas.width = width;
       canvas.height = height;
-
-      // Set canvas CSS size (logical pixels)
-      canvas.style.width = `${logicalWidth}px`;
-      canvas.style.height = `${logicalHeight}px`;
 
       // Create bitmap
       const bitmapPtr = pdfium._PDFium_BitmapCreate(width, height, 1);
