@@ -14,6 +14,7 @@
     "@pdfviewer/pdfium-wasm": "workspace:^",
     "@pdfviewer/ui": "workspace:*",
     "@tailwindcss/vite": "^4.1.17",
+    "lodash.throttle": "^4.1.1",
     "lucide-react": "^0.560.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
@@ -23,6 +24,7 @@
     "@types/node": "^24.10.1",
     "@types/react": "^19.2.5",
     "@types/react-dom": "^19.2.3",
+    "@types/lodash.throttle": "^4.1.9",
     "@vitejs/plugin-react": "^5.1.1",
     "eslint": "^9.39.1",
     "eslint-plugin-react-hooks": "^7.0.1",

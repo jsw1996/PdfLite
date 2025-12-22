@@ -1,4 +1,5 @@
 import { ToolBar } from '../Toolbar/Toolbar';
+import { SearchBar } from '../SearchBar/SearchBar';
 import type { IToolButton } from '../ToolButtons/ToolButton.type';
 interface IHeaderProps {
   fileName: string;
@@ -13,7 +14,8 @@ export const Header: React.FC<IHeaderProps> = ({ fileName, centerButtons, rightB
       <div className="flex-1 flex justify-center">
         <ToolBar buttons={centerButtons ?? []} boardered />
       </div>
-      <div className="flex-1 flex justify-end">
+      <div className="flex-1 flex justify-end items-center">
+        <SearchBar />
         <ToolBar buttons={rightButtons ?? []} />
       </div>
     </div>

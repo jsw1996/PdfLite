@@ -58,6 +58,13 @@ export interface IPageTextContent {
   textRects: ITextRect[];
 }
 
+export interface ISearchResult {
+  pageIndex: number;
+  matchIndex: number;
+  rects: { left: number; top: number; width: number; height: number }[];
+  text: string;
+}
+
 export interface IPdfController {
   ensureInitialized(): Promise<void>;
   loadFile(file: File, opts?: { signal?: AbortSignal }): Promise<void>;
@@ -70,6 +77,7 @@ export interface IPdfController {
   getPageTextContent(pageIndex: number): IPageTextContent | null;
   destroy(): void;
   setFontMap(map: Record<string, string>): void;
+  searchText(text: string, opts?: { scale?: number }): ISearchResult[];
 }
 
 export class PdfController implements IPdfController {
@@ -712,6 +720,164 @@ export class PdfController implements IPdfController {
 
       return out;
     });
+  }
+
+  public searchText(text: string, opts?: { scale?: number }): ISearchResult[] {
+    if (!text) return [];
+    const { pdfium } = this.requireDoc();
+    const scale = opts?.scale ?? 1;
+
+    // Encode search text as UTF-16LE (PDFium expects UTF-16)
+    const utf16 = new Uint16Array(text.length + 1);
+    for (let i = 0; i < text.length; i++) {
+      utf16[i] = text.charCodeAt(i);
+    }
+    utf16[text.length] = 0; // null terminator
+
+    // Allocate memory and copy UTF-16 string
+    const textPtr = pdfium._malloc(utf16.length * 2);
+    new Uint8Array(pdfium.HEAPU8.buffer, textPtr, utf16.length * 2).set(
+      new Uint8Array(utf16.buffer),
+    );
+
+    try {
+      const results: ISearchResult[] = [];
+      const pageCount = this.getPageCount();
+
+      for (let pageIndex = 0; pageIndex < pageCount; pageIndex++) {
+        this.withPage(pageIndex, (pdfium, pagePtr) => {
+          const textPagePtr = pdfium._PDFium_LoadPageText(pagePtr);
+          if (!textPagePtr) return;
+
+          try {
+            // 0 = Case Insensitive
+            const searchHandle = pdfium._PDFium_FindStart(textPagePtr, textPtr, 0, 0);
+            if (!searchHandle) return;
+
+            try {
+              while (pdfium._PDFium_FindNext(searchHandle)) {
+                const charIndex = pdfium._PDFium_GetSchResultIndex(searchHandle);
+                const charCount = pdfium._PDFium_GetSchCount(searchHandle);
+
+                const pageWidth = pdfium._PDFium_GetPageWidth(pagePtr);
+                const pageHeight = pdfium._PDFium_GetPageHeight(pagePtr);
+
+                const rects = this.getTextRects(
+                  pdfium,
+                  pagePtr,
+                  textPagePtr,
+                  charIndex,
+                  charCount,
+                  pageWidth,
+                  pageHeight,
+                  scale,
+                );
+
+                results.push({
+                  pageIndex,
+                  matchIndex: results.length,
+                  rects,
+                  text,
+                });
+              }
+            } finally {
+              pdfium._PDFium_FindClose(searchHandle);
+            }
+          } finally {
+            pdfium._PDFium_ClosePageText(textPagePtr);
+          }
+        });
+      }
+      return results;
+    } finally {
+      pdfium._free(textPtr);
+    }
+  }
+
+  private getTextRects(
+    pdfium: PDFiumModule,
+    pagePtr: number,
+    textPagePtr: number,
+    startIndex: number,
+    count: number,
+    pageWidth: number,
+    pageHeight: number,
+    scale = 1,
+  ): { left: number; top: number; width: number; height: number }[] {
+    const rectsCount = pdfium._PDFium_CountRects(textPagePtr, startIndex, count);
+    const rects: { left: number; top: number; width: number; height: number }[] = [];
+
+    const leftPtr = pdfium._malloc(8);
+    const topPtr = pdfium._malloc(8);
+    const rightPtr = pdfium._malloc(8);
+    const bottomPtr = pdfium._malloc(8);
+
+    const deviceXPtr = pdfium._malloc(4);
+    const deviceYPtr = pdfium._malloc(4);
+
+    // Use page dimensions scaled as device size
+    const deviceWidth = Math.round(pageWidth * scale);
+    const deviceHeight = Math.round(pageHeight * scale);
+
+    try {
+      for (let i = 0; i < rectsCount; i++) {
+        const ok = pdfium._PDFium_GetRect(textPagePtr, i, leftPtr, topPtr, rightPtr, bottomPtr);
+        if (!ok) continue;
+
+        const left = pdfium.getValue(leftPtr, 'double');
+        const top = pdfium.getValue(topPtr, 'double');
+        const right = pdfium.getValue(rightPtr, 'double');
+        const bottom = pdfium.getValue(bottomPtr, 'double');
+
+        // Convert to device coords (top-left origin)
+        // TL
+        pdfium._PDFium_PageToDevice(
+          pagePtr,
+          0,
+          0,
+          deviceWidth,
+          deviceHeight,
+          0,
+          left,
+          top,
+          deviceXPtr,
+          deviceYPtr,
+        );
+        const deviceLeft = pdfium.getValue(deviceXPtr, 'i32');
+        const deviceTop = pdfium.getValue(deviceYPtr, 'i32');
+
+        // BR
+        pdfium._PDFium_PageToDevice(
+          pagePtr,
+          0,
+          0,
+          deviceWidth,
+          deviceHeight,
+          0,
+          right,
+          bottom,
+          deviceXPtr,
+          deviceYPtr,
+        );
+        const deviceRight = pdfium.getValue(deviceXPtr, 'i32');
+        const deviceBottom = pdfium.getValue(deviceYPtr, 'i32');
+
+        rects.push({
+          left: Math.min(deviceLeft, deviceRight),
+          top: Math.min(deviceTop, deviceBottom),
+          width: Math.abs(deviceRight - deviceLeft),
+          height: Math.abs(deviceBottom - deviceTop),
+        });
+      }
+    } finally {
+      pdfium._free(leftPtr);
+      pdfium._free(topPtr);
+      pdfium._free(rightPtr);
+      pdfium._free(bottomPtr);
+      pdfium._free(deviceXPtr);
+      pdfium._free(deviceYPtr);
+    }
+    return rects;
   }
 
   public addInkHighlight(pageIndex: number, opts: { scale: number; canvasPoints: IPoint[] }): void {

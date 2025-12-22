@@ -9,4 +9,5 @@ export {
   type IRenderOptions,
   type ITextRect,
   type IPageTextContent,
+  type ISearchResult,
 } from './PdfController';
