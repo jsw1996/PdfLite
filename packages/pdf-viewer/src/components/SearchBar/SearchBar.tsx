@@ -108,7 +108,7 @@ export const SearchBar = () => {
           placeholder="Find in document"
           value={value}
           onChange={(e) => handleValueChange(e.target.value)}
-          className="pr-9"
+          className="pr-28"
           id={searchBoxId}
         />
         {value && (
