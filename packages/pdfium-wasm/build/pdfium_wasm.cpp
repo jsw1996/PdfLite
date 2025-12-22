@@ -28,7 +28,7 @@ class WasmPlatformIface : public CFX_GEModule::PlatformIface {
   ~WasmPlatformIface() override = default;
 
   void Init() override {}
-  
+
   std::unique_ptr<SystemFontInfoIface> CreateDefaultSystemFontInfo() override {
     return nullptr;
   }
@@ -51,14 +51,14 @@ int PDFium_Init() {
     if (g_libraryInitialized) {
         return 1;
     }
-    
+
     FPDF_LIBRARY_CONFIG config;
     memset(&config, 0, sizeof(config));
     config.version = 2;
     config.m_pUserFontPaths = nullptr;
     config.m_pIsolate = nullptr;
     config.m_v8EmbedderSlot = 0;
-    
+
     FPDF_InitLibraryWithConfig(&config);
     g_libraryInitialized = true;
     return 1;
@@ -123,7 +123,7 @@ void PDFium_PageToDevice(FPDF_PAGE page,
 }
 
 EMSCRIPTEN_KEEPALIVE
-void PDFium_RenderPageBitmap(FPDF_BITMAP bitmap, FPDF_PAGE page, int start_x, int start_y, 
+void PDFium_RenderPageBitmap(FPDF_BITMAP bitmap, FPDF_PAGE page, int start_x, int start_y,
                               int size_x, int size_y, int rotate, int flags) {
     FPDF_RenderPageBitmap(bitmap, page, start_x, start_y, size_x, size_y, rotate, flags);
 }
@@ -191,15 +191,15 @@ int PDFium_GetPageText(FPDF_TEXTPAGE textPage, unsigned short* buffer, int buffe
 
 // Get the bounding box of a character
 EMSCRIPTEN_KEEPALIVE
-FPDF_BOOL PDFium_GetCharBox(FPDF_TEXTPAGE textPage, int charIndex, 
-                             double* left, double* right, 
+FPDF_BOOL PDFium_GetCharBox(FPDF_TEXTPAGE textPage, int charIndex,
+                             double* left, double* right,
                              double* bottom, double* top) {
     return FPDFText_GetCharBox(textPage, charIndex, left, right, bottom, top);
 }
 
 // Get the origin point of a character
 EMSCRIPTEN_KEEPALIVE
-FPDF_BOOL PDFium_GetCharOrigin(FPDF_TEXTPAGE textPage, int charIndex, 
+FPDF_BOOL PDFium_GetCharOrigin(FPDF_TEXTPAGE textPage, int charIndex,
                                 double* x, double* y) {
     return FPDFText_GetCharOrigin(textPage, charIndex, x, y);
 }
@@ -224,7 +224,7 @@ float PDFium_GetCharAngle(FPDF_TEXTPAGE textPage, int charIndex) {
 
 // Get character index at a specific position
 EMSCRIPTEN_KEEPALIVE
-int PDFium_GetCharIndexAtPos(FPDF_TEXTPAGE textPage, double x, double y, 
+int PDFium_GetCharIndexAtPos(FPDF_TEXTPAGE textPage, double x, double y,
                               double xTolerance, double yTolerance) {
     return FPDFText_GetCharIndexAtPos(textPage, x, y, xTolerance, yTolerance);
 }
@@ -245,7 +245,7 @@ int PDFium_GetFontWeight(FPDF_TEXTPAGE textPage, int charIndex) {
 // Get text fill color
 EMSCRIPTEN_KEEPALIVE
 FPDF_BOOL PDFium_GetFillColor(FPDF_TEXTPAGE textPage, int charIndex,
-                               unsigned int* R, unsigned int* G, 
+                               unsigned int* R, unsigned int* G,
                                unsigned int* B, unsigned int* A) {
     return FPDFText_GetFillColor(textPage, charIndex, R, G, B, A);
 }
@@ -253,7 +253,7 @@ FPDF_BOOL PDFium_GetFillColor(FPDF_TEXTPAGE textPage, int charIndex,
 // Get text stroke color
 EMSCRIPTEN_KEEPALIVE
 FPDF_BOOL PDFium_GetStrokeColor(FPDF_TEXTPAGE textPage, int charIndex,
-                                 unsigned int* R, unsigned int* G, 
+                                 unsigned int* R, unsigned int* G,
                                  unsigned int* B, unsigned int* A) {
     return FPDFText_GetStrokeColor(textPage, charIndex, R, G, B, A);
 }
@@ -271,7 +271,7 @@ int PDFium_CountRects(FPDF_TEXTPAGE textPage, int startIndex, int count) {
 // Get a specific selection rectangle
 EMSCRIPTEN_KEEPALIVE
 FPDF_BOOL PDFium_GetRect(FPDF_TEXTPAGE textPage, int rectIndex,
-                          double* left, double* top, 
+                          double* left, double* top,
                           double* right, double* bottom) {
     return FPDFText_GetRect(textPage, rectIndex, left, top, right, bottom);
 }
@@ -331,7 +331,7 @@ unsigned long PDFium_GetLastError() {
 }
 
 EMSCRIPTEN_KEEPALIVE
-unsigned long PDFium_GetMetaText(FPDF_DOCUMENT doc, const char* tag, 
+unsigned long PDFium_GetMetaText(FPDF_DOCUMENT doc, const char* tag,
                                   unsigned short* buffer, unsigned long bufferLen) {
     return FPDF_GetMetaText(doc, tag, buffer, bufferLen);
 }
@@ -352,7 +352,7 @@ FPDF_BOOKMARK PDFium_GetFirstChildBookmark(FPDF_DOCUMENT doc, FPDF_BOOKMARK book
 }
 
 EMSCRIPTEN_KEEPALIVE
-unsigned long PDFium_GetBookmarkTitle(FPDF_BOOKMARK bookmark, 
+unsigned long PDFium_GetBookmarkTitle(FPDF_BOOKMARK bookmark,
                                        unsigned short* buffer, unsigned long bufferLen) {
     return FPDFBookmark_GetTitle(bookmark, buffer, bufferLen);
 }
@@ -444,14 +444,14 @@ FPDF_BOOL FPDFAnnot_SetRect_W(FPDF_ANNOTATION annot, const FS_RECTF* rect) {
 // Annotation color
 EMSCRIPTEN_KEEPALIVE
 FPDF_BOOL FPDFAnnot_GetColor_W(FPDF_ANNOTATION annot, FPDFANNOT_COLORTYPE type,
-                                unsigned int* R, unsigned int* G, 
+                                unsigned int* R, unsigned int* G,
                                 unsigned int* B, unsigned int* A) {
     return FPDFAnnot_GetColor(annot, type, R, G, B, A);
 }
 
 EMSCRIPTEN_KEEPALIVE
 FPDF_BOOL FPDFAnnot_SetColor_W(FPDF_ANNOTATION annot, FPDFANNOT_COLORTYPE type,
-                                unsigned int R, unsigned int G, 
+                                unsigned int R, unsigned int G,
                                 unsigned int B, unsigned int A) {
     return FPDFAnnot_SetColor(annot, type, R, G, B, A);
 }
@@ -519,7 +519,7 @@ size_t FPDFAnnot_CountAttachmentPoints_W(FPDF_ANNOTATION annot) {
 }
 
 EMSCRIPTEN_KEEPALIVE
-FPDF_BOOL FPDFAnnot_GetAttachmentPoints_W(FPDF_ANNOTATION annot, size_t quad_index, 
+FPDF_BOOL FPDFAnnot_GetAttachmentPoints_W(FPDF_ANNOTATION annot, size_t quad_index,
                                            FS_QUADPOINTSF* quad_points) {
     return FPDFAnnot_GetAttachmentPoints(annot, quad_index, quad_points);
 }
@@ -531,14 +531,14 @@ FPDF_BOOL FPDFAnnot_SetAttachmentPoints_W(FPDF_ANNOTATION annot, size_t quad_ind
 }
 
 EMSCRIPTEN_KEEPALIVE
-FPDF_BOOL FPDFAnnot_AppendAttachmentPoints_W(FPDF_ANNOTATION annot, 
+FPDF_BOOL FPDFAnnot_AppendAttachmentPoints_W(FPDF_ANNOTATION annot,
                                               const FS_QUADPOINTSF* quad_points) {
     return FPDFAnnot_AppendAttachmentPoints(annot, quad_points);
 }
 
 // Ink annotation
 EMSCRIPTEN_KEEPALIVE
-int FPDFAnnot_AddInkStroke_W(FPDF_ANNOTATION annot, const FS_POINTF* points, 
+int FPDFAnnot_AddInkStroke_W(FPDF_ANNOTATION annot, const FS_POINTF* points,
                               size_t point_count) {
     return FPDFAnnot_AddInkStroke(annot, points, point_count);
 }
@@ -562,7 +562,7 @@ FPDF_BOOL FPDFAnnot_GetBorder_W(FPDF_ANNOTATION annot, float* horizontal_radius,
 }
 
 EMSCRIPTEN_KEEPALIVE
-FPDF_BOOL FPDFAnnot_SetBorder_W(FPDF_ANNOTATION annot, float horizontal_radius, 
+FPDF_BOOL FPDFAnnot_SetBorder_W(FPDF_ANNOTATION annot, float horizontal_radius,
                                  float vertical_radius, float border_width) {
     return FPDFAnnot_SetBorder(annot, horizontal_radius, vertical_radius, border_width);
 }
@@ -601,7 +601,7 @@ FPDF_ANNOTATION FPDFAnnot_GetLinkedAnnot_W(FPDF_ANNOTATION annot, FPDF_BYTESTRIN
 
 // Vertices for polygon/polyline annotations
 EMSCRIPTEN_KEEPALIVE
-unsigned long FPDFAnnot_GetVertices_W(FPDF_ANNOTATION annot, FS_POINTF* buffer, 
+unsigned long FPDFAnnot_GetVertices_W(FPDF_ANNOTATION annot, FS_POINTF* buffer,
                                        unsigned long length) {
     return FPDFAnnot_GetVertices(annot, buffer, length);
 }
@@ -620,7 +620,7 @@ unsigned long FPDFAnnot_GetInkListPath_W(FPDF_ANNOTATION annot, unsigned long pa
 
 // Form field related
 EMSCRIPTEN_KEEPALIVE
-FPDF_FORMHANDLE FPDFDOC_InitFormFillEnvironment_W(FPDF_DOCUMENT document, 
+FPDF_FORMHANDLE FPDFDOC_InitFormFillEnvironment_W(FPDF_DOCUMENT document,
                                                    FPDF_FORMFILLINFO* formInfo) {
     return FPDFDOC_InitFormFillEnvironment(document, formInfo);
 }
@@ -680,8 +680,8 @@ FPDF_BOOL FPDFAnnot_IsChecked_W(FPDF_FORMHANDLE hHandle, FPDF_ANNOTATION annot) 
 
 // Focus annotation
 EMSCRIPTEN_KEEPALIVE
-FPDF_BOOL FPDFAnnot_SetFocusableSubtypes_W(FPDF_FORMHANDLE hHandle, 
-                                            const FPDF_ANNOTATION_SUBTYPE* subtypes, 
+FPDF_BOOL FPDFAnnot_SetFocusableSubtypes_W(FPDF_FORMHANDLE hHandle,
+                                            const FPDF_ANNOTATION_SUBTYPE* subtypes,
                                             size_t count) {
     return FPDFAnnot_SetFocusableSubtypes(hHandle, subtypes, count);
 }
@@ -702,6 +702,33 @@ FPDF_BOOL FPDFAnnot_GetFocusableSubtypes_W(FPDF_FORMHANDLE hHandle,
 EMSCRIPTEN_KEEPALIVE
 FPDF_LINK FPDFAnnot_GetLink_W(FPDF_ANNOTATION annot) {
     return FPDFAnnot_GetLink(annot);
+}
+
+// Link / Action helpers (needed to resolve URI and internal destinations)
+EMSCRIPTEN_KEEPALIVE
+FPDF_ACTION FPDFLink_GetAction_W(FPDF_LINK link) {
+    return FPDFLink_GetAction(link);
+}
+
+EMSCRIPTEN_KEEPALIVE
+FPDF_DEST FPDFLink_GetDest_W(FPDF_DOCUMENT doc, FPDF_LINK link) {
+    return FPDFLink_GetDest(doc, link);
+}
+
+EMSCRIPTEN_KEEPALIVE
+int FPDFAction_GetType_W(FPDF_ACTION action) {
+    return FPDFAction_GetType(action);
+}
+
+EMSCRIPTEN_KEEPALIVE
+unsigned long FPDFAction_GetURIPath_W(FPDF_DOCUMENT doc, FPDF_ACTION action,
+                                      char* buffer, unsigned long buflen) {
+    return FPDFAction_GetURIPath(doc, action, buffer, buflen);
+}
+
+EMSCRIPTEN_KEEPALIVE
+FPDF_DEST FPDFAction_GetDest_W(FPDF_DOCUMENT doc, FPDF_ACTION action) {
+    return FPDFAction_GetDest(doc, action);
 }
 
 EMSCRIPTEN_KEEPALIVE
