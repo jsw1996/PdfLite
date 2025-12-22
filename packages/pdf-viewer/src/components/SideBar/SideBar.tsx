@@ -9,15 +9,42 @@ import {
 import { usePdfController } from '@/providers/PdfControllerContextProvider';
 import { PagePreview } from './PagePreview';
 import { useLazyPageLoader } from '../../hooks/useLazyPageLoader';
+import { useEffect, useRef } from 'react';
 
 export function AppSidebar() {
-  const { controller } = usePdfController();
+  const { controller, currentPage } = usePdfController();
   const pageCount = controller.getPageCount();
-  const { loadedPages, sentinelRef, hasMorePages } = useLazyPageLoader({
+  const { loadedPages, sentinelRef, hasMorePages, ensurePageLoaded } = useLazyPageLoader({
     pageCount,
     initialPageLoad: 10,
     pageLoadIncrement: 10,
   });
+
+  const pendingScrollPageRef = useRef<number | null>(null);
+
+  // If user jumps to a page that isn't rendered in the preview list yet, load up to that page.
+  useEffect(() => {
+    if (pageCount <= 0) return;
+    if (currentPage < 0 || currentPage >= pageCount) return;
+    if (currentPage >= loadedPages) {
+      pendingScrollPageRef.current = currentPage;
+      ensurePageLoaded(currentPage);
+    }
+  }, [currentPage, ensurePageLoaded, loadedPages, pageCount]);
+
+  // Once loaded, scroll the preview into view (so preview follows PageControlBar jumps).
+  useEffect(() => {
+    const pending = pendingScrollPageRef.current;
+    if (pending == null) return;
+    if (pending >= loadedPages) return; // not rendered yet
+    pendingScrollPageRef.current = null;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const previewCanvas = document.querySelector(`[data-preview-index="${pending}"]`);
+        previewCanvas?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      });
+    });
+  }, [loadedPages]);
 
   return (
     <Sidebar>

@@ -28,7 +28,7 @@ export const Viewer: React.FC<IViewerProps> = ({
   initialPageLoad = 10,
   pageLoadIncrement = 10,
 }) => {
-  const { loadedPages, sentinelRef, hasMorePages } = useLazyPageLoader({
+  const { loadedPages, sentinelRef, hasMorePages, ensurePageLoaded } = useLazyPageLoader({
     pageCount,
     initialPageLoad,
     pageLoadIncrement,
@@ -100,7 +100,18 @@ export const Viewer: React.FC<IViewerProps> = ({
       {/* Floating page control bar - fixed to viewport bottom, centered on container */}
       <div className="fixed bottom-6 z-50 pointer-events-none flex justify-center w-[stretch]">
         <div className="pointer-events-auto margin">
-          <PageControlBar />
+          <PageControlBar
+            pageCount={pageCount}
+            onJumpToPage={(target) => {
+              ensurePageLoaded(target);
+              // Wait for React to render the target page before scrolling to it
+              requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                  goToPage(target, { scrollIntoView: true, scrollIntoPreview: true });
+                });
+              });
+            }}
+          />
         </div>
       </div>
     </div>

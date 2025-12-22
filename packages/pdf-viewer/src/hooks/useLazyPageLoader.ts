@@ -11,6 +11,8 @@ export interface IUseLazyPageLoaderResult {
   loadedPages: number;
   sentinelRef: React.RefObject<HTMLDivElement | null>;
   hasMorePages: boolean;
+  /** Ensure a target page index is rendered (useful for jumping). */
+  ensurePageLoaded: (pageIndex: number) => void;
 }
 
 /**
@@ -29,6 +31,14 @@ export const useLazyPageLoader = ({
   const loadMorePages = useCallback(() => {
     setLoadedPages((prev) => Math.min(prev + pageLoadIncrement, pageCount));
   }, [pageCount, pageLoadIncrement]);
+
+  const ensurePageLoaded = useCallback(
+    (pageIndex: number) => {
+      const next = Math.min(pageCount, Math.max(0, pageIndex + 1));
+      setLoadedPages((prev) => Math.max(prev, next));
+    },
+    [pageCount],
+  );
 
   useEffect(() => {
     const sentinel = sentinelRef.current;
@@ -55,5 +65,6 @@ export const useLazyPageLoader = ({
     loadedPages,
     sentinelRef,
     hasMorePages: loadedPages < pageCount,
+    ensurePageLoaded,
   };
 };
