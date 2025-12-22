@@ -543,6 +543,16 @@ export interface PDFiumModule {
   // ============================================================================
   /** Get link from annotation */
   _FPDFAnnot_GetLink_W(annot: number): number;
+  /** Get action from link */
+  _FPDFLink_GetAction_W(link: number): number;
+  /** Get destination from link (internal jump) */
+  _FPDFLink_GetDest_W(doc: number, link: number): number;
+  /** Get action type (URI / GoTo / etc) */
+  _FPDFAction_GetType_W(action: number): number;
+  /** Read URI for a URI action (returns required buffer size incl. NUL) */
+  _FPDFAction_GetURIPath_W(doc: number, action: number, buffer: number, buflen: number): number;
+  /** Get destination from action */
+  _FPDFAction_GetDest_W(doc: number, action: number): number;
   /** Set URI for link annotation */
   _FPDFAnnot_SetURI_W(annot: number, uriPtr: number): number;
 

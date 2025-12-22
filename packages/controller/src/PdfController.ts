@@ -19,6 +19,10 @@ export interface INativeAnnotation {
   points: IPoint[];
   color: { r: number; g: number; b: number; a: number };
   strokeWidth: number;
+  /** For LINK annotations: external URI (if present) */
+  uri?: string;
+  /** For LINK annotations: internal destination page index (0-based) */
+  destPageIndex?: number;
 }
 
 export interface IRenderOptions {
@@ -72,6 +76,14 @@ export interface IPdfController {
   getPageDimension(pageIndex: number): IPageDimension;
   listNativeAnnotations(pageIndex: number, opts: { scale: number }): INativeAnnotation[];
   addInkHighlight(pageIndex: number, opts: { scale: number; canvasPoints: IPoint[] }): void;
+  addLinkAnnotation(
+    pageIndex: number,
+    opts: {
+      scale: number;
+      canvasRect: { left: number; top: number; width: number; height: number };
+      uri: string;
+    },
+  ): void;
   exportPdfBytes(): Uint8Array;
   getPageCount(): number;
   getPageTextContent(pageIndex: number): IPageTextContent | null;
@@ -87,6 +99,18 @@ export class PdfController implements IPdfController {
   private initPromise: Promise<void> | null = null;
   private loadSeq = 0;
   private fontMap = new Map<string, string>();
+  private static utf8Decoder = new TextDecoder('utf-8');
+
+  private readUtf8Z(ptr: number, maxBytes: number): string {
+    const { pdfium } = this.requireDoc();
+    if (!ptr || maxBytes <= 0) return '';
+    const heap = pdfium.HEAPU8;
+    const end = Math.min(heap.length, ptr + maxBytes);
+    let nul = ptr;
+    while (nul < end && heap[nul] !== 0) nul++;
+    if (nul <= ptr) return '';
+    return PdfController.utf8Decoder.decode(heap.subarray(ptr, nul));
+  }
 
   public setFontMap(map: Record<string, string>): void {
     Object.entries(map).forEach(([family, url]) => {
@@ -581,6 +605,7 @@ export class PdfController implements IPdfController {
 
   public listNativeAnnotations(pageIndex: number, opts: { scale: number }): INativeAnnotation[] {
     const { scale } = opts;
+    const { docPtr } = this.requireDoc();
     return this.withPage(pageIndex, (pdfium, pagePtr) => {
       const pageW = pdfium._PDFium_GetPageWidth(pagePtr);
       const pageH = pdfium._PDFium_GetPageHeight(pagePtr);
@@ -678,6 +703,74 @@ export class PdfController implements IPdfController {
                   strokeWidth: 0,
                 });
               }
+              continue;
+            }
+
+            if (subtype === FPDF_ANNOTATION_SUBTYPE.LINK) {
+              // Link annotations are usually represented by a rect; action/URI is on the link handle.
+              let uri: string | undefined;
+              let destPageIndex: number | undefined;
+
+              const link = pdfium._FPDFAnnot_GetLink_W(annot);
+              if (link) {
+                const action = pdfium._FPDFLink_GetAction_W(link);
+                if (action) {
+                  // Try URI first (returns required size including NUL)
+                  const needed = pdfium._FPDFAction_GetURIPath_W(docPtr, action, 0, 0);
+                  if (needed > 1) {
+                    const bufPtr = pdfium._malloc(needed);
+                    try {
+                      pdfium._FPDFAction_GetURIPath_W(docPtr, action, bufPtr, needed);
+                      const s = this.readUtf8Z(bufPtr, needed);
+                      if (s) uri = s;
+                    } finally {
+                      pdfium._free(bufPtr);
+                    }
+                  }
+
+                  // Fallback to destination (internal jump)
+                  if (!uri) {
+                    const destFromAction = pdfium._FPDFAction_GetDest_W(docPtr, action);
+                    if (destFromAction) {
+                      const idx = pdfium._PDFium_GetDestPageIndex(docPtr, destFromAction);
+                      if (idx >= 0) destPageIndex = idx;
+                    }
+                  }
+                }
+
+                // Some PDFs use link dest directly
+                if (!uri && destPageIndex == null) {
+                  const dest = pdfium._FPDFLink_GetDest_W(docPtr, link);
+                  if (dest) {
+                    const idx = pdfium._PDFium_GetDestPageIndex(docPtr, dest);
+                    if (idx >= 0) destPageIndex = idx;
+                  }
+                }
+              }
+
+              const gotRect = pdfium._FPDFAnnot_GetRect_W(annot, rectPtr);
+              if (!gotRect) continue;
+              const f = pdfium.HEAPF32.subarray(rectPtr / 4, rectPtr / 4 + 4);
+              const left = f[0];
+              const bottom = f[1];
+              const right = f[2];
+              const top = f[3];
+              const poly: IPoint[] = [
+                this.pageToCanvasPoint(pageW, pageH, scale, left, top),
+                this.pageToCanvasPoint(pageW, pageH, scale, right, top),
+                this.pageToCanvasPoint(pageW, pageH, scale, right, bottom),
+                this.pageToCanvasPoint(pageW, pageH, scale, left, bottom),
+              ];
+              out.push({
+                id: `native-${pageIndex}-link-${i}`,
+                subtype,
+                shape: 'polygon',
+                points: poly,
+                color,
+                strokeWidth: 0,
+                uri,
+                destPageIndex,
+              });
               continue;
             }
 
@@ -915,6 +1008,61 @@ export class PdfController implements IPdfController {
         // NOTE: 当前 wasm wrapper 未暴露 FPDFPage_GenerateContent，因此这里无法强制生成内容流；
         // 对于很多阅读/渲染路径，annotation 仍能生效，但“保存导出”必须补齐 Save API（见 exportPdfBytes）。
       } finally {
+        pdfium._FPDFPage_CloseAnnot_W(annot);
+      }
+    });
+  }
+
+  public addLinkAnnotation(
+    pageIndex: number,
+    opts: {
+      scale: number;
+      canvasRect: { left: number; top: number; width: number; height: number };
+      uri: string;
+    },
+  ): void {
+    const { scale, canvasRect, uri } = opts;
+    if (!uri) return;
+    if (canvasRect.width <= 0 || canvasRect.height <= 0) return;
+
+    this.withPage(pageIndex, (pdfium, pagePtr) => {
+      const pageW = pdfium._PDFium_GetPageWidth(pagePtr);
+      const pageH = pdfium._PDFium_GetPageHeight(pagePtr);
+
+      const annot = pdfium._FPDFPage_CreateAnnot_W(pagePtr, FPDF_ANNOTATION_SUBTYPE.LINK);
+      if (!annot) throw new Error('Failed to create LINK annotation');
+
+      const rectPtr = pdfium._malloc(4 * 4); // FS_RECTF: left,bottom,right,top float
+      const uriPtrMax = Math.max(8, uri.length * 4 + 1);
+      const uriPtr = pdfium._malloc(uriPtrMax);
+      try {
+        const tl = this.canvasToPagePoint(pageW, pageH, scale, canvasRect.left, canvasRect.top);
+        const br = this.canvasToPagePoint(
+          pageW,
+          pageH,
+          scale,
+          canvasRect.left + canvasRect.width,
+          canvasRect.top + canvasRect.height,
+        );
+
+        const left = Math.min(tl.x, br.x);
+        const right = Math.max(tl.x, br.x);
+        const bottom = Math.min(tl.y, br.y);
+        const top = Math.max(tl.y, br.y);
+
+        pdfium.HEAPF32[rectPtr / 4 + 0] = left;
+        pdfium.HEAPF32[rectPtr / 4 + 1] = bottom;
+        pdfium.HEAPF32[rectPtr / 4 + 2] = right;
+        pdfium.HEAPF32[rectPtr / 4 + 3] = top;
+        const okRect = pdfium._FPDFAnnot_SetRect_W(annot, rectPtr);
+        if (!okRect) throw new Error('Failed to set LINK rect');
+
+        pdfium.stringToUTF8(uri, uriPtr, uriPtrMax);
+        const okUri = pdfium._FPDFAnnot_SetURI_W(annot, uriPtr);
+        if (!okUri) throw new Error('Failed to set LINK URI');
+      } finally {
+        pdfium._free(rectPtr);
+        pdfium._free(uriPtr);
         pdfium._FPDFPage_CloseAnnot_W(annot);
       }
     });
