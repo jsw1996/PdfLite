@@ -6,14 +6,16 @@ import { useAnnotation } from '../../providers/AnnotationContextProvider';
 import { AnnotationType } from '../../types/annotation';
 import { DrawButtonId } from '../ToolButtons/DrawButton';
 import { HighlightButtonId } from '../ToolButtons/HighlightButton';
+import { cn } from '@pdfviewer/ui/lib/utils';
 
 export interface IToobarProps {
   // Define any props needed for the Toolbar component
   buttons: IToolButton[];
+  boardered?: boolean;
 }
 
 export const ToolBar: React.FC<IToobarProps> = (props: IToobarProps) => {
-  const { buttons } = props;
+  const { buttons, boardered } = props;
 
   const { selectedTool, setSelectedTool } = useAnnotation();
   const [activeToolId, setActiveToolId] = useState<string | null>(null);
@@ -37,17 +39,22 @@ export const ToolBar: React.FC<IToobarProps> = (props: IToobarProps) => {
     [selectedTool, setSelectedTool],
   );
 
-  const buttonsByGroup: IToolButton[][] = buttons.reduce(
-    (groups: IToolButton[][], button) => {
-      const groupIndex = button.groupIndex;
-      groups[groupIndex].push(button);
-      return groups;
-    },
-    [[], [], []],
+  const classNames = cn(
+    'flex flex-row p-[5px] bg-[#f8fafc] border border-gray-300 rounded-[14px] space-x-1',
+    boardered ? '' : 'border-0 bg-transparent',
   );
 
+  const buttonsByGroup: IToolButton[][] = buttons.reduce((groups: IToolButton[][], button) => {
+    const groupIndex = button.groupIndex;
+    if (!groups[groupIndex]) {
+      groups[groupIndex] = [];
+    }
+    groups[groupIndex].push(button);
+    return groups;
+  }, []);
+
   return (
-    <div className="flex flex-row p-[5px] bg-[#f8fafc] border border-gray-300 rounded-[14px] space-x-1">
+    <div className={classNames}>
       {buttonsByGroup.map((groupButtons, index) => (
         <div key={index} className="flex flex-row items-center">
           <ToolGroup

@@ -1,7 +1,9 @@
 import React, { useEffect } from 'react';
+import throttle from 'lodash.throttle';
 import { ViewerPage } from './ViewerPage';
 import { useLazyPageLoader } from '../../hooks/useLazyPageLoader';
 import { useCurrentPageTracker } from '../../hooks/useCurrentPageTracker';
+import { usePreserveScrollOnZoom } from '../../hooks/usePreserveScrollOnZoom';
 import { usePdfController } from '@/providers/PdfControllerContextProvider';
 import { PageControlBar } from '../PageControlBar/PageControlBar';
 import { usePdfState } from '@/providers/PdfStateContextProvider';
@@ -41,38 +43,60 @@ export const Viewer: React.FC<IViewerProps> = ({
 
   const { scale, setScale } = usePdfState();
 
+  // Preserve scroll position when zooming
+  usePreserveScrollOnZoom(scale);
+
+  // Keep scale in a ref so wheel handler doesn't rebind every render
+  const scaleRef = React.useRef(scale);
+  useEffect(() => {
+    scaleRef.current = scale;
+  }, [scale]);
+
+  const minScale = 0.25;
+  const maxScale = 2.5;
+  const wheelStep = 0.25;
+  const wheelThrottleMs = 60;
+
   const divRef = React.useRef<HTMLDivElement | null>(null);
 
   // Handle Ctrl + Mouse Wheel for zooming
   useEffect(() => {
+    const applyWheelZoom = throttle(
+      (delta: number) => {
+        const next = Math.min(maxScale, Math.max(minScale, scaleRef.current + delta));
+        if (next !== scaleRef.current) {
+          setScale(next);
+        }
+      },
+      wheelThrottleMs,
+      { leading: true, trailing: true },
+    );
+
     const onWheel = (e: WheelEvent) => {
-      if (e.ctrlKey) {
-        e.preventDefault();
-        const newScale = e.deltaY < 0 ? scale * 1.1 : scale / 1.1;
-        setScale(newScale);
-      }
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      applyWheelZoom(e.deltaY < 0 ? wheelStep : -wheelStep);
     };
-    divRef.current?.addEventListener('wheel', onWheel, { passive: false });
+    const el = divRef.current;
+    el?.addEventListener('wheel', onWheel, { passive: false });
     return () => {
-      divRef.current?.removeEventListener('wheel', onWheel);
+      el?.removeEventListener('wheel', onWheel);
+      applyWheelZoom.cancel();
     };
-  }, [scale, setScale]);
+  }, [setScale]);
 
   return (
-    <div className="h-full relative">
-      {/* Scrollable content */}
-      <div className="h-full" ref={divRef}>
-        {/* Render only the loaded pages */}
-        {Array.from({ length: loadedPages }, (_, index) => (
-          <ViewerPage key={index} pageIndex={index} registerPageElement={registerPageElement} />
-        ))}
-        {/* Sentinel element - when this becomes visible, load more pages */}
-        {hasMorePages && (
-          <div ref={sentinelRef} className="h-10 flex items-center justify-center text-gray-500">
-            Loading more pages...
-          </div>
-        )}
-      </div>
+    <div className="h-full relative" ref={divRef}>
+      {/* Render only the loaded pages */}
+      {Array.from({ length: loadedPages }, (_, index) => (
+        <ViewerPage key={index} pageIndex={index} registerPageElement={registerPageElement} />
+      ))}
+      {/* Sentinel element - when this becomes visible, load more pages */}
+      {hasMorePages && (
+        <div ref={sentinelRef} className="h-10 flex items-center justify-center text-gray-500">
+          Loading more pages...
+        </div>
+      )}
       {/* Floating page control bar - fixed to viewport bottom, centered on container */}
       <div className="fixed bottom-6 z-50 pointer-events-none flex justify-center w-[stretch]">
         <div className="pointer-events-auto margin">

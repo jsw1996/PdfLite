@@ -6,6 +6,8 @@ import { HighlightButton } from '../components/ToolButtons/HighlightButton';
 import { DrawButton } from '../components/ToolButtons/DrawButton';
 import { AddTextButton } from '../components/ToolButtons/AddTextButton';
 import { SidebarTriggerButton } from '@/components/ToolButtons/SidebarTriggerButton';
+import { PrintButton } from '@/components/ToolButtons/PrintButton';
+import { DownloadButton } from '@/components/ToolButtons/DownloadButton';
 
 export const getButtons: () => IToolButton[] = () => {
   return [
@@ -19,4 +21,8 @@ export const getButtons: () => IToolButton[] = () => {
     DrawButton(),
     AddTextButton(),
   ];
+};
+
+export const getRightButtons: () => IToolButton[] = () => {
+  return [DownloadButton(), PrintButton()];
 };
