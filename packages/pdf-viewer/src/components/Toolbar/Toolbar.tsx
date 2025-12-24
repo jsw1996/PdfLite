@@ -1,7 +1,7 @@
 import type { IToolButton } from '../ToolButtons/ToolButton.type';
 import { ToolGroup } from './ToolGroup';
 import { Separator } from '@pdfviewer/ui/components/separator';
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useAnnotation } from '../../providers/AnnotationContextProvider';
 import { AnnotationType } from '../../types/annotation';
 import { DrawButtonId } from '../ToolButtons/DrawButton';
@@ -18,11 +18,19 @@ export const ToolBar: React.FC<IToobarProps> = (props: IToobarProps) => {
   const { buttons, boardered } = props;
 
   const { selectedTool, setSelectedTool } = useAnnotation();
+  // Active tool for non-annotation tools. Annotation tools are derived from selectedTool.
   const [activeToolId, setActiveToolId] = useState<string | null>(null);
+
+  const derivedAnnotActiveToolId = useMemo(() => {
+    if (selectedTool === AnnotationType.DRAW) return DrawButtonId;
+    if (selectedTool === AnnotationType.HIGHLIGHT) return HighlightButtonId;
+    return null;
+  }, [selectedTool]);
+
+  const effectiveActiveToolId = derivedAnnotActiveToolId ?? activeToolId;
 
   const handleActivate = useCallback(
     (toolId: string | null) => {
-      setActiveToolId(toolId);
       if (toolId === DrawButtonId) {
         setSelectedTool(selectedTool === AnnotationType.DRAW ? null : AnnotationType.DRAW);
         return;
@@ -33,6 +41,7 @@ export const ToolBar: React.FC<IToobarProps> = (props: IToobarProps) => {
         );
         return;
       }
+      setActiveToolId(toolId);
       // 其它工具不进入 annotation 模式
       setSelectedTool(null);
     },
@@ -59,11 +68,11 @@ export const ToolBar: React.FC<IToobarProps> = (props: IToobarProps) => {
         <div key={index} className="flex flex-row items-center">
           <ToolGroup
             buttons={groupButtons}
-            activeToolId={activeToolId}
+            activeToolId={effectiveActiveToolId}
             onActivate={handleActivate}
           />
           {index < buttonsByGroup.length - 1 && (
-            <Separator orientation="vertical" className="mx-2 !h-6" />
+            <Separator orientation="vertical" className="mx-2 h-6!" />
           )}
         </div>
       ))}

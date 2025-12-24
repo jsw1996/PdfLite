@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { CanvasLayer } from '../CanvasLayer/CanvasLayer';
 import { AnnotationLayer } from '../AnnotationLayer/AnnotationLayer';
 import { usePdfController } from '../../providers/PdfControllerContextProvider';
@@ -21,17 +21,82 @@ export const ViewerPage: React.FC<IViewerPageProps> = ({ pageIndex, registerPage
   const [containerEl, setContainerEl] = useState<HTMLDivElement | null>(null);
   const { controller, goToPage } = usePdfController();
   const [linkItems, setLinkItems] = useState<ILinkItem[]>([]);
-  const {
-    setNativeAnnotationsForPage,
-  }: {
-    setNativeAnnotationsForPage: (pageIndex: number, annotations: IAnnotation[]) => void;
-  } = useAnnotation();
+  const { selectedTool, setSelectedTool, addAnnotation, setNativeAnnotationsForPage } =
+    useAnnotation();
+  const prevToolRef = useRef<AnnotationType | null>(null);
 
   const onCanvasReady = useCallback((c: HTMLCanvasElement) => {
     setPdfCanvas(c);
   }, []);
 
   const { scale } = usePdfState();
+
+  const applyCurrentSelectionAsHighlight = useCallback((): boolean => {
+    if (!pdfCanvas) return false;
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return false;
+
+    const range = sel.getRangeAt(0);
+
+    const findPageIndex = (n: Node | null): number | null => {
+      let el: Element | null =
+        n && n.nodeType === Node.ELEMENT_NODE ? (n as Element) : (n?.parentElement ?? null);
+      while (el) {
+        const v = el.getAttribute('data-page-index');
+        if (v != null) {
+          const idx = Number(v);
+          return Number.isFinite(idx) ? idx : null;
+        }
+        el = el.parentElement;
+      }
+      return null;
+    };
+
+    const a = findPageIndex(sel.anchorNode);
+    const f = findPageIndex(sel.focusNode);
+    if (a !== pageIndex || f !== pageIndex) return false;
+
+    const pdfRect = pdfCanvas.getBoundingClientRect();
+    const clientRects = Array.from(range.getClientRects());
+    const now = Date.now();
+
+    let added = 0;
+    for (const r of clientRects) {
+      const left = Math.max(r.left, pdfRect.left);
+      const right = Math.min(r.right, pdfRect.right);
+      const top = Math.max(r.top, pdfRect.top);
+      const bottom = Math.min(r.bottom, pdfRect.bottom);
+      const w = right - left;
+      const h = bottom - top;
+      if (w <= 0 || h <= 0) continue;
+
+      const x = left - pdfRect.left;
+      const y = top - pdfRect.top;
+      addAnnotation({
+        id: `selhl-${now}-${pageIndex}-${added}`,
+        type: AnnotationType.HIGHLIGHT,
+        shape: 'polygon',
+        source: 'overlay',
+        pageIndex,
+        points: [
+          { x, y },
+          { x: x + w, y },
+          { x: x + w, y: y + h },
+          { x, y: y + h },
+        ],
+        color: DEFAULT_HIGHLIGHT_COLOR,
+        strokeWidth: 0,
+        createdAt: now,
+      });
+      added++;
+    }
+
+    if (added > 0) {
+      sel.removeAllRanges();
+      return true;
+    }
+    return false;
+  }, [addAnnotation, pageIndex, pdfCanvas]);
 
   const refreshNativeAnnots = useCallback(() => {
     const native = controller.listNativeAnnotations(pageIndex, { scale });
@@ -74,6 +139,19 @@ export const ViewerPage: React.FC<IViewerPageProps> = ({ pageIndex, registerPage
     refreshNativeAnnots();
   }, [pdfCanvas, refreshNativeAnnots]);
 
+  // Case 2:
+  // Highlight tool was inactive, user selected text, then clicked Highlight button.
+  // We treat that click as "apply highlight to current selection", not "enter freehand mode".
+  useEffect(() => {
+    const prev = prevToolRef.current;
+    prevToolRef.current = selectedTool;
+    if (selectedTool !== AnnotationType.HIGHLIGHT) return;
+    const applied = applyCurrentSelectionAsHighlight();
+    if (applied && prev == null) {
+      setSelectedTool(null);
+    }
+  }, [applyCurrentSelectionAsHighlight, selectedTool, setSelectedTool]);
+
   const onCommitHighlight = useCallback(
     ({ canvasPoints }: { pageIndex: number; canvasPoints: { x: number; y: number }[] }) => {
       controller.addInkHighlight(pageIndex, { scale, canvasPoints });
@@ -89,7 +167,19 @@ export const ViewerPage: React.FC<IViewerPageProps> = ({ pageIndex, registerPage
         registerPageElement(pageIndex, el);
       }}
       data-slot={`viewer-page-container-${pageIndex}`}
+      data-page-index={pageIndex}
       className="relative z-0 w-fit mx-auto mb-4"
+      onMouseUpCapture={() => {
+        // Case 1: Highlight mode active -> selecting text applies highlight on mouse up.
+        if (selectedTool === AnnotationType.HIGHLIGHT) {
+          applyCurrentSelectionAsHighlight();
+        }
+      }}
+      onKeyUpCapture={() => {
+        if (selectedTool === AnnotationType.HIGHLIGHT) {
+          applyCurrentSelectionAsHighlight();
+        }
+      }}
     >
       <CanvasLayer
         data-slot={`viewer-canvas-${pageIndex}`}

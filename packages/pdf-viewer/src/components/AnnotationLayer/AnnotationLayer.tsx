@@ -84,7 +84,9 @@ export const AnnotationLayer: React.FC<IAnnotationLayerProps> = ({
     };
   }, [pdfCanvas, updateMetrics]);
 
-  const canInteract = selectedTool != null;
+  // Highlight is now text-selection based (handled by TextLayer/ViewerPage),
+  // so AnnotationLayer only supports freehand interaction for DRAW.
+  const canInteract = selectedTool === AnnotationType.DRAW;
 
   const style = useMemo<React.CSSProperties>(() => {
     if (!metrics) return { display: 'none' };
@@ -104,17 +106,17 @@ export const AnnotationLayer: React.FC<IAnnotationLayerProps> = ({
       ...style,
       // 关键：让高亮与底下 PDF 画面混合（不需要透明度也不会盖住文字）
       mixBlendMode: 'multiply',
-      pointerEvents: canInteract && selectedTool === AnnotationType.HIGHLIGHT ? 'auto' : 'none',
+      pointerEvents: 'none',
     };
-  }, [canInteract, selectedTool, style]);
+  }, [style]);
 
   const drawCanvasStyle = useMemo<React.CSSProperties>(() => {
     return {
       ...style,
       mixBlendMode: 'normal',
-      pointerEvents: canInteract && selectedTool === AnnotationType.DRAW ? 'auto' : 'none',
+      pointerEvents: canInteract ? 'auto' : 'none',
     };
-  }, [canInteract, selectedTool, style]);
+  }, [canInteract, style]);
 
   const getPoint = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>): IPoint | null => {
