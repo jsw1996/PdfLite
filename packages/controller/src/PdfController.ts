@@ -139,14 +139,41 @@ export class PdfController implements IPdfController {
   }
 
   private pageToCanvasPoint(
-    _pageW: number,
+    pagePtr: number,
+    pageW: number,
     pageH: number,
     scale: number,
     x: number,
     y: number,
   ): IPoint {
-    // PDF 坐标系通常原点在左下；bitmap/Canvas 以左上为原点
-    return { x: x * scale, y: (pageH - y) * scale };
+    const { pdfium } = this.requireDoc();
+    // Use PDFium's PageToDevice API for accurate coordinate conversion
+    const deviceWidth = Math.round(pageW * scale);
+    const deviceHeight = Math.round(pageH * scale);
+
+    const deviceXPtr = pdfium._malloc(4);
+    const deviceYPtr = pdfium._malloc(4);
+    try {
+      pdfium._PDFium_PageToDevice(
+        pagePtr,
+        0,
+        0,
+        deviceWidth,
+        deviceHeight,
+        0, // rotate = 0
+        x,
+        y,
+        deviceXPtr,
+        deviceYPtr,
+      );
+      return {
+        x: pdfium.getValue(deviceXPtr, 'i32'),
+        y: pdfium.getValue(deviceYPtr, 'i32'),
+      };
+    } finally {
+      pdfium._free(deviceXPtr);
+      pdfium._free(deviceYPtr);
+    }
   }
 
   private canvasToPagePoint(
@@ -660,7 +687,7 @@ export class PdfController implements IPdfController {
                   for (let k = 0; k < n; k++) {
                     const x = pdfium.HEAPF32[bufPtr / 4 + k * 2 + 0];
                     const y = pdfium.HEAPF32[bufPtr / 4 + k * 2 + 1];
-                    pts.push(this.pageToCanvasPoint(pageW, pageH, scale, x, y));
+                    pts.push(this.pageToCanvasPoint(pagePtr, pageW, pageH, scale, x, y));
                   }
                   if (pts.length) {
                     out.push({
@@ -689,10 +716,10 @@ export class PdfController implements IPdfController {
                 const floats = pdfium.HEAPF32.subarray(quadPtr / 4, quadPtr / 4 + 8);
 
                 const quadPoints: IPoint[] = [
-                  this.pageToCanvasPoint(pageW, pageH, scale, floats[0], floats[1]), // TL
-                  this.pageToCanvasPoint(pageW, pageH, scale, floats[2], floats[3]), // TR
-                  this.pageToCanvasPoint(pageW, pageH, scale, floats[6], floats[7]), // BR
-                  this.pageToCanvasPoint(pageW, pageH, scale, floats[4], floats[5]), // BL
+                  this.pageToCanvasPoint(pagePtr, pageW, pageH, scale, floats[0], floats[1]), // TL
+                  this.pageToCanvasPoint(pagePtr, pageW, pageH, scale, floats[2], floats[3]), // TR
+                  this.pageToCanvasPoint(pagePtr, pageW, pageH, scale, floats[6], floats[7]), // BR
+                  this.pageToCanvasPoint(pagePtr, pageW, pageH, scale, floats[4], floats[5]), // BL
                 ];
                 out.push({
                   id: `native-${pageIndex}-hl-${i}-${q}`,
@@ -756,10 +783,10 @@ export class PdfController implements IPdfController {
               const right = f[2];
               const top = f[3];
               const poly: IPoint[] = [
-                this.pageToCanvasPoint(pageW, pageH, scale, left, top),
-                this.pageToCanvasPoint(pageW, pageH, scale, right, top),
-                this.pageToCanvasPoint(pageW, pageH, scale, right, bottom),
-                this.pageToCanvasPoint(pageW, pageH, scale, left, bottom),
+                this.pageToCanvasPoint(pagePtr, pageW, pageH, scale, left, top),
+                this.pageToCanvasPoint(pagePtr, pageW, pageH, scale, right, top),
+                this.pageToCanvasPoint(pagePtr, pageW, pageH, scale, right, bottom),
+                this.pageToCanvasPoint(pagePtr, pageW, pageH, scale, left, bottom),
               ];
               out.push({
                 id: `native-${pageIndex}-link-${i}`,
@@ -783,10 +810,10 @@ export class PdfController implements IPdfController {
               const right = f[2];
               const top = f[3];
               const poly: IPoint[] = [
-                this.pageToCanvasPoint(pageW, pageH, scale, left, top),
-                this.pageToCanvasPoint(pageW, pageH, scale, right, top),
-                this.pageToCanvasPoint(pageW, pageH, scale, right, bottom),
-                this.pageToCanvasPoint(pageW, pageH, scale, left, bottom),
+                this.pageToCanvasPoint(pagePtr, pageW, pageH, scale, left, top),
+                this.pageToCanvasPoint(pagePtr, pageW, pageH, scale, right, top),
+                this.pageToCanvasPoint(pagePtr, pageW, pageH, scale, right, bottom),
+                this.pageToCanvasPoint(pagePtr, pageW, pageH, scale, left, bottom),
               ];
               out.push({
                 id: `native-${pageIndex}-rect-${i}`,
