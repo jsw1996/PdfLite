@@ -7,6 +7,7 @@ import { usePreserveScrollOnZoom } from '../../hooks/usePreserveScrollOnZoom';
 import { usePdfController } from '@/providers/PdfControllerContextProvider';
 import { PageControlBar } from '../PageControlBar/PageControlBar';
 import { usePdfState } from '@/providers/PdfStateContextProvider';
+import { useUndo } from '../../hooks/useUndo';
 export interface IViewerProps {
   /** Total number of pages in the PDF document */
   pageCount: number;
@@ -40,7 +41,7 @@ export const Viewer: React.FC<IViewerProps> = ({
     rootMargin: '0px',
     threshold: 0.7,
   });
-
+  useUndo();
   const { scale, setScale } = usePdfState();
 
   // Preserve scroll position when zooming

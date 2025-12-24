@@ -269,7 +269,7 @@ export const AnnotationLayer: React.FC<IAnnotationLayerProps> = ({
       strokeWidth,
       createdAt: Date.now(),
     };
-    addAnnotation(pageIndex, ann);
+    addAnnotation(ann);
     if (selectedTool === AnnotationType.HIGHLIGHT) {
       onCommitHighlight?.({ pageIndex, canvasPoints: currentPath });
     }

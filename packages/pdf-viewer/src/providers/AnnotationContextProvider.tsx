@@ -4,10 +4,11 @@ import type { IAnnotation, AnnotationType } from '../types/annotation';
 export interface IAnnotationContextValue {
   selectedTool: AnnotationType | null;
   setSelectedTool: (tool: AnnotationType | null) => void;
-  addAnnotation: (pageIndex: number, annotation: IAnnotation) => void;
+  addAnnotation: (annotation: IAnnotation) => void;
+  annotationStack: IAnnotation[];
+  popAnnotation: () => IAnnotation | undefined;
   getAnnotationsForPage: (pageIndex: number) => IAnnotation[];
   setNativeAnnotationsForPage: (pageIndex: number, annotations: IAnnotation[]) => void;
-  clearAnnotations: (pageIndex?: number) => void;
 }
 
 const AnnotationContext = createContext<IAnnotationContextValue | null>(null);
@@ -20,46 +21,39 @@ export function useAnnotation(): IAnnotationContextValue {
 
 export function AnnotationContextProvider({ children }: { children: React.ReactNode }) {
   const [selectedTool, setSelectedTool] = useState<AnnotationType | null>(null);
-  const [byPage, setByPage] = useState<Map<number, IAnnotation[]>>(new Map());
+  const [annotationStack, setAnnotationStack] = useState<IAnnotation[]>([]);
 
-  const addAnnotation = useCallback((pageIndex: number, annotation: IAnnotation) => {
-    setByPage((prev) => {
-      const next = new Map(prev);
-      const list = next.get(pageIndex) ?? [];
-      next.set(pageIndex, [...list, annotation]);
-      return next;
+  const popAnnotation = useCallback(() => {
+    let popped: IAnnotation | undefined;
+    setAnnotationStack((prev) => {
+      if (prev.length === 0) return prev;
+      popped = prev[prev.length - 1];
+      return prev.slice(0, -1);
     });
+    return popped;
+  }, []);
+
+  const addAnnotation = useCallback((annotation: IAnnotation) => {
+    setAnnotationStack((prev) => [...prev, annotation]);
   }, []);
 
   const getAnnotationsForPage = useCallback(
-    (pageIndex: number) => byPage.get(pageIndex) ?? [],
-    [byPage],
+    (pageIndex: number) => annotationStack.filter((a) => a.pageIndex === pageIndex) ?? [],
+    [annotationStack],
   );
 
   const setNativeAnnotationsForPage = useCallback(
     (pageIndex: number, annotations: IAnnotation[]) => {
-      setByPage((prev) => {
-        const next = new Map(prev);
-        const existing = next.get(pageIndex) ?? [];
-        const overlays = existing.filter((a) => a.source !== 'native');
-        next.set(pageIndex, [...overlays, ...annotations]);
-        return next;
+      setAnnotationStack((prev) => {
+        if (prev.some((a) => a.source === 'native' && a.pageIndex === pageIndex)) {
+          return prev;
+        } else {
+          return [...annotations, ...prev];
+        }
       });
     },
     [],
   );
-
-  const clearAnnotations = useCallback((pageIndex?: number) => {
-    if (typeof pageIndex === 'number') {
-      setByPage((prev) => {
-        const next = new Map(prev);
-        next.delete(pageIndex);
-        return next;
-      });
-      return;
-    }
-    setByPage(new Map());
-  }, []);
 
   const value = useMemo<IAnnotationContextValue>(
     () => ({
@@ -68,14 +62,16 @@ export function AnnotationContextProvider({ children }: { children: React.ReactN
       addAnnotation,
       getAnnotationsForPage,
       setNativeAnnotationsForPage,
-      clearAnnotations,
+      annotationStack,
+      popAnnotation,
     }),
     [
       addAnnotation,
-      clearAnnotations,
       getAnnotationsForPage,
       selectedTool,
       setNativeAnnotationsForPage,
+      annotationStack,
+      popAnnotation,
     ],
   );
 
