@@ -76,6 +76,13 @@ export interface IPdfController {
   getPageDimension(pageIndex: number): IPageDimension;
   listNativeAnnotations(pageIndex: number, opts: { scale: number }): INativeAnnotation[];
   addInkHighlight(pageIndex: number, opts: { scale: number; canvasPoints: IPoint[] }): void;
+  addHighlightAnnotation(
+    pageIndex: number,
+    opts: {
+      scale: number;
+      canvasRect: { left: number; top: number; width: number; height: number };
+    },
+  ): void;
   addLinkAnnotation(
     pageIndex: number,
     opts: {
@@ -84,7 +91,8 @@ export interface IPdfController {
       uri: string;
     },
   ): void;
-  exportPdfBytes(): Uint8Array;
+  exportPdfBytes(options?: { flags?: number; version?: number }): Uint8Array;
+  downloadPdf(filename?: string, options?: { flags?: number; version?: number }): void;
   getPageCount(): number;
   getPageTextContent(pageIndex: number): IPageTextContent | null;
   destroy(): void;
@@ -177,13 +185,41 @@ export class PdfController implements IPdfController {
   }
 
   private canvasToPagePoint(
-    _pageW: number,
+    pagePtr: number,
+    pageW: number,
     pageH: number,
     scale: number,
     x: number,
     y: number,
   ): IPoint {
-    return { x: x / scale, y: pageH - y / scale };
+    const { pdfium } = this.requireDoc();
+    // Use PDFium's DeviceToPage API for accurate coordinate conversion
+    const deviceWidth = Math.round(pageW * scale);
+    const deviceHeight = Math.round(pageH * scale);
+
+    const pageXPtr = pdfium._malloc(8); // double
+    const pageYPtr = pdfium._malloc(8); // double
+    try {
+      pdfium._PDFium_DeviceToPage(
+        pagePtr,
+        0,
+        0,
+        deviceWidth,
+        deviceHeight,
+        0, // rotate = 0
+        Math.round(x),
+        Math.round(y),
+        pageXPtr,
+        pageYPtr,
+      );
+      return {
+        x: pdfium.getValue(pageXPtr, 'double'),
+        y: pdfium.getValue(pageYPtr, 'double'),
+      };
+    } finally {
+      pdfium._free(pageXPtr);
+      pdfium._free(pageYPtr);
+    }
   }
 
   // single-flight pattern to ensure only one instance of the PDFium module is created
@@ -1018,7 +1054,7 @@ export class PdfController implements IPdfController {
         pdfium._FPDFAnnot_SetBorder_W(annot, 0, 0, 14 / scale);
 
         const ptsPage = canvasPoints.map((p) =>
-          this.canvasToPagePoint(pageW, pageH, scale, p.x, p.y),
+          this.canvasToPagePoint(pagePtr, pageW, pageH, scale, p.x, p.y),
         );
         const bufPtr = pdfium._malloc(ptsPage.length * 2 * 4);
         try {
@@ -1035,6 +1071,88 @@ export class PdfController implements IPdfController {
         // NOTE: 当前 wasm wrapper 未暴露 FPDFPage_GenerateContent，因此这里无法强制生成内容流；
         // 对于很多阅读/渲染路径，annotation 仍能生效，但“保存导出”必须补齐 Save API（见 exportPdfBytes）。
       } finally {
+        pdfium._FPDFPage_CloseAnnot_W(annot);
+      }
+    });
+  }
+
+  /**
+   * Add a HIGHLIGHT annotation (proper PDF highlight with QuadPoints) for text selection.
+   * This creates a standard PDF highlight annotation that will be saved with the document.
+   */
+  public addHighlightAnnotation(
+    pageIndex: number,
+    opts: {
+      scale: number;
+      canvasRect: { left: number; top: number; width: number; height: number };
+    },
+  ): void {
+    const { scale, canvasRect } = opts;
+    if (canvasRect.width <= 0 || canvasRect.height <= 0) return;
+
+    this.withPage(pageIndex, (pdfium, pagePtr) => {
+      const pageW = pdfium._PDFium_GetPageWidth(pagePtr);
+      const pageH = pdfium._PDFium_GetPageHeight(pagePtr);
+
+      const annot = pdfium._FPDFPage_CreateAnnot_W(pagePtr, FPDF_ANNOTATION_SUBTYPE.HIGHLIGHT);
+      if (!annot) throw new Error('Failed to create HIGHLIGHT annotation');
+
+      // Allocate memory for FS_RECTF (4 floats) and FS_QUADPOINTSF (8 floats)
+      const rectPtr = pdfium._malloc(4 * 4);
+      const quadPtr = pdfium._malloc(8 * 4);
+
+      try {
+        // Convert canvas coordinates to page coordinates
+        const tl = this.canvasToPagePoint(
+          pagePtr,
+          pageW,
+          pageH,
+          scale,
+          canvasRect.left,
+          canvasRect.top,
+        );
+        const br = this.canvasToPagePoint(
+          pagePtr,
+          pageW,
+          pageH,
+          scale,
+          canvasRect.left + canvasRect.width,
+          canvasRect.top + canvasRect.height,
+        );
+
+        const left = Math.min(tl.x, br.x);
+        const right = Math.max(tl.x, br.x);
+        const bottom = Math.min(tl.y, br.y);
+        const top = Math.max(tl.y, br.y);
+
+        // Set annotation rectangle (FS_RECTF: left, bottom, right, top)
+        pdfium.HEAPF32[rectPtr / 4 + 0] = left;
+        pdfium.HEAPF32[rectPtr / 4 + 1] = bottom;
+        pdfium.HEAPF32[rectPtr / 4 + 2] = right;
+        pdfium.HEAPF32[rectPtr / 4 + 3] = top;
+        const okRect = pdfium._FPDFAnnot_SetRect_W(annot, rectPtr);
+        if (!okRect) throw new Error('Failed to set HIGHLIGHT rect');
+
+        // Set QuadPoints for the highlight
+        // FS_QUADPOINTSF: x1,y1, x2,y2, x3,y3, x4,y4
+        // PDFium uses: (x1,y1)=top-left, (x2,y2)=top-right, (x3,y3)=bottom-left, (x4,y4)=bottom-right
+        pdfium.HEAPF32[quadPtr / 4 + 0] = left; // x1 (top-left x)
+        pdfium.HEAPF32[quadPtr / 4 + 1] = top; // y1 (top-left y)
+        pdfium.HEAPF32[quadPtr / 4 + 2] = right; // x2 (top-right x)
+        pdfium.HEAPF32[quadPtr / 4 + 3] = top; // y2 (top-right y)
+        pdfium.HEAPF32[quadPtr / 4 + 4] = left; // x3 (bottom-left x)
+        pdfium.HEAPF32[quadPtr / 4 + 5] = bottom; // y3 (bottom-left y)
+        pdfium.HEAPF32[quadPtr / 4 + 6] = right; // x4 (bottom-right x)
+        pdfium.HEAPF32[quadPtr / 4 + 7] = bottom; // y4 (bottom-right y)
+
+        const okQuad = pdfium._FPDFAnnot_AppendAttachmentPoints_W(annot, quadPtr);
+        if (!okQuad) throw new Error('Failed to set HIGHLIGHT QuadPoints');
+
+        // Set highlight color (yellow: RGB 248, 196, 72)
+        pdfium._FPDFAnnot_SetColor_W(annot, FPDFANNOT_COLORTYPE.COLOR, 248, 196, 72, 255);
+      } finally {
+        pdfium._free(rectPtr);
+        pdfium._free(quadPtr);
         pdfium._FPDFPage_CloseAnnot_W(annot);
       }
     });
@@ -1063,8 +1181,16 @@ export class PdfController implements IPdfController {
       const uriPtrMax = Math.max(8, uri.length * 4 + 1);
       const uriPtr = pdfium._malloc(uriPtrMax);
       try {
-        const tl = this.canvasToPagePoint(pageW, pageH, scale, canvasRect.left, canvasRect.top);
+        const tl = this.canvasToPagePoint(
+          pagePtr,
+          pageW,
+          pageH,
+          scale,
+          canvasRect.left,
+          canvasRect.top,
+        );
         const br = this.canvasToPagePoint(
+          pagePtr,
           pageW,
           pageH,
           scale,
@@ -1095,12 +1221,79 @@ export class PdfController implements IPdfController {
     });
   }
 
-  public exportPdfBytes(): Uint8Array {
-    // 当前 pdfium-wasm 构建未暴露 FPDF_SaveAsCopy / FPDF_SaveWithVersion 等保存 API，
-    // 因此无法从内存文档导出更新后的 PDF 字节。
-    // 需要在 packages/pdfium-wasm/build/pdfium_wasm.cpp 添加 wrapper + 重新编译 wasm。
-    throw new Error(
-      'exportPdfBytes() 目前不可用：当前 pdfium-wasm 未包含 PDF 保存/导出 wrapper（例如 FPDF_SaveAsCopy）。需要扩展 wasm 并重新编译后才能写回文件。',
-    );
+  /**
+   * Export the current PDF document as a byte array.
+   * This includes any modifications made (annotations, etc.).
+   * @param options Optional save options
+   * @returns Uint8Array containing the PDF data
+   */
+  public exportPdfBytes(options?: {
+    /** Save flags: 0=default, 1=incremental, 2=no incremental, 3=remove security */
+    flags?: number;
+    /** PDF version: 14=1.4, 15=1.5, 16=1.6, 17=1.7, 20=2.0 (optional) */
+    version?: number;
+  }): Uint8Array {
+    const { pdfium, docPtr } = this.requireDoc();
+    const flags = options?.flags ?? 0;
+    const version = options?.version;
+
+    // Save the document to memory
+    let size: number;
+    if (version !== undefined) {
+      size = pdfium._PDFium_SaveToMemoryWithVersion(docPtr, flags, version);
+    } else {
+      size = pdfium._PDFium_SaveToMemory(docPtr, flags);
+    }
+
+    if (size <= 0) {
+      const errorCode = pdfium._PDFium_GetLastError();
+      throw new Error(`Failed to save PDF (error code: ${errorCode})`);
+    }
+
+    // Get pointer to the saved buffer
+    const bufferPtr = pdfium._PDFium_GetSaveBuffer();
+    if (!bufferPtr) {
+      throw new Error('Failed to get save buffer pointer');
+    }
+
+    try {
+      // Copy the data from WASM memory to a new Uint8Array
+      // We must copy because the WASM memory view can become invalid
+      const pdfData = new Uint8Array(pdfium.HEAPU8.buffer, bufferPtr, size);
+      const result = new Uint8Array(pdfData); // Create a copy
+      return result;
+    } finally {
+      // Always free the save buffer
+      pdfium._PDFium_FreeSaveBuffer();
+    }
+  }
+
+  /**
+   * Download the current PDF document as a file.
+   * This is a convenience method that exports the PDF and triggers a browser download.
+   * @param filename The filename for the downloaded file (default: 'document.pdf')
+   * @param options Optional save options
+   */
+  public downloadPdf(
+    filename = 'document.pdf',
+    options?: {
+      flags?: number;
+      version?: number;
+    },
+  ): void {
+    const pdfBytes = this.exportPdfBytes(options);
+    const blob = new Blob([pdfBytes as BlobPart], { type: 'application/pdf' });
+    const url = URL.createObjectURL(blob);
+
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    // Revoke the object URL after a short delay to allow the download to start
+    setTimeout(() => URL.revokeObjectURL(url), 100);
   }
 }

@@ -72,6 +72,8 @@ export const ViewerPage: React.FC<IViewerPageProps> = ({ pageIndex, registerPage
 
       const x = left - pdfRect.left;
       const y = top - pdfRect.top;
+
+      // Add to overlay for immediate visual feedback
       addAnnotation({
         id: `selhl-${now}-${pageIndex}-${added}`,
         type: AnnotationType.HIGHLIGHT,
@@ -88,6 +90,13 @@ export const ViewerPage: React.FC<IViewerPageProps> = ({ pageIndex, registerPage
         strokeWidth: 0,
         createdAt: now,
       });
+
+      // Also commit to PDFium so it gets saved when downloading
+      controller.addHighlightAnnotation(pageIndex, {
+        scale,
+        canvasRect: { left: x, top: y, width: w, height: h },
+      });
+
       added++;
     }
 
@@ -96,7 +105,7 @@ export const ViewerPage: React.FC<IViewerPageProps> = ({ pageIndex, registerPage
       return true;
     }
     return false;
-  }, [addAnnotation, pageIndex, pdfCanvas]);
+  }, [addAnnotation, controller, pageIndex, pdfCanvas, scale]);
 
   const refreshNativeAnnots = useCallback(() => {
     const native = controller.listNativeAnnotations(pageIndex, { scale });

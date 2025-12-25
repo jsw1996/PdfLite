@@ -122,6 +122,17 @@ void PDFium_PageToDevice(FPDF_PAGE page,
     FPDF_PageToDevice(page, start_x, start_y, size_x, size_y, rotate, page_x, page_y, device_x, device_y);
 }
 
+// Convert device coordinates to page coordinates
+EMSCRIPTEN_KEEPALIVE
+void PDFium_DeviceToPage(FPDF_PAGE page,
+                         int start_x, int start_y,
+                         int size_x, int size_y,
+                         int rotate,
+                         int device_x, int device_y,
+                         double* page_x, double* page_y) {
+    FPDF_DeviceToPage(page, start_x, start_y, size_x, size_y, rotate, device_x, device_y, page_x, page_y);
+}
+
 EMSCRIPTEN_KEEPALIVE
 void PDFium_RenderPageBitmap(FPDF_BITMAP bitmap, FPDF_PAGE page, int start_x, int start_y,
                               int size_x, int size_y, int rotate, int flags) {
@@ -750,6 +761,122 @@ unsigned long FPDFAnnot_GetFormFieldExportValue_W(FPDF_FORMHANDLE hHandle, FPDF_
 EMSCRIPTEN_KEEPALIVE
 FPDF_BOOL FPDFAnnot_SetURI_W(FPDF_ANNOTATION annot, const char* uri) {
     return FPDFAnnot_SetURI(annot, uri);
+}
+
+// ============================================================================
+// PDF Save/Download API - Save document to memory buffer
+// ============================================================================
+
+// Custom file writer structure for saving to memory
+struct MemoryFileWriter {
+    std::vector<uint8_t> buffer;
+};
+
+// Write block callback for FPDF_SaveAsCopy
+static int WriteBlockCallback(FPDF_FILEWRITE* pThis, const void* data, unsigned long size) {
+    MemoryFileWriter* writer = reinterpret_cast<MemoryFileWriter*>(pThis);
+    const uint8_t* bytes = static_cast<const uint8_t*>(data);
+    writer->buffer.insert(writer->buffer.end(), bytes, bytes + size);
+    return 1;  // Return non-zero on success
+}
+
+// Global buffer to hold saved PDF data (managed by the wrapper)
+static std::vector<uint8_t> g_savedPdfBuffer;
+
+// Save document to memory and return pointer to buffer
+// Returns the size of the saved PDF, or 0 on failure
+// The buffer can be accessed via PDFium_GetSaveBuffer()
+EMSCRIPTEN_KEEPALIVE
+int PDFium_SaveToMemory(FPDF_DOCUMENT doc, int flags) {
+    if (!doc) {
+        return 0;
+    }
+
+    // Clear any previous saved data
+    g_savedPdfBuffer.clear();
+
+    // Create file writer with callback
+    struct FileWriterWithCallback : FPDF_FILEWRITE {
+        std::vector<uint8_t> buffer;
+    };
+
+    FileWriterWithCallback writer;
+    writer.version = 1;
+    writer.WriteBlock = [](FPDF_FILEWRITE* pThis, const void* data, unsigned long size) -> int {
+        FileWriterWithCallback* w = static_cast<FileWriterWithCallback*>(pThis);
+        const uint8_t* bytes = static_cast<const uint8_t*>(data);
+        w->buffer.insert(w->buffer.end(), bytes, bytes + size);
+        return 1;
+    };
+
+    // Save the document
+    // flags: FPDF_INCREMENTAL = 1, FPDF_NO_INCREMENTAL = 2, FPDF_REMOVE_SECURITY = 3
+    FPDF_BOOL success = FPDF_SaveAsCopy(doc, &writer, flags);
+
+    if (success) {
+        g_savedPdfBuffer = std::move(writer.buffer);
+        return static_cast<int>(g_savedPdfBuffer.size());
+    }
+
+    return 0;
+}
+
+// Get pointer to the saved PDF buffer
+EMSCRIPTEN_KEEPALIVE
+const uint8_t* PDFium_GetSaveBuffer() {
+    if (g_savedPdfBuffer.empty()) {
+        return nullptr;
+    }
+    return g_savedPdfBuffer.data();
+}
+
+// Get the size of the saved PDF buffer
+EMSCRIPTEN_KEEPALIVE
+int PDFium_GetSaveBufferSize() {
+    return static_cast<int>(g_savedPdfBuffer.size());
+}
+
+// Free the saved PDF buffer
+EMSCRIPTEN_KEEPALIVE
+void PDFium_FreeSaveBuffer() {
+    g_savedPdfBuffer.clear();
+    g_savedPdfBuffer.shrink_to_fit();
+}
+
+// Save document with version control
+// version: 14 = PDF 1.4, 15 = PDF 1.5, 16 = PDF 1.6, 17 = PDF 1.7, 20 = PDF 2.0
+EMSCRIPTEN_KEEPALIVE
+int PDFium_SaveToMemoryWithVersion(FPDF_DOCUMENT doc, int flags, int version) {
+    if (!doc) {
+        return 0;
+    }
+
+    // Clear any previous saved data
+    g_savedPdfBuffer.clear();
+
+    // Create file writer with callback
+    struct FileWriterWithCallback : FPDF_FILEWRITE {
+        std::vector<uint8_t> buffer;
+    };
+
+    FileWriterWithCallback writer;
+    writer.version = 1;
+    writer.WriteBlock = [](FPDF_FILEWRITE* pThis, const void* data, unsigned long size) -> int {
+        FileWriterWithCallback* w = static_cast<FileWriterWithCallback*>(pThis);
+        const uint8_t* bytes = static_cast<const uint8_t*>(data);
+        w->buffer.insert(w->buffer.end(), bytes, bytes + size);
+        return 1;
+    };
+
+    // Save the document with specific PDF version
+    FPDF_BOOL success = FPDF_SaveWithVersion(doc, &writer, flags, version);
+
+    if (success) {
+        g_savedPdfBuffer = std::move(writer.buffer);
+        return static_cast<int>(g_savedPdfBuffer.size());
+    }
+
+    return 0;
 }
 
 } // extern "C"

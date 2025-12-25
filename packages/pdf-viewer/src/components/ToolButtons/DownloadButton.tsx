@@ -1,5 +1,6 @@
 import { Download } from 'lucide-react';
 import type { IToolButton } from './ToolButton.type';
+import type { PdfController } from '@pdfviewer/controller';
 
 export const DownloadButton: () => IToolButton = () => {
   return {
@@ -8,5 +9,8 @@ export const DownloadButton: () => IToolButton = () => {
     icon: Download,
     type: 'button',
     groupIndex: 0,
+    onClick: (pdfController: PdfController) => {
+      pdfController.downloadPdf();
+    },
   };
 };

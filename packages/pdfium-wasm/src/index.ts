@@ -119,6 +119,19 @@ export interface PDFiumModule {
     deviceXPtr: number,
     deviceYPtr: number
   ): void;
+  /** Convert device coordinates to page coordinates */
+  _PDFium_DeviceToPage(
+    page: number,
+    startX: number,
+    startY: number,
+    sizeX: number,
+    sizeY: number,
+    rotate: number,
+    deviceX: number,
+    deviceY: number,
+    pageXPtr: number,
+    pageYPtr: number
+  ): void;
 
   // ============================================================================
   // Bitmap/Rendering Functions
@@ -555,6 +568,39 @@ export interface PDFiumModule {
   _FPDFAction_GetDest_W(doc: number, action: number): number;
   /** Set URI for link annotation */
   _FPDFAnnot_SetURI_W(annot: number, uriPtr: number): number;
+
+  // ============================================================================
+  // PDF Save/Download API
+  // ============================================================================
+  /**
+   * Save document to internal memory buffer
+   * @param doc Document pointer
+   * @param flags Save flags: 0=default, 1=FPDF_INCREMENTAL, 2=FPDF_NO_INCREMENTAL, 3=FPDF_REMOVE_SECURITY
+   * @returns Size of saved PDF in bytes, or 0 on failure
+   */
+  _PDFium_SaveToMemory(doc: number, flags: number): number;
+  /**
+   * Get pointer to the saved PDF buffer (call after SaveToMemory)
+   * @returns Pointer to the buffer, or 0 if no data
+   */
+  _PDFium_GetSaveBuffer(): number;
+  /**
+   * Get the size of the saved PDF buffer
+   * @returns Size in bytes
+   */
+  _PDFium_GetSaveBufferSize(): number;
+  /**
+   * Free the saved PDF buffer memory
+   */
+  _PDFium_FreeSaveBuffer(): void;
+  /**
+   * Save document with specific PDF version
+   * @param doc Document pointer
+   * @param flags Save flags
+   * @param version PDF version: 14=1.4, 15=1.5, 16=1.6, 17=1.7, 20=2.0
+   * @returns Size of saved PDF in bytes, or 0 on failure
+   */
+  _PDFium_SaveToMemoryWithVersion(doc: number, flags: number, version: number): number;
 
   // ============================================================================
   // Emscripten Runtime

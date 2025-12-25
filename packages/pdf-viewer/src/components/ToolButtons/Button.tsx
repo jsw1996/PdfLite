@@ -1,6 +1,7 @@
 import { cn } from '@pdfviewer/ui/lib/utils';
 import type { IToolButton } from './ToolButton.type';
 import { TooltipButton } from '@pdfviewer/ui/components/tooltipButton';
+import { usePdfController } from '@/providers/PdfControllerContextProvider';
 
 export type ToolButtonProps = IToolButton & {
   isActive: boolean;
@@ -14,6 +15,7 @@ export const ToolButton: React.FC<ToolButtonProps> = (props: ToolButtonProps) =>
     'text-[#65758D]',
     props.isActive && 'bg-blue-100 text-[#4f46e5] bg-white border border-gray-300',
   );
+  const { controller } = usePdfController();
 
   return (
     <>
@@ -32,7 +34,7 @@ export const ToolButton: React.FC<ToolButtonProps> = (props: ToolButtonProps) =>
           if (props.type === 'toggle') {
             props.onActivate(toolId);
           }
-          props.onClick?.();
+          props.onClick?.(controller);
         }}
       >
         <props.icon className="w-[24px] h-[24px] stroke-2" />
