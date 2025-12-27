@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useMemo, useState, useCallback } from 'react';
 import type { IAnnotation, AnnotationType } from '../types/annotation';
+import { usePdfState } from './PdfStateContextProvider';
 
 export interface IAnnotationContextValue {
   selectedTool: AnnotationType | null;
@@ -22,7 +23,7 @@ export function useAnnotation(): IAnnotationContextValue {
 export function AnnotationContextProvider({ children }: { children: React.ReactNode }) {
   const [selectedTool, setSelectedTool] = useState<AnnotationType | null>(null);
   const [annotationStack, setAnnotationStack] = useState<IAnnotation[]>([]);
-
+  const scale = usePdfState().scale;
   const popAnnotation = useCallback(() => {
     let popped: IAnnotation | undefined;
     setAnnotationStack((prev) => {
@@ -33,13 +34,32 @@ export function AnnotationContextProvider({ children }: { children: React.ReactN
     return popped;
   }, []);
 
-  const addAnnotation = useCallback((annotation: IAnnotation) => {
-    setAnnotationStack((prev) => [...prev, annotation]);
-  }, []);
+  const addAnnotation = useCallback(
+    (annotation: IAnnotation) => {
+      const normalizedPoints = annotation.points.map((point) => ({
+        x: point.x / scale,
+        y: point.y / scale,
+      }));
+      const normalizedAnnotation = { ...annotation, points: normalizedPoints };
+      setAnnotationStack((prev) => [...prev, normalizedAnnotation]);
+    },
+    [scale],
+  );
 
   const getAnnotationsForPage = useCallback(
-    (pageIndex: number) => annotationStack.filter((a) => a.pageIndex === pageIndex) ?? [],
-    [annotationStack],
+    (pageIndex: number) =>
+      annotationStack
+        .filter((a) => a.pageIndex === pageIndex)
+        .map((annotation) => {
+          return {
+            ...annotation,
+            points: annotation.points.map((point) => ({
+              x: point.x * scale,
+              y: point.y * scale,
+            })),
+          };
+        }) ?? [],
+    [annotationStack, scale],
   );
 
   const setNativeAnnotationsForPage = useCallback(
