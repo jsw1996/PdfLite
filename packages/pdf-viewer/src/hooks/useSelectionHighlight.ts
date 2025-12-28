@@ -4,6 +4,9 @@ import { AnnotationType } from '../types/annotation';
 
 const DEFAULT_HIGHLIGHT_COLOR = 'rgb(248, 196, 72)';
 
+// Delay to wait before applying highlight, to allow for double/triple-click detection
+const MULTI_CLICK_DELAY_MS = 300;
+
 export interface IUseSelectionHighlightOptions {
   pageIndex: number;
   pdfCanvas: HTMLCanvasElement | null;
@@ -12,6 +15,7 @@ export interface IUseSelectionHighlightOptions {
 export function useSelectionHighlight({ pageIndex, pdfCanvas }: IUseSelectionHighlightOptions) {
   const { selectedTool, setSelectedTool, addAnnotation } = useAnnotation();
   const prevToolRef = useRef<AnnotationType | null>(null);
+  const highlightTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const applyCurrentSelectionAsHighlight = useCallback((): boolean => {
     if (!pdfCanvas) return false;
@@ -98,9 +102,27 @@ export function useSelectionHighlight({ pageIndex, pdfCanvas }: IUseSelectionHig
   const handleHighlightOnInteraction = useCallback(() => {
     // Case 1: Highlight mode active -> selecting text applies highlight on mouse/key up.
     if (selectedTool === AnnotationType.HIGHLIGHT) {
-      applyCurrentSelectionAsHighlight();
+      // Cancel any pending highlight application to handle double/triple-click
+      if (highlightTimeoutRef.current) {
+        clearTimeout(highlightTimeoutRef.current);
+        highlightTimeoutRef.current = null;
+      }
+      // Delay the highlight application to allow for double/triple-click selection
+      highlightTimeoutRef.current = setTimeout(() => {
+        highlightTimeoutRef.current = null;
+        applyCurrentSelectionAsHighlight();
+      }, MULTI_CLICK_DELAY_MS);
     }
   }, [applyCurrentSelectionAsHighlight, selectedTool]);
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (highlightTimeoutRef.current) {
+        clearTimeout(highlightTimeoutRef.current);
+      }
+    };
+  }, []);
 
   return {
     applyCurrentSelectionAsHighlight,
