@@ -630,19 +630,14 @@ export class PdfController implements IPdfController {
       const next = rects[i];
 
       // Check if rects are on the same line (similar top position)
-      const sameBaseline = Math.abs(current.rect.top - next.rect.top) < current.rect.height * 0.5;
-
-      // Check if font properties match
-      const sameFont =
-        current.font.family === next.font.family &&
-        Math.abs(current.font.size - next.font.size) < current.font.size * 0.1;
+      const sameBaseline = Math.abs(current.rect.top - next.rect.top) < current.rect.height;
 
       // Check if horizontally adjacent (with small tolerance for spacing)
       const currentRight = current.rect.left + current.rect.width;
       const gap = next.rect.left - currentRight;
       const isAdjacent = gap < current.font.size * 0.5;
 
-      if (sameBaseline && sameFont && isAdjacent) {
+      if (sameBaseline && isAdjacent) {
         // Merge: extend current rect and append content
         current.content += next.content;
         current.rect.width = next.rect.left + next.rect.width - current.rect.left;
