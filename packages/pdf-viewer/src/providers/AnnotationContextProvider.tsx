@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useMemo, useState, useCallback } from 'react';
-import type { IAnnotation, AnnotationType } from '../types/annotation';
+import { type IAnnotation, AnnotationType } from '../types/annotation';
 import { usePdfState } from './PdfStateContextProvider';
-
+import { usePdfController } from './PdfControllerContextProvider';
 export interface IAnnotationContextValue {
   selectedTool: AnnotationType | null;
   setSelectedTool: (tool: AnnotationType | null) => void;
@@ -10,6 +10,7 @@ export interface IAnnotationContextValue {
   popAnnotation: () => IAnnotation | undefined;
   getAnnotationsForPage: (pageIndex: number) => IAnnotation[];
   setNativeAnnotationsForPage: (pageIndex: number, annotations: IAnnotation[]) => void;
+  commitAnnotations: () => void;
 }
 
 const AnnotationContext = createContext<IAnnotationContextValue | null>(null);
@@ -24,6 +25,7 @@ export function AnnotationContextProvider({ children }: { children: React.ReactN
   const [selectedTool, setSelectedTool] = useState<AnnotationType | null>(null);
   const [annotationStack, setAnnotationStack] = useState<IAnnotation[]>([]);
   const scale = usePdfState().scale;
+  const { controller } = usePdfController();
   const popAnnotation = useCallback(() => {
     let popped: IAnnotation | undefined;
     setAnnotationStack((prev) => {
@@ -75,6 +77,32 @@ export function AnnotationContextProvider({ children }: { children: React.ReactN
     [],
   );
 
+  const commitAnnotations = useCallback(() => {
+    annotationStack.forEach((annotation) => {
+      if (annotation.source === 'overlay') {
+        if (annotation.type === AnnotationType.HIGHLIGHT) {
+          controller.addHighlightAnnotation(annotation.pageIndex, {
+            scale: 1,
+            canvasRect: {
+              left: Math.min(...annotation.points.map((p) => p.x)),
+              top: Math.min(...annotation.points.map((p) => p.y)),
+              width:
+                Math.max(...annotation.points.map((p) => p.x)) -
+                Math.min(...annotation.points.map((p) => p.x)),
+              height:
+                Math.max(...annotation.points.map((p) => p.y)) -
+                Math.min(...annotation.points.map((p) => p.y)),
+            },
+          });
+        }
+      }
+      // Here you can implement the logic to commit the annotation,
+      // e.g., saving it to a server or rendering it permanently on the PDF.
+    });
+    // mark all the annoations as native after commit
+    setAnnotationStack((prev) => prev.map((a) => ({ ...a, source: 'native' as const })));
+  }, [annotationStack, controller]);
+
   const value = useMemo<IAnnotationContextValue>(
     () => ({
       selectedTool,
@@ -84,6 +112,7 @@ export function AnnotationContextProvider({ children }: { children: React.ReactN
       setNativeAnnotationsForPage,
       annotationStack,
       popAnnotation,
+      commitAnnotations,
     }),
     [
       addAnnotation,
@@ -92,6 +121,7 @@ export function AnnotationContextProvider({ children }: { children: React.ReactN
       setNativeAnnotationsForPage,
       annotationStack,
       popAnnotation,
+      commitAnnotations,
     ],
   );
 

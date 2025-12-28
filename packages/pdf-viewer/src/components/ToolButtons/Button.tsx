@@ -2,6 +2,7 @@ import { cn } from '@pdfviewer/ui/lib/utils';
 import type { IToolButton } from './ToolButton.type';
 import { TooltipButton } from '@pdfviewer/ui/components/tooltipButton';
 import { usePdfController } from '@/providers/PdfControllerContextProvider';
+import { useAnnotation } from '@/providers/AnnotationContextProvider';
 
 export type ToolButtonProps = IToolButton & {
   isActive: boolean;
@@ -16,6 +17,7 @@ export const ToolButton: React.FC<ToolButtonProps> = (props: ToolButtonProps) =>
     props.isActive && 'bg-blue-100 text-[#4f46e5] bg-white border border-gray-300',
   );
   const { controller } = usePdfController();
+  const { commitAnnotations } = useAnnotation();
 
   return (
     <>
@@ -34,7 +36,7 @@ export const ToolButton: React.FC<ToolButtonProps> = (props: ToolButtonProps) =>
           if (props.type === 'toggle') {
             props.onActivate(toolId);
           }
-          props.onClick?.(controller);
+          props.onClick?.(controller, commitAnnotations);
         }}
       >
         <props.icon className="w-[24px] h-[24px] stroke-2" />

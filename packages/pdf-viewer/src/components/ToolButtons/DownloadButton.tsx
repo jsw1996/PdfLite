@@ -9,7 +9,8 @@ export const DownloadButton: () => IToolButton = () => {
     icon: Download,
     type: 'button',
     groupIndex: 0,
-    onClick: (pdfController: PdfController) => {
+    onClick: (pdfController: PdfController, commitAnnotations: () => void) => {
+      commitAnnotations();
       pdfController.downloadPdf();
     },
   };

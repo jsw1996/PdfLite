@@ -33,7 +33,7 @@ export const ViewerPage: React.FC<IViewerPageProps> = ({ pageIndex, registerPage
   const { handleHighlightOnInteraction } = useSelectionHighlight({ pageIndex, pdfCanvas });
 
   const refreshNativeAnnots = useCallback(() => {
-    const native = controller.listNativeAnnotations(pageIndex, { scale });
+    const native = controller.listNativeAnnotations(pageIndex, { scale: 1 });
     const links = native
       .filter((a) => a.subtype === FPDF_ANNOTATION_SUBTYPE_LINK)
       .map(
@@ -65,7 +65,7 @@ export const ViewerPage: React.FC<IViewerPageProps> = ({ pageIndex, registerPage
         createdAt: Date.now(),
       }));
     setNativeAnnotationsForPage(pageIndex, converted);
-  }, [controller, pageIndex, scale, setNativeAnnotationsForPage]);
+  }, [controller, pageIndex, setNativeAnnotationsForPage]);
 
   useEffect(() => {
     if (!pdfCanvas) return;

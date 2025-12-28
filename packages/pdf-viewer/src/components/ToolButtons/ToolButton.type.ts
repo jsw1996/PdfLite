@@ -9,7 +9,7 @@ export interface IToolButton {
   name: string;
   icon: React.ComponentType<LucideProps>;
   type: 'button' | 'toggle' | 'dropdown';
-  onClick?: (pdfController: PdfController) => void;
+  onClick?: (pdfController: PdfController, commitAnnotations: () => void) => void;
   isEnabled?: boolean;
   groupIndex: GroupIndex;
 }

@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react';
-import { usePdfController } from '../providers/PdfControllerContextProvider';
 import { useAnnotation } from '../providers/AnnotationContextProvider';
-import { usePdfState } from '../providers/PdfStateContextProvider';
 import { AnnotationType } from '../types/annotation';
 
 const DEFAULT_HIGHLIGHT_COLOR = 'rgb(248, 196, 72)';
@@ -12,9 +10,7 @@ export interface IUseSelectionHighlightOptions {
 }
 
 export function useSelectionHighlight({ pageIndex, pdfCanvas }: IUseSelectionHighlightOptions) {
-  const { controller } = usePdfController();
   const { selectedTool, setSelectedTool, addAnnotation } = useAnnotation();
-  const { scale } = usePdfState();
   const prevToolRef = useRef<AnnotationType | null>(null);
 
   const applyCurrentSelectionAsHighlight = useCallback((): boolean => {
@@ -76,13 +72,6 @@ export function useSelectionHighlight({ pageIndex, pdfCanvas }: IUseSelectionHig
         strokeWidth: 0,
         createdAt: now,
       });
-
-      // Also commit to PDFium so it gets saved when downloading
-      controller.addHighlightAnnotation(pageIndex, {
-        scale,
-        canvasRect: { left: x, top: y, width: w, height: h },
-      });
-
       added++;
     }
 
@@ -91,7 +80,7 @@ export function useSelectionHighlight({ pageIndex, pdfCanvas }: IUseSelectionHig
       return true;
     }
     return false;
-  }, [addAnnotation, controller, pageIndex, pdfCanvas, scale]);
+  }, [addAnnotation, pageIndex, pdfCanvas]);
 
   // Case 2:
   // Highlight tool was inactive, user selected text, then clicked Highlight button.
