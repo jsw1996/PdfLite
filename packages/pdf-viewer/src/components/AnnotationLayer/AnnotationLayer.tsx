@@ -125,7 +125,7 @@ export const AnnotationLayer: React.FC<IAnnotationLayerProps> = ({
     onCommitHighlight,
   });
 
-  useRenderAnnotation({
+  const { textAnnotations } = useRenderAnnotation({
     highlightCanvasRef,
     drawCanvasRef,
     metrics,
@@ -156,6 +156,7 @@ export const AnnotationLayer: React.FC<IAnnotationLayerProps> = ({
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerCancel}
       />
+      {textAnnotations}
     </>
   );
 };

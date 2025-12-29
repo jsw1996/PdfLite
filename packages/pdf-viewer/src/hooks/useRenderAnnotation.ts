@@ -1,6 +1,6 @@
-import { useCallback, useEffect, type RefObject } from 'react';
+import React, { useCallback, useEffect, useMemo, type RefObject } from 'react';
 import { AnnotationType, type IAnnotation, type IPoint } from '../types/annotation';
-
+import { TextBox } from '../components/AnnotationLayer/TextBox';
 const DEFAULT_HIGHLIGHT_COLOR = 'rgb(248, 196, 72)';
 
 interface ICanvasMetrics {
@@ -67,7 +67,14 @@ export function useRenderAnnotation({
   annotations,
   selectedTool,
   currentPath,
-}: IUseRenderAnnotationOptions) {
+}: IUseRenderAnnotationOptions): { textAnnotations: React.ReactElement[] } {
+  // Derive text annotations from annotations using useMemo instead of useState
+  const textAnnotations = useMemo(() => {
+    return annotations
+      .filter((a) => a.type === AnnotationType.TEXT)
+      .map((a) => React.createElement(TextBox, { value: a.textContent ?? '', pos: a.points[0] }));
+  }, [annotations]);
+
   const redraw = useCallback(() => {
     const hc = highlightCanvasRef.current;
     const dc = drawCanvasRef.current;
@@ -88,10 +95,10 @@ export function useRenderAnnotation({
     dctx.setTransform(sx, 0, 0, sy, 0, 0);
 
     for (const a of annotations) {
-      if (a.shape === 'polygon') {
+      if (a.type === AnnotationType.HIGHLIGHT) {
         // polygon 目前只用于原生 highlight quadpoints，画在高亮层
         drawPolygon(hctx, a.points, a.color);
-      } else {
+      } else if (a.type === AnnotationType.DRAW) {
         drawStroke(dctx, a.points, a.type, a.color, a.strokeWidth);
       }
     }
@@ -112,5 +119,5 @@ export function useRenderAnnotation({
     redraw();
   }, [redraw]);
 
-  return { redraw };
+  return { textAnnotations };
 }

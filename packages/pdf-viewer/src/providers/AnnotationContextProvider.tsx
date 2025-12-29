@@ -30,6 +30,7 @@ export function AnnotationContextProvider({ children }: { children: React.ReactN
     let popped: IAnnotation | undefined;
     setAnnotationStack((prev) => {
       if (prev.length === 0) return prev;
+      if (prev[prev.length - 1].source === 'native') return prev;
       popped = prev[prev.length - 1];
       return prev.slice(0, -1);
     });
@@ -96,8 +97,6 @@ export function AnnotationContextProvider({ children }: { children: React.ReactN
           });
         }
       }
-      // Here you can implement the logic to commit the annotation,
-      // e.g., saving it to a server or rendering it permanently on the PDF.
     });
     // mark all the annoations as native after commit
     setAnnotationStack((prev) => prev.map((a) => ({ ...a, source: 'native' as const })));
