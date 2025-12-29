@@ -6,7 +6,7 @@ import { useAnnotation } from '../../providers/AnnotationContextProvider';
 import { AnnotationType, type IAnnotation } from '../../types/annotation';
 import { TextLayer } from '../TextLayer/TextLayer';
 import { usePdfState } from '@/providers/PdfStateContextProvider';
-import { LinkLayer, type ILinkItem } from '../LinkLayer/LinkLayer';
+import { LinkLayer } from '../LinkLayer/LinkLayer';
 import { useSelectionHighlight } from '../../hooks/useSelectionHighlight';
 
 const DEFAULT_HIGHLIGHT_COLOR = 'rgb(248, 196, 72)';
@@ -21,7 +21,6 @@ export const ViewerPage: React.FC<IViewerPageProps> = ({ pageIndex, registerPage
   const [pdfCanvas, setPdfCanvas] = useState<HTMLCanvasElement | null>(null);
   const [containerEl, setContainerEl] = useState<HTMLDivElement | null>(null);
   const { controller, goToPage } = usePdfController();
-  const [linkItems, setLinkItems] = useState<ILinkItem[]>([]);
   const { setNativeAnnotationsForPage } = useAnnotation();
 
   const onCanvasReady = useCallback((c: HTMLCanvasElement) => {
@@ -34,17 +33,6 @@ export const ViewerPage: React.FC<IViewerPageProps> = ({ pageIndex, registerPage
 
   const refreshNativeAnnots = useCallback(() => {
     const native = controller.listNativeAnnotations(pageIndex, { scale: 1 });
-    const links = native
-      .filter((a) => a.subtype === FPDF_ANNOTATION_SUBTYPE_LINK)
-      .map(
-        (a): ILinkItem => ({
-          id: a.id,
-          points: a.points,
-          uri: a.uri,
-          destPageIndex: a.destPageIndex,
-        }),
-      );
-    setLinkItems(links);
 
     const converted: IAnnotation[] = native
       .filter((a) => a.subtype !== FPDF_ANNOTATION_SUBTYPE_LINK)
@@ -69,7 +57,7 @@ export const ViewerPage: React.FC<IViewerPageProps> = ({ pageIndex, registerPage
 
   useEffect(() => {
     if (!pdfCanvas) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- refresh native annotations after canvas is ready
+
     refreshNativeAnnots();
   }, [pdfCanvas, refreshNativeAnnots]);
 
@@ -104,13 +92,8 @@ export const ViewerPage: React.FC<IViewerPageProps> = ({ pageIndex, registerPage
         pageIndex={pageIndex}
         pdfCanvas={pdfCanvas}
         containerEl={containerEl}
-        links={linkItems}
         onOpenExternal={(uri) => window.open(uri, '_blank', 'noopener,noreferrer')}
         onGoToPage={(p) => goToPage(p, { scrollIntoView: true, scrollIntoPreview: true })}
-        onCreateLink={({ canvasRect, uri }) => {
-          controller.addLinkAnnotation(pageIndex, { scale, canvasRect, uri });
-          refreshNativeAnnots();
-        }}
       />
       <AnnotationLayer
         pageIndex={pageIndex}
