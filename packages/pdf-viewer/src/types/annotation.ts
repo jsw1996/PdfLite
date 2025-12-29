@@ -1,6 +1,7 @@
 export enum AnnotationType {
   DRAW = 'draw',
   HIGHLIGHT = 'highlight',
+  TEXT = 'text',
 }
 
 export type AnnotationShape = 'stroke' | 'polygon';
@@ -21,4 +22,5 @@ export interface IAnnotation {
   color: string;
   strokeWidth: number;
   createdAt: number;
+  textContent?: string;
 }

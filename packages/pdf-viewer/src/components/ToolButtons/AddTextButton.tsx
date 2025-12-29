@@ -1,11 +1,12 @@
 import type { IToolButton } from './ToolButton.type';
-import { PenLine } from 'lucide-react';
+import { Type } from 'lucide-react';
 
 export const AddTextButton: () => IToolButton = () => {
   return {
+    id: 'text',
     name: 'Add Text',
-    icon: PenLine,
-    type: 'button',
+    icon: Type,
+    type: 'toggle',
     groupIndex: 1,
   };
 };

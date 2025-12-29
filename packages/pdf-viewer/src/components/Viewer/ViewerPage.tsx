@@ -8,6 +8,7 @@ import { TextLayer } from '../TextLayer/TextLayer';
 import { usePdfState } from '@/providers/PdfStateContextProvider';
 import { LinkLayer, type ILinkItem } from '../LinkLayer/LinkLayer';
 import { useSelectionHighlight } from '../../hooks/useSelectionHighlight';
+import { useAddText } from '@/hooks/useAddText';
 
 const DEFAULT_HIGHLIGHT_COLOR = 'rgb(248, 196, 72)';
 const FPDF_ANNOTATION_SUBTYPE_LINK = 2;
@@ -31,7 +32,7 @@ export const ViewerPage: React.FC<IViewerPageProps> = ({ pageIndex, registerPage
   const { scale } = usePdfState();
 
   const { handleHighlightOnInteraction } = useSelectionHighlight({ pageIndex, pdfCanvas });
-
+  useAddText(containerEl, pageIndex);
   const refreshNativeAnnots = useCallback(() => {
     const native = controller.listNativeAnnotations(pageIndex, { scale: 1 });
     const links = native
