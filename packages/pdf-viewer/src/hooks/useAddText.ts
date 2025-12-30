@@ -3,7 +3,7 @@ import { AnnotationType } from '../types/annotation';
 import { useEffect, useCallback } from 'react';
 
 export const useAddText = (pageElement: HTMLDivElement | null, pageIndex: number) => {
-  const { selectedTool, addAnnotation } = useAnnotation();
+  const { selectedTool, addAnnotation, setSelectedTool } = useAnnotation();
 
   const handleClick = useCallback(
     (e: MouseEvent) => {
@@ -24,8 +24,9 @@ export const useAddText = (pageElement: HTMLDivElement | null, pageIndex: number
         pageIndex,
         textContent: '',
       });
+      setSelectedTool(null);
     },
-    [selectedTool, addAnnotation, pageElement, pageIndex],
+    [selectedTool, addAnnotation, pageElement, pageIndex, setSelectedTool],
   );
 
   useEffect(() => {
