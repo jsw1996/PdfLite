@@ -100,7 +100,6 @@ export const ViewerPage: React.FC<IViewerPageProps> = ({ pageIndex, registerPage
         scale={scale}
         onCanvasReady={onCanvasReady}
       />
-      <TextLayer pageIndex={pageIndex} scale={scale} />
       <LinkLayer
         pageIndex={pageIndex}
         pdfCanvas={pdfCanvas}
@@ -119,6 +118,7 @@ export const ViewerPage: React.FC<IViewerPageProps> = ({ pageIndex, registerPage
         containerEl={containerEl}
         onCommitHighlight={onCommitHighlight}
       />
+      <TextLayer pageIndex={pageIndex} scale={scale} />
     </div>
   );
 };

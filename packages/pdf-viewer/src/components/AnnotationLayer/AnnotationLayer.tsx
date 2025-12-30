@@ -3,6 +3,7 @@ import { useAnnotation } from '../../providers/AnnotationContextProvider';
 import { AnnotationType, type IPoint } from '../../types/annotation';
 import { useRenderAnnotation } from '../../hooks/useRenderAnnotation';
 import { useInk } from '../../hooks/useInk';
+import { cn } from '@pdfviewer/ui/lib/utils';
 
 export interface IAnnotationLayerProps {
   pageIndex: number;
@@ -136,8 +137,14 @@ export const AnnotationLayer: React.FC<IAnnotationLayerProps> = ({
 
   if (!metrics) return null;
 
+  const annotationLayerClassName = cn(
+    'absolute top-0 left-0 w-[stretch] h-[stretch]',
+    selectedTool === AnnotationType.TEXT && 'cursor-text',
+    selectedTool === AnnotationType.DRAW && 'cursor-crosshair',
+  );
+
   return (
-    <>
+    <div className={annotationLayerClassName}>
       <canvas
         ref={highlightCanvasRef}
         width={metrics.pixelWidth}
@@ -157,6 +164,6 @@ export const AnnotationLayer: React.FC<IAnnotationLayerProps> = ({
         onPointerCancel={onPointerCancel}
       />
       {textAnnotations}
-    </>
+    </div>
   );
 };

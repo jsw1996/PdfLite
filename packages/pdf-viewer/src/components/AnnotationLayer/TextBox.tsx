@@ -10,7 +10,7 @@ export const TextBox = ({ value, pos }: { value: string; pos: IPoint }) => {
   const dragOffset = React.useRef<IPoint>({ x: 0, y: 0 });
 
   const className = cn(
-    'field-sizing-content resize-none absolute max-w-[stretch] max-h-[stretch] overflow-hidden caret-black focus:border focus:border-[#a200ff] focus:outline-none focus:border-dashed',
+    'field-sizing-content resize-none absolute max-w-[stretch] max-h-[stretch] overflow-hidden caret-black focus:border focus:border-[#a200ff] focus:outline-none focus:border-dashed min-w-[50px]',
     isDragging && 'cursor-grabbing',
     isReadonly && 'cursor-grab select-none',
     !isReadonly && 'cursor-text',

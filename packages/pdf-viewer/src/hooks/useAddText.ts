@@ -11,7 +11,7 @@ export const useAddText = (pageElement: HTMLDivElement | null, pageIndex: number
       if (!pageElement) return;
       const rect = pageElement.getBoundingClientRect();
       const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
+      const y = e.clientY - rect.top - 12; // offset by half of the height of textbox
       addAnnotation({
         id: `text-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
         type: AnnotationType.TEXT,
