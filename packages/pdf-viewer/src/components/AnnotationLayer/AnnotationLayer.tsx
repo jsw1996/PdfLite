@@ -1,15 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAnnotation } from '../../providers/AnnotationContextProvider';
-import { AnnotationType, type IPoint } from '../../types/annotation';
+import { type IPoint } from '../../annotations';
 import { useRenderAnnotation } from '../../hooks/useRenderAnnotation';
 import { useInk } from '../../hooks/useInk';
 import { cn } from '@pdfviewer/ui/lib/utils';
 
 export interface IAnnotationLayerProps {
   pageIndex: number;
-  /** PDF 主画布，用于对齐位置/尺寸 */
+  /** PDF canvas for position/size alignment */
   pdfCanvas: HTMLCanvasElement | null;
-  /** ViewerPage 的容器，用于计算相对偏移，避免 offsetTop/Left 在 margin/scroll 下错位 */
+  /** ViewerPage container for calculating relative offsets */
   containerEl: HTMLElement | null;
   onCommitHighlight?: (args: { pageIndex: number; canvasPoints: IPoint[] }) => void;
 }
@@ -44,7 +44,7 @@ export const AnnotationLayer: React.FC<IAnnotationLayerProps> = ({
     if (!pdfCanvas || !containerEl) return;
     const rect = pdfCanvas.getBoundingClientRect();
     const containerRect = containerEl.getBoundingClientRect();
-    // 用 rect 差值算相对 container 的偏移（更稳：不受 margin/scroll/offsetParent 影响）
+    // Calculate offset relative to container (stable across margin/scroll/offsetParent changes)
     const top = rect.top - containerRect.top;
     const left = rect.left - containerRect.left;
 
@@ -85,7 +85,7 @@ export const AnnotationLayer: React.FC<IAnnotationLayerProps> = ({
 
   // Highlight is now text-selection based (handled by TextLayer/ViewerPage),
   // so AnnotationLayer only supports freehand interaction for DRAW.
-  const canInteract = selectedTool === AnnotationType.DRAW;
+  const canInteract = selectedTool === 'draw';
 
   const style = useMemo<React.CSSProperties>(() => {
     if (!metrics) return { display: 'none' };
@@ -96,7 +96,7 @@ export const AnnotationLayer: React.FC<IAnnotationLayerProps> = ({
       width: metrics.cssWidth,
       height: metrics.cssHeight,
       zIndex: 10,
-      // pointerEvents 由具体 canvas 控制
+      // pointerEvents controlled by specific canvas
     };
   }, [metrics]);
 
@@ -139,8 +139,8 @@ export const AnnotationLayer: React.FC<IAnnotationLayerProps> = ({
 
   const annotationLayerClassName = cn(
     'absolute top-0 left-0 w-[stretch] h-[stretch]',
-    selectedTool === AnnotationType.TEXT && 'cursor-text',
-    selectedTool === AnnotationType.DRAW && 'cursor-crosshair',
+    selectedTool === 'text' && 'cursor-text',
+    selectedTool === 'draw' && 'cursor-crosshair',
   );
 
   return (

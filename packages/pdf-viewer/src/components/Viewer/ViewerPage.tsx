@@ -3,15 +3,21 @@ import { CanvasLayer } from '../CanvasLayer/CanvasLayer';
 import { AnnotationLayer } from '../AnnotationLayer/AnnotationLayer';
 import { usePdfController } from '../../providers/PdfControllerContextProvider';
 import { useAnnotation } from '../../providers/AnnotationContextProvider';
-import { AnnotationType, type IAnnotation } from '../../types/annotation';
+import {
+  type IAnnotation,
+  type IDrawAnnotation,
+  type IHighlightAnnotation,
+  ANNOTATION_COLORS,
+} from '../../annotations';
 import { TextLayer } from '../TextLayer/TextLayer';
 import { usePdfState } from '@/providers/PdfStateContextProvider';
 import { LinkLayer, type ILinkItem } from '../LinkLayer/LinkLayer';
 import { useSelectionHighlight } from '../../hooks/useSelectionHighlight';
 import { useAddText } from '@/hooks/useAddText';
 
-const DEFAULT_HIGHLIGHT_COLOR = 'rgb(248, 196, 72)';
 const FPDF_ANNOTATION_SUBTYPE_LINK = 2;
+const FPDF_ANNOTATION_SUBTYPE_HIGHLIGHT = 9;
+const FPDF_ANNOTATION_SUBTYPE_INK = 15;
 
 export interface IViewerPageProps {
   pageIndex: number;
@@ -47,24 +53,50 @@ export const ViewerPage: React.FC<IViewerPageProps> = ({ pageIndex, registerPage
       );
     setLinkItems(links);
 
+    // Convert native annotations to our new type system
     const converted: IAnnotation[] = native
       .filter((a) => a.subtype !== FPDF_ANNOTATION_SUBTYPE_LINK)
-      .map((a) => ({
-        id: a.id,
-        // 原生注释里：HIGHLIGHT=9, INK=15（我们把两者都按“高亮效果”显示为黄色）
-        type: a.subtype === 9 || a.subtype === 15 ? AnnotationType.HIGHLIGHT : AnnotationType.DRAW,
-        shape: a.shape,
-        source: 'native' as const,
-        pageIndex,
-        points: a.points,
-        // 默认显示颜色：黄色（避免部分 PDF 高亮颜色存储在 CA/其它键里导致读出来发灰）
-        color:
-          a.subtype === 9 || a.subtype === 15
-            ? DEFAULT_HIGHLIGHT_COLOR
-            : `rgba(${a.color.r}, ${a.color.g}, ${a.color.b}, ${Math.min(1, Math.max(0, a.color.a / 255))})`,
-        strokeWidth: a.strokeWidth,
-        createdAt: Date.now(),
-      }));
+      .map((a): IAnnotation => {
+        const isHighlight =
+          a.subtype === FPDF_ANNOTATION_SUBTYPE_HIGHLIGHT ||
+          a.subtype === FPDF_ANNOTATION_SUBTYPE_INK;
+
+        if (isHighlight && a.shape === 'polygon' && a.points.length >= 4) {
+          // Convert polygon points to rect for highlight annotations
+          const xs = a.points.map((p) => p.x);
+          const ys = a.points.map((p) => p.y);
+          const highlight: IHighlightAnnotation = {
+            id: a.id,
+            type: 'highlight',
+            source: 'native',
+            pageIndex,
+            rects: [
+              {
+                left: Math.min(...xs),
+                top: Math.min(...ys),
+                width: Math.max(...xs) - Math.min(...xs),
+                height: Math.max(...ys) - Math.min(...ys),
+              },
+            ],
+            color: ANNOTATION_COLORS.HIGHLIGHT,
+            createdAt: Date.now(),
+          };
+          return highlight;
+        } else {
+          // Draw annotation (ink strokes)
+          const draw: IDrawAnnotation = {
+            id: a.id,
+            type: 'draw',
+            source: 'native',
+            pageIndex,
+            points: a.points,
+            color: `rgba(${a.color.r}, ${a.color.g}, ${a.color.b}, ${Math.min(1, Math.max(0, a.color.a / 255))})`,
+            strokeWidth: a.strokeWidth,
+            createdAt: Date.now(),
+          };
+          return draw;
+        }
+      });
     setNativeAnnotationsForPage(pageIndex, converted);
   }, [controller, pageIndex, setNativeAnnotationsForPage]);
 

@@ -1,5 +1,9 @@
 import { useAnnotation } from '../providers/AnnotationContextProvider';
-import { AnnotationType } from '../types/annotation';
+import {
+  type ITextAnnotation,
+  generateAnnotationId,
+  TEXT_ANNOTATION_DEFAULTS,
+} from '../annotations';
 import { useEffect, useCallback } from 'react';
 
 export const useAddText = (pageElement: HTMLDivElement | null, pageIndex: number) => {
@@ -7,23 +11,24 @@ export const useAddText = (pageElement: HTMLDivElement | null, pageIndex: number
 
   const handleClick = useCallback(
     (e: MouseEvent) => {
-      if (selectedTool !== AnnotationType.TEXT) return;
+      if (selectedTool !== 'text') return;
       if (!pageElement) return;
       const rect = pageElement.getBoundingClientRect();
       const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top - 12; // offset by half of the height of textbox
-      addAnnotation({
-        id: `text-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
-        type: AnnotationType.TEXT,
-        shape: 'polygon',
+      const y = e.clientY - rect.top - TEXT_ANNOTATION_DEFAULTS.FONT_SIZE / 2; // offset by half font size
+
+      const annotation: ITextAnnotation = {
+        id: generateAnnotationId('text'),
+        type: 'text',
         source: 'overlay',
-        points: [{ x, y }],
-        color: 'black',
-        strokeWidth: 0,
-        createdAt: Date.now(),
         pageIndex,
-        textContent: '',
-      });
+        position: { x, y },
+        content: '',
+        fontSize: TEXT_ANNOTATION_DEFAULTS.FONT_SIZE,
+        fontColor: TEXT_ANNOTATION_DEFAULTS.FONT_COLOR,
+        createdAt: Date.now(),
+      };
+      addAnnotation(annotation);
       setSelectedTool(null);
     },
     [selectedTool, addAnnotation, pageElement, pageIndex, setSelectedTool],

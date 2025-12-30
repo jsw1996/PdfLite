@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { useAnnotation } from '../providers/AnnotationContextProvider';
-import { AnnotationType } from '../types/annotation';
-
-const DEFAULT_HIGHLIGHT_COLOR = 'rgb(248, 196, 72)';
-
-// Delay to wait before applying highlight, to allow for double/triple-click detection
-const MULTI_CLICK_DELAY_MS = 300;
+import {
+  type IHighlightAnnotation,
+  type IRect,
+  generateAnnotationId,
+  ANNOTATION_COLORS,
+  ANNOTATION_TIMING,
+} from '../annotations';
 
 export interface IUseSelectionHighlightOptions {
   pageIndex: number;
@@ -14,7 +15,7 @@ export interface IUseSelectionHighlightOptions {
 
 export function useSelectionHighlight({ pageIndex, pdfCanvas }: IUseSelectionHighlightOptions) {
   const { selectedTool, setSelectedTool, addAnnotation } = useAnnotation();
-  const prevToolRef = useRef<AnnotationType | null>(null);
+  const prevToolRef = useRef<typeof selectedTool>(null);
   const highlightTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const applyCurrentSelectionAsHighlight = useCallback((): boolean => {
@@ -46,7 +47,8 @@ export function useSelectionHighlight({ pageIndex, pdfCanvas }: IUseSelectionHig
     const clientRects = Array.from(range.getClientRects());
     const now = Date.now();
 
-    let added = 0;
+    // Collect all rects for this highlight annotation
+    const rects: IRect[] = [];
     for (const r of clientRects) {
       const left = Math.max(r.left, pdfRect.left);
       const right = Math.min(r.right, pdfRect.right);
@@ -56,30 +58,26 @@ export function useSelectionHighlight({ pageIndex, pdfCanvas }: IUseSelectionHig
       const h = bottom - top;
       if (w <= 0 || h <= 0) continue;
 
-      const x = left - pdfRect.left;
-      const y = top - pdfRect.top;
-
-      // Add to overlay for immediate visual feedback
-      addAnnotation({
-        id: `selhl-${now}-${pageIndex}-${added}`,
-        type: AnnotationType.HIGHLIGHT,
-        shape: 'polygon',
-        source: 'overlay',
-        pageIndex,
-        points: [
-          { x, y },
-          { x: x + w, y },
-          { x: x + w, y: y + h },
-          { x, y: y + h },
-        ],
-        color: DEFAULT_HIGHLIGHT_COLOR,
-        strokeWidth: 0,
-        createdAt: now,
+      rects.push({
+        left: left - pdfRect.left,
+        top: top - pdfRect.top,
+        width: w,
+        height: h,
       });
-      added++;
     }
 
-    if (added > 0) {
+    if (rects.length > 0) {
+      // Create a single highlight annotation with all rects
+      const annotation: IHighlightAnnotation = {
+        id: generateAnnotationId('highlight'),
+        type: 'highlight',
+        source: 'overlay',
+        pageIndex,
+        rects,
+        color: ANNOTATION_COLORS.HIGHLIGHT,
+        createdAt: now,
+      };
+      addAnnotation(annotation);
       sel.removeAllRanges();
       return true;
     }
@@ -92,7 +90,7 @@ export function useSelectionHighlight({ pageIndex, pdfCanvas }: IUseSelectionHig
   useEffect(() => {
     const prev = prevToolRef.current;
     prevToolRef.current = selectedTool;
-    if (selectedTool !== AnnotationType.HIGHLIGHT) return;
+    if (selectedTool !== 'highlight') return;
     const applied = applyCurrentSelectionAsHighlight();
     if (applied && prev == null) {
       setSelectedTool(null);
@@ -101,7 +99,7 @@ export function useSelectionHighlight({ pageIndex, pdfCanvas }: IUseSelectionHig
 
   const handleHighlightOnInteraction = useCallback(() => {
     // Case 1: Highlight mode active -> selecting text applies highlight on mouse/key up.
-    if (selectedTool === AnnotationType.HIGHLIGHT) {
+    if (selectedTool === 'highlight') {
       // Cancel any pending highlight application to handle double/triple-click
       if (highlightTimeoutRef.current) {
         clearTimeout(highlightTimeoutRef.current);
@@ -111,7 +109,7 @@ export function useSelectionHighlight({ pageIndex, pdfCanvas }: IUseSelectionHig
       highlightTimeoutRef.current = setTimeout(() => {
         highlightTimeoutRef.current = null;
         applyCurrentSelectionAsHighlight();
-      }, MULTI_CLICK_DELAY_MS);
+      }, ANNOTATION_TIMING.MULTI_CLICK_DELAY_MS);
     }
   }, [applyCurrentSelectionAsHighlight, selectedTool]);
 

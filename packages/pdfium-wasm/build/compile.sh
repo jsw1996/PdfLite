@@ -111,7 +111,7 @@ em++ \
     -s WASM=1 \
     -s MODULARIZE=1 \
     -s EXPORT_NAME="createPDFiumModule" \
-    -s EXPORTED_RUNTIME_METHODS='["ccall","cwrap","getValue","setValue","UTF16ToString","stringToUTF16","HEAPU8","HEAP16"]' \
+    -s EXPORTED_RUNTIME_METHODS='["ccall","cwrap","getValue","setValue","UTF8ToString","UTF16ToString","stringToUTF8","stringToUTF16","HEAPU8","HEAP16"]' \
     -s EXPORTED_FUNCTIONS='["_PDFium_Init","_PDFium_Destroy","_PDFium_LoadMemDocument","_PDFium_CloseDocument","_PDFium_GetPageCount","_PDFium_LoadPage","_PDFium_ClosePage","_PDFium_GetPageWidth","_PDFium_GetPageHeight","_PDFium_RenderPageBitmap","_PDFium_FreeBuffer","_PDFium_LoadPageText","_PDFium_ClosePageText","_PDFium_GetPageCharCount","_PDFium_GetPageText","_PDFium_GetLastError","_PDFium_GetMetaText","_PDFium_GetFirstBookmark","_PDFium_GetNextBookmark","_PDFium_GetFirstChildBookmark","_PDFium_GetBookmarkTitle","_PDFium_GetBookmarkDest","_PDFium_GetDestPageIndex","_PDFium_Malloc","_PDFium_Free","_malloc","_free"]' \
     -s ALLOW_MEMORY_GROWTH=1 \
     -s INITIAL_MEMORY=67108864 \

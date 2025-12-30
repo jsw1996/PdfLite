@@ -91,6 +91,16 @@ export interface IPdfController {
       uri: string;
     },
   ): void;
+  addTextAnnotation(
+    pageIndex: number,
+    opts: {
+      scale: number;
+      canvasRect: { left: number; top: number; width: number; height: number };
+      text: string;
+      fontSize?: number;
+      fontColor?: { r: number; g: number; b: number };
+    },
+  ): void;
   exportPdfBytes(options?: { flags?: number; version?: number }): Uint8Array;
   downloadPdf(filename?: string, options?: { flags?: number; version?: number }): void;
   getPageCount(): number;
@@ -1057,8 +1067,9 @@ export class PdfController implements IPdfController {
             pdfium.HEAPF32[bufPtr / 4 + i * 2 + 0] = ptsPage[i].x;
             pdfium.HEAPF32[bufPtr / 4 + i * 2 + 1] = ptsPage[i].y;
           }
-          const ok = pdfium._FPDFAnnot_AddInkStroke_W(annot, bufPtr, ptsPage.length);
-          if (!ok) throw new Error('Failed to add ink stroke');
+          // FPDFAnnot_AddInkStroke returns the index of the stroke (0-based) on success, -1 on failure
+          const strokeIndex = pdfium._FPDFAnnot_AddInkStroke_W(annot, bufPtr, ptsPage.length);
+          if (strokeIndex < 0) throw new Error('Failed to add ink stroke');
         } finally {
           pdfium._free(bufPtr);
         }
@@ -1211,6 +1222,97 @@ export class PdfController implements IPdfController {
       } finally {
         pdfium._free(rectPtr);
         pdfium._free(uriPtr);
+        pdfium._FPDFPage_CloseAnnot_W(annot);
+      }
+    });
+  }
+
+  /**
+   * Add a FreeText annotation (text box) to the PDF.
+   * This creates a standard PDF FreeText annotation that will be saved with the document.
+   */
+  public addTextAnnotation(
+    pageIndex: number,
+    opts: {
+      scale: number;
+      canvasRect: { left: number; top: number; width: number; height: number };
+      text: string;
+      fontSize?: number;
+      fontColor?: { r: number; g: number; b: number };
+    },
+  ): void {
+    const { scale, canvasRect, text, fontSize = 12, fontColor = { r: 0, g: 0, b: 0 } } = opts;
+    if (!text) return;
+    if (canvasRect.width <= 0 || canvasRect.height <= 0) return;
+
+    this.withPage(pageIndex, (pdfium, pagePtr) => {
+      const pageW = pdfium._PDFium_GetPageWidth(pagePtr);
+      const pageH = pdfium._PDFium_GetPageHeight(pagePtr);
+
+      const annot = pdfium._FPDFPage_CreateAnnot_W(pagePtr, FPDF_ANNOTATION_SUBTYPE.FREETEXT);
+      if (!annot) throw new Error('Failed to create FREETEXT annotation');
+
+      const rectPtr = pdfium._malloc(4 * 4); // FS_RECTF: left, bottom, right, top (floats)
+      const keyContentsPtr = pdfium._malloc(16); // "Contents" + null terminator
+      const keyDaPtr = pdfium._malloc(8); // "DA" + null terminator
+      const contentsMaxLen = text.length * 4 + 4;
+      const contentsPtr = pdfium._malloc(contentsMaxLen);
+      const daMaxLen = 64;
+      const daPtr = pdfium._malloc(daMaxLen);
+
+      try {
+        // Convert canvas coordinates to page coordinates
+        const tl = this.canvasToPagePoint(
+          pagePtr,
+          pageW,
+          pageH,
+          scale,
+          canvasRect.left,
+          canvasRect.top,
+        );
+        const br = this.canvasToPagePoint(
+          pagePtr,
+          pageW,
+          pageH,
+          scale,
+          canvasRect.left + canvasRect.width,
+          canvasRect.top + canvasRect.height,
+        );
+
+        const left = Math.min(tl.x, br.x);
+        const right = Math.max(tl.x, br.x);
+        const bottom = Math.min(tl.y, br.y);
+        const top = Math.max(tl.y, br.y);
+
+        // Set annotation rectangle (FS_RECTF: left, bottom, right, top)
+        pdfium.HEAPF32[rectPtr / 4 + 0] = left;
+        pdfium.HEAPF32[rectPtr / 4 + 1] = bottom;
+        pdfium.HEAPF32[rectPtr / 4 + 2] = right;
+        pdfium.HEAPF32[rectPtr / 4 + 3] = top;
+        const okRect = pdfium._FPDFAnnot_SetRect_W(annot, rectPtr);
+        if (!okRect) throw new Error('Failed to set FREETEXT rect');
+
+        // Set Contents (the text content)
+        pdfium.stringToUTF8('Contents', keyContentsPtr, 16);
+        pdfium.stringToUTF16(text, contentsPtr, contentsMaxLen);
+        pdfium._FPDFAnnot_SetStringValue_W(annot, keyContentsPtr, contentsPtr);
+
+        // Set DA (Default Appearance) string for font and color
+        // Format: "/<fontName> <fontSize> Tf <r> <g> <b> rg"
+        const r = fontColor.r / 255;
+        const g = fontColor.g / 255;
+        const b = fontColor.b / 255;
+        const fontSizeInPage = fontSize / scale; // Convert font size from canvas to page units
+        const daString = `/Helv ${fontSizeInPage.toFixed(2)} Tf ${r.toFixed(3)} ${g.toFixed(3)} ${b.toFixed(3)} rg`;
+        pdfium.stringToUTF8('DA', keyDaPtr, 8);
+        pdfium.stringToUTF16(daString, daPtr, daMaxLen);
+        pdfium._FPDFAnnot_SetStringValue_W(annot, keyDaPtr, daPtr);
+      } finally {
+        pdfium._free(rectPtr);
+        pdfium._free(keyContentsPtr);
+        pdfium._free(keyDaPtr);
+        pdfium._free(contentsPtr);
+        pdfium._free(daPtr);
         pdfium._FPDFPage_CloseAnnot_W(annot);
       }
     });

@@ -1,84 +1,115 @@
 import { cn } from '@pdfviewer/ui/lib/utils';
-import type { IPoint } from '../../../../controller/dist/PdfController';
+import type { IPoint } from '../../annotations';
 import React from 'react';
+import { useAnnotation } from '../../providers/AnnotationContextProvider';
 
-export const TextBox = ({ value, pos }: { value: string; pos: IPoint }) => {
+export interface ITextBoxProps {
+  id: string;
+  content: string;
+  position: IPoint;
+  fontSize: number;
+  fontColor: string;
+}
+
+type Mode = 'editing' | 'selected' | 'idle';
+
+export const TextBox = ({ id, content, position, fontSize, fontColor }: ITextBoxProps) => {
+  const { updateAnnotation } = useAnnotation();
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
-  const [isReadonly, setIsReadonly] = React.useState(false);
-  const [position, setPosition] = React.useState<IPoint>(pos);
+  const [mode, setMode] = React.useState<Mode>('editing');
+  const [localPosition, setLocalPosition] = React.useState<IPoint>(position);
   const [isDragging, setIsDragging] = React.useState(false);
-  const dragOffset = React.useRef<IPoint>({ x: 0, y: 0 });
 
   const className = cn(
-    'field-sizing-content resize-none absolute max-w-[stretch] max-h-[stretch] overflow-hidden caret-black focus:border focus:border-[#a200ff] focus:outline-none focus:border-dashed min-w-[50px]',
-    isDragging && 'cursor-grabbing',
-    isReadonly && 'cursor-grab select-none',
-    !isReadonly && 'cursor-text',
+    'field-sizing-content resize-none absolute max-w-[stretch] max-h-[stretch] overflow-hidden caret-black focus:border focus:border-[#a200ff] focus:outline-none focus:border-dashed min-w-[50px] bg-transparent',
+    mode === 'editing' && 'cursor-text',
+    mode === 'selected' && !isDragging && 'cursor-grab',
+    isDragging && 'cursor-grabbing select-none',
   );
 
-  // auto focus on mount
+  // Auto focus on mount
   React.useEffect(() => {
     textareaRef.current?.focus();
   }, []);
 
-  const handleMouseDown = (e: React.MouseEvent) => {
-    if (!isReadonly) return;
-    e.preventDefault();
-    setIsDragging(true);
-    dragOffset.current = {
-      x: e.clientX - position.x,
-      y: e.clientY - position.y,
-    };
-  };
-
-  const handleMouseMove = React.useCallback(
-    (e: MouseEvent) => {
-      if (!isDragging) return;
-      setPosition({
-        x: Math.max(e.clientX - dragOffset.current.x, 0),
-        y: Math.max(e.clientY - dragOffset.current.y, 0),
-      });
-    },
-    [isDragging],
-  );
-
-  const handleMouseUp = React.useCallback(() => {
-    setIsDragging(false);
-  }, []);
-
+  // Sync position from props
   React.useEffect(() => {
-    if (isDragging) {
-      window.addEventListener('mousemove', handleMouseMove);
-      window.addEventListener('mouseup', handleMouseUp);
-    }
-    return () => {
+    setLocalPosition(position);
+  }, [position]);
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (mode !== 'selected') return;
+
+    const offset = {
+      x: e.clientX - localPosition.x,
+      y: e.clientY - localPosition.y,
+    };
+    let currentPos = localPosition;
+    let dragged = false;
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      if (!dragged) {
+        dragged = true;
+        setIsDragging(true);
+      }
+      currentPos = {
+        x: Math.max(moveEvent.clientX - offset.x, 0),
+        y: Math.max(moveEvent.clientY - offset.y, 0),
+      };
+      setLocalPosition(currentPos);
+    };
+
+    const handleMouseUp = () => {
+      if (dragged) {
+        const rect = textareaRef.current?.getBoundingClientRect();
+        updateAnnotation(id, {
+          position: currentPos,
+          dimensions: rect ? { width: rect.width, height: rect.height } : undefined,
+        } as Partial<never>);
+        setIsDragging(false);
+      }
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isDragging, handleMouseMove, handleMouseUp]);
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+  };
 
   const handleClick = () => {
-    if (isReadonly) {
+    if (isDragging) return;
+
+    if (mode === 'idle') {
+      setMode('selected');
+    } else if (mode === 'selected') {
+      setMode('editing');
       textareaRef.current?.focus();
     }
   };
 
-  const onDoubleClick = () => {
-    setIsReadonly(false);
-    textareaRef.current?.focus();
+  const handleBlur = () => {
+    setMode('idle');
+    const newContent = textareaRef.current?.value ?? '';
+    if (newContent !== content) {
+      updateAnnotation(id, { content: newContent } as Partial<never>);
+    }
   };
 
   return (
     <textarea
-      onBlur={() => setIsReadonly(true)}
+      ref={textareaRef}
+      readOnly={mode !== 'editing'}
+      className={className}
+      style={{
+        left: localPosition.x,
+        top: localPosition.y,
+        fontSize: `${fontSize}px`,
+        color: fontColor,
+      }}
+      defaultValue={content}
       onMouseDown={handleMouseDown}
       onClick={handleClick}
-      onDoubleClick={onDoubleClick}
-      readOnly={isReadonly}
-      ref={textareaRef}
-      className={className}
-      style={{ left: position.x, top: position.y }}
-      defaultValue={value}
+      onBlur={handleBlur}
     />
   );
 };
