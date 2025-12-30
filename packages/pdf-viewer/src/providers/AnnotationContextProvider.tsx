@@ -1,16 +1,33 @@
 import React, { createContext, useContext, useMemo, useState, useCallback } from 'react';
-import { type IAnnotation, AnnotationType } from '../types/annotation';
+import {
+  type IAnnotation,
+  type AnnotationType,
+  normalizeAnnotation,
+  denormalizeAnnotation,
+  commitAnnotation,
+} from '../annotations';
 import { usePdfState } from './PdfStateContextProvider';
 import { usePdfController } from './PdfControllerContextProvider';
+
 export interface IAnnotationContextValue {
+  /** Currently selected annotation tool */
   selectedTool: AnnotationType | null;
+  /** Set the current annotation tool */
   setSelectedTool: (tool: AnnotationType | null) => void;
+  /** Add an annotation (will be normalized for scale-independent storage) */
   addAnnotation: (annotation: IAnnotation) => void;
+  /** All annotations in the stack */
   annotationStack: IAnnotation[];
+  /** Remove and return the last overlay annotation */
   popAnnotation: () => IAnnotation | undefined;
+  /** Get annotations for a specific page (denormalized for current scale) */
   getAnnotationsForPage: (pageIndex: number) => IAnnotation[];
+  /** Set native annotations loaded from PDF */
   setNativeAnnotationsForPage: (pageIndex: number, annotations: IAnnotation[]) => void;
+  /** Commit all overlay annotations to PDFium */
   commitAnnotations: () => void;
+  /** Update an existing annotation by ID */
+  updateAnnotation: (id: string, updates: Partial<IAnnotation>) => void;
 }
 
 const AnnotationContext = createContext<IAnnotationContextValue | null>(null);
@@ -26,10 +43,12 @@ export function AnnotationContextProvider({ children }: { children: React.ReactN
   const [annotationStack, setAnnotationStack] = useState<IAnnotation[]>([]);
   const scale = usePdfState().scale;
   const { controller } = usePdfController();
+
   const popAnnotation = useCallback(() => {
     let popped: IAnnotation | undefined;
     setAnnotationStack((prev) => {
       if (prev.length === 0) return prev;
+      // Don't pop native annotations
       if (prev[prev.length - 1].source === 'native') return prev;
       popped = prev[prev.length - 1];
       return prev.slice(0, -1);
@@ -39,66 +58,53 @@ export function AnnotationContextProvider({ children }: { children: React.ReactN
 
   const addAnnotation = useCallback(
     (annotation: IAnnotation) => {
-      const normalizedPoints = annotation.points.map((point) => ({
-        x: point.x / scale,
-        y: point.y / scale,
-      }));
-      const normalizedAnnotation = { ...annotation, points: normalizedPoints };
+      // Normalize the annotation for scale-independent storage
+      const normalizedAnnotation = normalizeAnnotation(annotation, scale);
       setAnnotationStack((prev) => [...prev, normalizedAnnotation]);
     },
     [scale],
   );
 
+  const updateAnnotation = useCallback((id: string, updates: Partial<IAnnotation>) => {
+    setAnnotationStack((prev) =>
+      prev.map((ann) => {
+        if (ann.id !== id) return ann;
+        // Merge updates, ensuring type compatibility
+        return { ...ann, ...updates } as IAnnotation;
+      }),
+    );
+  }, []);
+
   const getAnnotationsForPage = useCallback(
     (pageIndex: number) =>
       annotationStack
         .filter((a) => a.pageIndex === pageIndex)
-        .map((annotation) => {
-          return {
-            ...annotation,
-            points: annotation.points.map((point) => ({
-              x: point.x * scale,
-              y: point.y * scale,
-            })),
-          };
-        }) ?? [],
+        .map((annotation) => denormalizeAnnotation(annotation, scale)),
     [annotationStack, scale],
   );
 
   const setNativeAnnotationsForPage = useCallback(
     (pageIndex: number, annotations: IAnnotation[]) => {
       setAnnotationStack((prev) => {
+        // Check if we already have native annotations for this page
         if (prev.some((a) => a.source === 'native' && a.pageIndex === pageIndex)) {
           return prev;
-        } else {
-          return [...annotations, ...prev];
         }
+        // Prepend native annotations (they should appear below overlay annotations)
+        return [...annotations, ...prev];
       });
     },
     [],
   );
 
-  const commitAnnotations = useCallback(() => {
+  const commitAnnotationsCallback = useCallback(() => {
+    // Commit all overlay annotations to PDFium using handlers
     annotationStack.forEach((annotation) => {
       if (annotation.source === 'overlay') {
-        if (annotation.type === AnnotationType.HIGHLIGHT) {
-          controller.addHighlightAnnotation(annotation.pageIndex, {
-            scale: 1,
-            canvasRect: {
-              left: Math.min(...annotation.points.map((p) => p.x)),
-              top: Math.min(...annotation.points.map((p) => p.y)),
-              width:
-                Math.max(...annotation.points.map((p) => p.x)) -
-                Math.min(...annotation.points.map((p) => p.x)),
-              height:
-                Math.max(...annotation.points.map((p) => p.y)) -
-                Math.min(...annotation.points.map((p) => p.y)),
-            },
-          });
-        }
+        commitAnnotation(controller, annotation);
       }
     });
-    // mark all the annoations as native after commit
+    // Mark all annotations as native after commit
     setAnnotationStack((prev) => prev.map((a) => ({ ...a, source: 'native' as const })));
   }, [annotationStack, controller]);
 
@@ -111,7 +117,8 @@ export function AnnotationContextProvider({ children }: { children: React.ReactN
       setNativeAnnotationsForPage,
       annotationStack,
       popAnnotation,
-      commitAnnotations,
+      commitAnnotations: commitAnnotationsCallback,
+      updateAnnotation,
     }),
     [
       addAnnotation,
@@ -120,7 +127,8 @@ export function AnnotationContextProvider({ children }: { children: React.ReactN
       setNativeAnnotationsForPage,
       annotationStack,
       popAnnotation,
-      commitAnnotations,
+      commitAnnotationsCallback,
+      updateAnnotation,
     ],
   );
 

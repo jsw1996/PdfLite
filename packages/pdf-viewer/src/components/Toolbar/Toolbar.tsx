@@ -3,7 +3,6 @@ import { ToolGroup } from './ToolGroup';
 import { Separator } from '@pdfviewer/ui/components/separator';
 import { useCallback } from 'react';
 import { useAnnotation } from '../../providers/AnnotationContextProvider';
-import { AnnotationType } from '../../types/annotation';
 import { DrawButtonId } from '../ToolButtons/DrawButton';
 import { HighlightButtonId } from '../ToolButtons/HighlightButton';
 import { cn } from '@pdfviewer/ui/lib/utils';
@@ -22,20 +21,18 @@ export const ToolBar: React.FC<IToobarProps> = (props: IToobarProps) => {
   const handleActivate = useCallback(
     (toolId: string | null) => {
       if (toolId === DrawButtonId) {
-        setSelectedTool(selectedTool === AnnotationType.DRAW ? null : AnnotationType.DRAW);
+        setSelectedTool(selectedTool === 'draw' ? null : 'draw');
         return;
       }
       if (toolId === HighlightButtonId) {
-        setSelectedTool(
-          selectedTool === AnnotationType.HIGHLIGHT ? null : AnnotationType.HIGHLIGHT,
-        );
+        setSelectedTool(selectedTool === 'highlight' ? null : 'highlight');
         return;
       }
       if (toolId === 'text') {
-        setSelectedTool(selectedTool === AnnotationType.TEXT ? null : AnnotationType.TEXT);
+        setSelectedTool(selectedTool === 'text' ? null : 'text');
         return;
       }
-      // 其它工具不进入 annotation 模式
+      // Other tools don't enter annotation mode
       setSelectedTool(null);
     },
     [selectedTool, setSelectedTool],
