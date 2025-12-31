@@ -14,6 +14,8 @@ import { usePdfState } from '@/providers/PdfStateContextProvider';
 import { LinkLayer } from '../LinkLayer/LinkLayer';
 import { useSelectionHighlight } from '../../hooks/useSelectionHighlight';
 import { useAddText } from '@/hooks/useAddText';
+import { useAddSignature } from '@/hooks/useAddSignature';
+import { SignatureDialog } from '../Signature/SignatureDialog';
 
 const FPDF_ANNOTATION_SUBTYPE_LINK = 2;
 const FPDF_ANNOTATION_SUBTYPE_HIGHLIGHT = 9;
@@ -38,6 +40,11 @@ export const ViewerPage: React.FC<IViewerPageProps> = ({ pageIndex, registerPage
 
   const { handleHighlightOnInteraction } = useSelectionHighlight({ pageIndex, pdfCanvas });
   useAddText(containerEl, pageIndex);
+
+  const { isDialogOpen, setIsDialogOpen, onSignatureReady } = useAddSignature(
+    containerEl,
+    pageIndex,
+  );
   const refreshNativeAnnots = useCallback(() => {
     const native = controller.listNativeAnnotations(pageIndex, { scale: 1 });
 
@@ -134,6 +141,11 @@ export const ViewerPage: React.FC<IViewerPageProps> = ({ pageIndex, registerPage
         onCommitHighlight={onCommitHighlight}
       />
       <TextLayer pageIndex={pageIndex} scale={scale} />
+      <SignatureDialog
+        open={isDialogOpen}
+        onOpenChange={setIsDialogOpen}
+        onSignatureReady={onSignatureReady}
+      />
     </div>
   );
 };

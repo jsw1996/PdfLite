@@ -3,7 +3,7 @@
  * Each annotation type has its own specific properties.
  */
 
-export type AnnotationType = 'draw' | 'highlight' | 'text';
+export type AnnotationType = 'draw' | 'highlight' | 'text' | 'signature';
 export type AnnotationSource = 'native' | 'overlay';
 
 export interface IPoint {
@@ -61,9 +61,25 @@ export interface ITextAnnotation extends IBaseAnnotation {
 }
 
 /**
+ * Signature annotation (image/stamp)
+ */
+export interface ISignatureAnnotation extends IBaseAnnotation {
+  type: 'signature';
+  position: IPoint;
+  imageDataUrl: string;
+  imageBytes: Uint8Array;
+  width: number;
+  height: number;
+}
+
+/**
  * Discriminated union of all annotation types
  */
-export type IAnnotation = IDrawAnnotation | IHighlightAnnotation | ITextAnnotation;
+export type IAnnotation =
+  | IDrawAnnotation
+  | IHighlightAnnotation
+  | ITextAnnotation
+  | ISignatureAnnotation;
 
 /**
  * Type guard for draw annotations
@@ -84,6 +100,13 @@ export function isHighlightAnnotation(a: IAnnotation): a is IHighlightAnnotation
  */
 export function isTextAnnotation(a: IAnnotation): a is ITextAnnotation {
   return a.type === 'text';
+}
+
+/**
+ * Type guard for signature annotations
+ */
+export function isSignatureAnnotation(a: IAnnotation): a is ISignatureAnnotation {
+  return a.type === 'signature';
 }
 
 /**

@@ -12,9 +12,11 @@ export {
   type IDrawAnnotation,
   type IHighlightAnnotation,
   type ITextAnnotation,
+  type ISignatureAnnotation,
   isDrawAnnotation,
   isHighlightAnnotation,
   isTextAnnotation,
+  isSignatureAnnotation,
   generateAnnotationId,
 } from './types';
 

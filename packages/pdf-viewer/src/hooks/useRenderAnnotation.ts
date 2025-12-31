@@ -6,11 +6,13 @@ import {
   isDrawAnnotation,
   isHighlightAnnotation,
   isTextAnnotation,
+  isSignatureAnnotation,
   renderAnnotation,
   ANNOTATION_COLORS,
   ANNOTATION_STROKE_WIDTH,
 } from '../annotations';
 import { TextBox } from '../components/AnnotationLayer/TextBox';
+import { SignatureBox } from '../components/AnnotationLayer/SignatureBox';
 
 interface ICanvasMetrics {
   top: number;
@@ -62,7 +64,10 @@ export function useRenderAnnotation({
   annotations,
   selectedTool,
   currentPath,
-}: IUseRenderAnnotationOptions): { textAnnotations: React.ReactElement[] } {
+}: IUseRenderAnnotationOptions): {
+  textAnnotations: React.ReactElement[];
+  signatureAnnotations: React.ReactElement[];
+} {
   // Derive text annotations from annotations using useMemo
   const textAnnotations = useMemo(() => {
     return annotations.filter(isTextAnnotation).map((a) =>
@@ -73,6 +78,20 @@ export function useRenderAnnotation({
         position: a.position,
         fontSize: a.fontSize,
         fontColor: a.fontColor,
+      }),
+    );
+  }, [annotations]);
+
+  // Derive signature annotations from annotations using useMemo
+  const signatureAnnotations = useMemo(() => {
+    return annotations.filter(isSignatureAnnotation).map((a) =>
+      React.createElement(SignatureBox, {
+        key: a.id,
+        id: a.id,
+        position: a.position,
+        imageDataUrl: a.imageDataUrl,
+        width: a.width,
+        height: a.height,
       }),
     );
   }, [annotations]);
@@ -121,5 +140,5 @@ export function useRenderAnnotation({
     redraw();
   }, [redraw]);
 
-  return { textAnnotations };
+  return { textAnnotations, signatureAnnotations };
 }
