@@ -99,7 +99,10 @@ export const HandwritingCanvas: React.FC<IHandwritingCanvasProps> = ({ onSignatu
         const canvas = canvasRef.current;
         if (!canvas) return;
 
+        // Convert canvas to PNG data URL (base64 encoded)
         const pngDataUrl = canvas.toDataURL('image/png');
+
+        // Convert base64 string to Uint8Array
         const pngBytes = new Uint8Array(
           atob(pngDataUrl.split(',')[1])
             .split('')

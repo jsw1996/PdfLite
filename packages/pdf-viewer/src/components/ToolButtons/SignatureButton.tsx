@@ -1,5 +1,5 @@
 import type { IToolButton } from './ToolButton.type';
-import { PenTool } from 'lucide-react';
+import { Signature } from 'lucide-react';
 
 export const SignatureButtonId = 'signature';
 
@@ -7,7 +7,7 @@ export const SignatureButton: () => IToolButton = () => {
   return {
     id: SignatureButtonId,
     name: 'Signature',
-    icon: PenTool,
+    icon: Signature,
     type: 'toggle',
     groupIndex: 1,
   };
