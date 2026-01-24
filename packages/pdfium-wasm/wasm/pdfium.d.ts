@@ -39,6 +39,8 @@ export interface PDFiumModule {
   setValue(ptr: number, value: number, type: string): void;
   UTF16ToString(ptr: number): string;
   stringToUTF16(str: string, buffer: number, maxBytes: number): void;
+  stringToUTF8(str: string, buffer: number, maxBytes: number): void;
+  lengthBytesUTF8(str: string): number;
 }
 
 declare function createPDFiumModule(): Promise<PDFiumModule>;

@@ -1,0 +1,21 @@
+From: PDFViewer Build <build@pdfviewer.local>
+Subject: [PATCH 2/5] Allow emscripten as primary target OS
+
+PDFium's build system has an assertion preventing emscripten as primary target.
+Replace with proper toolchain configuration for WebAssembly builds.
+
+---
+ build/config/BUILDCONFIG.gn | 6 ++----
+ 1 file changed, 2 insertions(+), 4 deletions(-)
+
+diff --git a/build/config/BUILDCONFIG.gn b/build/config/BUILDCONFIG.gn
+--- a/build/config/BUILDCONFIG.gn
++++ b/build/config/BUILDCONFIG.gn
+@@ -1,6 +1,4 @@
+ } else if (target_os == "emscripten") {
+-  # Because it's too hard to remove all targets from //BUILD.gn that do not work with it.
+-  assert(
+-      false,
+-      "emscripten is not a supported target_os. It is available only as secondary toolchain.")
++  # Patched to allow emscripten as primary target for WebAssembly builds
++  _default_toolchain = "//build/toolchain/wasm:wasm"

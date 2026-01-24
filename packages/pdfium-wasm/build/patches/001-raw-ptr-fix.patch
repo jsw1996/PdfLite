@@ -1,0 +1,16 @@
+From: PDFViewer Build <build@pdfviewer.local>
+Subject: [PATCH 1/5] Fix raw_ptr for standalone PDFium builds
+
+The raw_ptr template is part of Chromium's MiraclePtr memory safety feature
+and is not available in standalone PDFium builds. Replace with regular pointer.
+
+---
+ fpdfsdk/fpdf_editpage.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/fpdfsdk/fpdf_editpage.cpp b/fpdfsdk/fpdf_editpage.cpp
+--- a/fpdfsdk/fpdf_editpage.cpp
++++ b/fpdfsdk/fpdf_editpage.cpp
+@@ -1,1 +1,1 @@
+-raw_ptr<CPDF_PageObject>
++CPDF_PageObject*

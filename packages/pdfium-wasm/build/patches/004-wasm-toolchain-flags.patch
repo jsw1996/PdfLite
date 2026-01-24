@@ -1,0 +1,19 @@
+From: PDFViewer Build <build@pdfviewer.local>
+Subject: [PATCH 4/5] Add compiler flags for WASM toolchain
+
+Add necessary compiler flags for Emscripten compatibility:
+- -fno-stack-protector: Stack protector not supported in WASM
+- -Wno-unknown-warning-option: Suppress warnings about unknown flags
+- -D_POSIX_C_SOURCE=200112: Enable POSIX compatibility
+
+---
+ build/toolchain/wasm/BUILD.gn | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/build/toolchain/wasm/BUILD.gn b/build/toolchain/wasm/BUILD.gn
+--- a/build/toolchain/wasm/BUILD.gn
++++ b/build/toolchain/wasm/BUILD.gn
+@@ -1,4 +1,6 @@
++  extra_cflags = "-fno-stack-protector -Wno-unknown-warning-option -D_POSIX_C_SOURCE=200112"
++  extra_cxxflags = "-fno-stack-protector -Wno-unknown-warning-option -D_POSIX_C_SOURCE=200112"
+   toolchain_args = {

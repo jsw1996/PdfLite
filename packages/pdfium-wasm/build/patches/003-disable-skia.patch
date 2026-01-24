@@ -1,0 +1,19 @@
+From: PDFViewer Build <build@pdfviewer.local>
+Subject: [PATCH 3/5] Disable Skia dependency for emscripten builds
+
+Skia graphics library doesn't compile well for WASM and isn't needed
+for PDFium's core PDF rendering functionality.
+
+---
+ BUILD.gn | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/BUILD.gn b/BUILD.gn
+--- a/BUILD.gn
++++ b/BUILD.gn
+@@ -1,5 +1,5 @@
+-  if (defined(checkout_skia) && checkout_skia && !is_android) {
++  # Patched: Disabled skia for emscripten/wasm builds
++  if (defined(checkout_skia) && checkout_skia && !is_android && target_os != "emscripten") {
+     deps += [ "//skia" ]
+   }

@@ -618,6 +618,7 @@ export interface PDFiumModule {
   UTF16ToString(ptr: number): string;
   stringToUTF8(str: string, buffer: number, maxBytes: number): void;
   stringToUTF16(str: string, buffer: number, maxBytes: number): void;
+  lengthBytesUTF8(str: string): number;
 }
 
 // Get the factory function from the module (handles ESM/CJS interop)

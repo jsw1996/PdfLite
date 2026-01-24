@@ -1238,10 +1238,11 @@ export class PdfController implements IPdfController {
       canvasRect: { left: number; top: number; width: number; height: number };
       text: string;
       fontSize?: number;
-      fontColor?: { r: number; g: number; b: number };
+      fontColor?: { r: number; g: number; b: number }; // allow 0..255
     },
   ): void {
-    const { scale, canvasRect, text, fontSize = 12, fontColor = { r: 0, g: 0, b: 0 } } = opts;
+    const { scale, canvasRect, text } = opts;
+
     if (!text) return;
     if (canvasRect.width <= 0 || canvasRect.height <= 0) return;
 
@@ -1252,16 +1253,40 @@ export class PdfController implements IPdfController {
       const annot = pdfium._FPDFPage_CreateAnnot_W(pagePtr, FPDF_ANNOTATION_SUBTYPE.FREETEXT);
       if (!annot) throw new Error('Failed to create FREETEXT annotation');
 
-      const rectPtr = pdfium._malloc(4 * 4); // FS_RECTF: left, bottom, right, top (floats)
-      const keyContentsPtr = pdfium._malloc(16); // "Contents" + null terminator
-      const keyDaPtr = pdfium._malloc(8); // "DA" + null terminator
-      const contentsMaxLen = text.length * 4 + 4;
-      const contentsPtr = pdfium._malloc(contentsMaxLen);
-      const daMaxLen = 64;
-      const daPtr = pdfium._malloc(daMaxLen);
+      const allocUtf8Z = (s: string) => {
+        const bytes = pdfium.lengthBytesUTF8(s) + 1;
+        const ptr = pdfium._malloc(bytes);
+        pdfium.stringToUTF8(s, ptr, bytes);
+        return ptr;
+      };
+
+      const allocUtf16Z = (s: string) => {
+        // stringToUTF16 expects "numBytes"
+        const bytes = (s.length + 1) * 2;
+        const ptr = pdfium._malloc(bytes);
+        pdfium.stringToUTF16(s, ptr, bytes);
+        return ptr;
+      };
+
+      const setAnnotString = (key: string, value: string) => {
+        const keyPtr = allocUtf8Z(key); // key: UTF-8 bytestring
+        const valPtr = allocUtf16Z(value); // value: UTF-16LE widestring
+        try {
+          const ok = pdfium._FPDFAnnot_SetStringValue_W(annot, keyPtr, valPtr);
+          if (!ok) throw new Error(`Failed to set ${key}`);
+        } finally {
+          pdfium._free(valPtr);
+          pdfium._free(keyPtr);
+        }
+      };
+
+      const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
+      const to01 = (v: number) => (v > 1 ? v / 255 : v); // supports 0..255 or 0..1
+
+      let rectPtr = 0;
 
       try {
-        // Convert canvas coordinates to page coordinates
+        // Convert canvas coords to page coords
         const tl = this.canvasToPagePoint(
           pagePtr,
           pageW,
@@ -1284,35 +1309,59 @@ export class PdfController implements IPdfController {
         const bottom = Math.min(tl.y, br.y);
         const top = Math.max(tl.y, br.y);
 
-        // Set annotation rectangle (FS_RECTF: left, bottom, right, top)
-        pdfium.HEAPF32[rectPtr / 4 + 0] = left;
-        pdfium.HEAPF32[rectPtr / 4 + 1] = bottom;
-        pdfium.HEAPF32[rectPtr / 4 + 2] = right;
-        pdfium.HEAPF32[rectPtr / 4 + 3] = top;
-        const okRect = pdfium._FPDFAnnot_SetRect_W(annot, rectPtr);
-        if (!okRect) throw new Error('Failed to set FREETEXT rect');
+        rectPtr = this.allocRectF(left, bottom, right, top);
+        if (!pdfium._FPDFAnnot_SetRect_W(annot, rectPtr)) {
+          throw new Error('Failed to set FREETEXT rect');
+        }
 
-        // Set Contents (the text content)
-        pdfium.stringToUTF8('Contents', keyContentsPtr, 16);
-        pdfium.stringToUTF16(text, contentsPtr, contentsMaxLen);
-        pdfium._FPDFAnnot_SetStringValue_W(annot, keyContentsPtr, contentsPtr);
+        // Contents (text)
+        setAnnotString('Contents', text);
 
-        // Set DA (Default Appearance) string for font and color
-        // Format: "/<fontName> <fontSize> Tf <r> <g> <b> rg"
-        const r = fontColor.r / 255;
-        const g = fontColor.g / 255;
-        const b = fontColor.b / 255;
-        const fontSizeInPage = fontSize / scale; // Convert font size from canvas to page units
-        const daString = `/Helv ${fontSizeInPage.toFixed(2)} Tf ${r.toFixed(3)} ${g.toFixed(3)} ${b.toFixed(3)} rg`;
-        pdfium.stringToUTF8('DA', keyDaPtr, 8);
-        pdfium.stringToUTF16(daString, daPtr, daMaxLen);
-        pdfium._FPDFAnnot_SetStringValue_W(annot, keyDaPtr, daPtr);
+        // DA (basic default appearance): font + size + text color
+        const fontSize = opts.fontSize ?? 12;
+        const fc = opts.fontColor ?? { r: 0, g: 0, b: 0 };
+        const r = clamp01(to01(fc.r));
+        const g = clamp01(to01(fc.g));
+        const b = clamp01(to01(fc.b));
+
+        // Use a base font name. /Helv is common.
+        // Format: /FontName <size> Tf <r> <g> <b> rg
+        const da = `/Helv ${fontSize} Tf ${r} ${g} ${b} rg`;
+        setAnnotString('DA', da);
+
+        // Border (legacy /Border array)
+        const okBorder = pdfium._FPDFAnnot_SetBorder_W(annot, 0, 0, 0);
+        if (!okBorder) throw new Error('Failed to set border');
+
+        // NOTE: Clearing AP can cause some viewers to synthesize their own look.
+        // If you still want to clear:
+        // pdfium._FPDFAnnot_SetAP_W(annot, 0, 0);
+
+        const ok = pdfium._FPDFAnnot_SetColor_W(
+          annot,
+          0, // border/line color
+          0,
+          0,
+          0,
+          0, // R,G,B,A (A=0 => transparent)
+        );
+        if (!ok) throw new Error('Failed to set annotation color');
+
+        // Optional: also ensure there is no fill
+        // pdfium._FPDFAnnot_SetColor_W(
+        //   annot,
+        //   1, // interior/fill color
+        //   0,
+        //   0,
+        //   0,
+        //   0,
+        // );
+
+        if (typeof pdfium._FPDFAnnot_SetFlags_W === 'function') {
+          pdfium._FPDFAnnot_SetFlags_W(annot, 4);
+        }
       } finally {
-        pdfium._free(rectPtr);
-        pdfium._free(keyContentsPtr);
-        pdfium._free(keyDaPtr);
-        pdfium._free(contentsPtr);
-        pdfium._free(daPtr);
+        if (rectPtr) pdfium._free(rectPtr);
         pdfium._FPDFPage_CloseAnnot_W(annot);
       }
     });
@@ -1392,5 +1441,19 @@ export class PdfController implements IPdfController {
 
     // Revoke the object URL after a short delay to allow the download to start
     setTimeout(() => URL.revokeObjectURL(url), 100);
+  }
+
+  private allocRectF(left: number, top: number, right: number, bottom: number): number {
+    const { pdfium } = this.requireDoc();
+
+    const ptr = pdfium._malloc(16);
+    const f32 = pdfium.HEAPF32;
+    const o = ptr >> 2;
+    // FS_RECTF = { left, top, right, bottom } :contentReference[oaicite:12]{index=12}
+    f32[o + 0] = left;
+    f32[o + 1] = top;
+    f32[o + 2] = right;
+    f32[o + 3] = bottom;
+    return ptr;
   }
 }

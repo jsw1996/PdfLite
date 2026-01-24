@@ -1,0 +1,23 @@
+From: PDFViewer Build <build@pdfviewer.local>
+Subject: [PATCH 5/5] Fix libopenjpeg fseeko/ftello for Emscripten
+
+libopenjpeg redefines fseek/ftell to fseeko/ftello which breaks
+Emscripten compilation. Use standard functions for WASM target.
+
+---
+ third_party/libopenjpeg/opj_includes.h | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/third_party/libopenjpeg/opj_includes.h b/third_party/libopenjpeg/opj_includes.h
+--- a/third_party/libopenjpeg/opj_includes.h
++++ b/third_party/libopenjpeg/opj_includes.h
+@@ -1,4 +1,10 @@
+-#  define fseek  fseeko
+-#  define ftell  ftello
++/* Patched for Emscripten: don't redefine fseek/ftell to fseeko/ftello */
++#  ifdef __EMSCRIPTEN__
++/* Use standard fseek/ftell for Emscripten */
++#  else
++#  define fseek  fseeko
++#  define ftell  ftello
++#  endif
