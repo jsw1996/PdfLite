@@ -32,6 +32,10 @@ export const ToolBar: React.FC<IToobarProps> = (props: IToobarProps) => {
         setSelectedTool(selectedTool === 'text' ? null : 'text');
         return;
       }
+      if (toolId === 'signature') {
+        setSelectedTool(selectedTool === 'signature' ? null : 'signature');
+        return;
+      }
       // Other tools don't enter annotation mode
       setSelectedTool(null);
     },

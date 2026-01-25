@@ -9,6 +9,7 @@ import type {
   IDrawAnnotation,
   IHighlightAnnotation,
   ITextAnnotation,
+  ISignatureAnnotation,
   IRect,
 } from './types';
 import { TEXT_ANNOTATION_DEFAULTS } from './constants';
@@ -242,6 +243,86 @@ export const textHandler: IAnnotationHandler<ITextAnnotation> = {
 };
 
 // =============================================================================
+// Signature Annotation Handler
+// =============================================================================
+
+// Signature annotations are rendered as DOM elements (SignatureBox), not on canvas
+function renderSignatureAnnotation(
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _ctx: CanvasRenderingContext2D,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _annotation: ISignatureAnnotation,
+): void {
+  // No-op: Signature annotations are rendered as React components
+}
+
+function commitSignatureAnnotation(
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _controller: PdfController,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _annotation: ISignatureAnnotation,
+): void {
+  // TODO: Implement addSignatureAnnotation in PdfController when PDFium supports STAMP annotations
+  // For now, signature annotations are stored as overlay and will be visible in the viewer
+  // but won't be committed to the PDF file until addSignatureAnnotation is implemented
+  //
+  // When implemented, it should look like:
+  // controller.addSignatureAnnotation(annotation.pageIndex, {
+  //   scale: 1,
+  //   canvasRect: {
+  //     left: annotation.position.x,
+  //     top: annotation.position.y,
+  //     width: annotation.width,
+  //     height: annotation.height,
+  //   },
+  //   imageBytes: annotation.imageBytes,
+  // });
+
+  // For now, we'll just log a warning
+  // Signatures will still be visible as overlay annotations
+  console.warn(
+    'Signature annotation commit to PDF not yet implemented - signature will remain as overlay',
+  );
+}
+
+function normalizeSignatureAnnotation(
+  annotation: ISignatureAnnotation,
+  scale: number,
+): ISignatureAnnotation {
+  return {
+    ...annotation,
+    position: {
+      x: annotation.position.x / scale,
+      y: annotation.position.y / scale,
+    },
+    width: annotation.width / scale,
+    height: annotation.height / scale,
+  };
+}
+
+function denormalizeSignatureAnnotation(
+  annotation: ISignatureAnnotation,
+  scale: number,
+): ISignatureAnnotation {
+  return {
+    ...annotation,
+    position: {
+      x: annotation.position.x * scale,
+      y: annotation.position.y * scale,
+    },
+    width: annotation.width * scale,
+    height: annotation.height * scale,
+  };
+}
+
+export const signatureHandler: IAnnotationHandler<ISignatureAnnotation> = {
+  render: renderSignatureAnnotation,
+  commit: commitSignatureAnnotation,
+  normalize: normalizeSignatureAnnotation,
+  denormalize: denormalizeSignatureAnnotation,
+};
+
+// =============================================================================
 // Handler Registry
 // =============================================================================
 
@@ -251,6 +332,7 @@ export const textHandler: IAnnotationHandler<ITextAnnotation> = {
 export function getHandler(type: 'draw'): IAnnotationHandler<IDrawAnnotation>;
 export function getHandler(type: 'highlight'): IAnnotationHandler<IHighlightAnnotation>;
 export function getHandler(type: 'text'): IAnnotationHandler<ITextAnnotation>;
+export function getHandler(type: 'signature'): IAnnotationHandler<ISignatureAnnotation>;
 export function getHandler(type: IAnnotation['type']): IAnnotationHandler<IAnnotation>;
 export function getHandler(type: IAnnotation['type']): IAnnotationHandler<IAnnotation> {
   switch (type) {
@@ -260,6 +342,8 @@ export function getHandler(type: IAnnotation['type']): IAnnotationHandler<IAnnot
       return highlightHandler as IAnnotationHandler<IAnnotation>;
     case 'text':
       return textHandler as IAnnotationHandler<IAnnotation>;
+    case 'signature':
+      return signatureHandler as IAnnotationHandler<IAnnotation>;
   }
 }
 

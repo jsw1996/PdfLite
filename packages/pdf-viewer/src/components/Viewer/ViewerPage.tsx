@@ -11,9 +11,11 @@ import {
 } from '../../annotations';
 import { TextLayer } from '../TextLayer/TextLayer';
 import { usePdfState } from '@/providers/PdfStateContextProvider';
-import { LinkLayer, type ILinkItem } from '../LinkLayer/LinkLayer';
+import { LinkLayer } from '../LinkLayer/LinkLayer';
 import { useSelectionHighlight } from '../../hooks/useSelectionHighlight';
 import { useAddText } from '@/hooks/useAddText';
+import { useAddSignature } from '@/hooks/useAddSignature';
+import { SignatureDialog } from '../Signature/SignatureDialog';
 
 const FPDF_ANNOTATION_SUBTYPE_LINK = 2;
 const FPDF_ANNOTATION_SUBTYPE_HIGHLIGHT = 9;
@@ -28,7 +30,6 @@ export const ViewerPage: React.FC<IViewerPageProps> = ({ pageIndex, registerPage
   const [pdfCanvas, setPdfCanvas] = useState<HTMLCanvasElement | null>(null);
   const [containerEl, setContainerEl] = useState<HTMLDivElement | null>(null);
   const { controller, goToPage } = usePdfController();
-  const [linkItems, setLinkItems] = useState<ILinkItem[]>([]);
   const { setNativeAnnotationsForPage } = useAnnotation();
 
   const onCanvasReady = useCallback((c: HTMLCanvasElement) => {
@@ -39,19 +40,13 @@ export const ViewerPage: React.FC<IViewerPageProps> = ({ pageIndex, registerPage
 
   const { handleHighlightOnInteraction } = useSelectionHighlight({ pageIndex, pdfCanvas });
   useAddText(containerEl, pageIndex);
+
+  const { isDialogOpen, setIsDialogOpen, onSignatureReady } = useAddSignature(
+    containerEl,
+    pageIndex,
+  );
   const refreshNativeAnnots = useCallback(() => {
     const native = controller.listNativeAnnotations(pageIndex, { scale: 1 });
-    const links = native
-      .filter((a) => a.subtype === FPDF_ANNOTATION_SUBTYPE_LINK)
-      .map(
-        (a): ILinkItem => ({
-          id: a.id,
-          points: a.points,
-          uri: a.uri,
-          destPageIndex: a.destPageIndex,
-        }),
-      );
-    setLinkItems(links);
 
     // Convert native annotations to our new type system
     const converted: IAnnotation[] = native
@@ -102,7 +97,7 @@ export const ViewerPage: React.FC<IViewerPageProps> = ({ pageIndex, registerPage
 
   useEffect(() => {
     if (!pdfCanvas) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- refresh native annotations after canvas is ready
+
     refreshNativeAnnots();
   }, [pdfCanvas, refreshNativeAnnots]);
 
@@ -136,13 +131,8 @@ export const ViewerPage: React.FC<IViewerPageProps> = ({ pageIndex, registerPage
         pageIndex={pageIndex}
         pdfCanvas={pdfCanvas}
         containerEl={containerEl}
-        links={linkItems}
         onOpenExternal={(uri) => window.open(uri, '_blank', 'noopener,noreferrer')}
         onGoToPage={(p) => goToPage(p, { scrollIntoView: true, scrollIntoPreview: true })}
-        onCreateLink={({ canvasRect, uri }) => {
-          controller.addLinkAnnotation(pageIndex, { scale, canvasRect, uri });
-          refreshNativeAnnots();
-        }}
       />
       <AnnotationLayer
         pageIndex={pageIndex}
@@ -151,6 +141,11 @@ export const ViewerPage: React.FC<IViewerPageProps> = ({ pageIndex, registerPage
         onCommitHighlight={onCommitHighlight}
       />
       <TextLayer pageIndex={pageIndex} scale={scale} />
+      <SignatureDialog
+        open={isDialogOpen}
+        onOpenChange={setIsDialogOpen}
+        onSignatureReady={onSignatureReady}
+      />
     </div>
   );
 };
