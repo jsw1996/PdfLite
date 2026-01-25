@@ -235,4 +235,5 @@ Pre-commit hooks run:
 3. Use workspace protocol for internal dependencies: `"@pdfviewer/ui": "workspace:*"`
 4. The `ui` package is source-only (no build step)
 5. PDFium WASM operations require careful memory management
-6. Check `packages/pdfium-wasm/README.md` for WASM API documentation
+6. Agents may extend the PDFium WASM wrapper with additional APIs as needed
+7. Check `packages/pdfium-wasm/README.md` for WASM API documentation

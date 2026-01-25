@@ -37,4 +37,5 @@ Write-Host "`nBuild complete!" -ForegroundColor Green
 Write-Host "Output files are in: $WasmDir" -ForegroundColor Cyan
 Write-Host "  - pdfium.js    (JavaScript loader)"
 Write-Host "  - pdfium.wasm  (WebAssembly binary)"
-Write-Host "  - pdfium.d.ts  (TypeScript definitions)"
+Write-Host ""
+Write-Host "Note: TypeScript types are defined in src/index.ts (IPDFiumModule interface)"

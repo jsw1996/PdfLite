@@ -91,9 +91,29 @@ export enum FPDF_ANNOT_FLAG {
 }
 
 /**
+ * PDFium error codes returned by _PDFium_GetLastError()
+ */
+export enum FPDF_ERR {
+  /** No error */
+  SUCCESS = 0,
+  /** Unknown error */
+  UNKNOWN = 1,
+  /** File not found or could not be opened */
+  FILE = 2,
+  /** File not in PDF format or corrupted */
+  FORMAT = 3,
+  /** Password required or incorrect password */
+  PASSWORD = 4,
+  /** Unsupported security scheme */
+  SECURITY = 5,
+  /** Page not found or content error */
+  PAGE = 6,
+}
+
+/**
  * PDFium Module interface - the raw WASM module exports
  */
-export interface PDFiumModule {
+export interface IPDFiumModule {
   // ============================================================================
   // Core Document Functions
   // ============================================================================
@@ -117,7 +137,7 @@ export interface PDFiumModule {
     pageX: number,
     pageY: number,
     deviceXPtr: number,
-    deviceYPtr: number
+    deviceYPtr: number,
   ): void;
   /** Convert device coordinates to page coordinates */
   _PDFium_DeviceToPage(
@@ -130,7 +150,7 @@ export interface PDFiumModule {
     deviceX: number,
     deviceY: number,
     pageXPtr: number,
-    pageYPtr: number
+    pageYPtr: number,
   ): void;
 
   // ============================================================================
@@ -144,7 +164,7 @@ export interface PDFiumModule {
     sizeX: number,
     sizeY: number,
     rotate: number,
-    flags: number
+    flags: number,
   ): void;
   _PDFium_BitmapCreate(width: number, height: number, alpha: number): number;
   _PDFium_BitmapDestroy(bitmap: number): void;
@@ -154,7 +174,7 @@ export interface PDFiumModule {
     top: number,
     width: number,
     height: number,
-    color: number
+    color: number,
   ): void;
   _PDFium_BitmapGetBuffer(bitmap: number): number;
   _PDFium_BitmapGetStride(bitmap: number): number;
@@ -178,7 +198,7 @@ export interface PDFiumModule {
     leftPtr: number,
     rightPtr: number,
     bottomPtr: number,
-    topPtr: number
+    topPtr: number,
   ): number;
   /** Get the origin point of a character */
   _PDFium_GetCharOrigin(textPage: number, charIndex: number, xPtr: number, yPtr: number): number;
@@ -194,7 +214,7 @@ export interface PDFiumModule {
     x: number,
     y: number,
     xTolerance: number,
-    yTolerance: number
+    yTolerance: number,
   ): number;
   /** Get font information for a character */
   _PDFium_GetFontInfo(
@@ -202,7 +222,7 @@ export interface PDFiumModule {
     charIndex: number,
     buffer: number,
     bufferLen: number,
-    flagsPtr: number
+    flagsPtr: number,
   ): number;
   /** Get font weight for a character */
   _PDFium_GetFontWeight(textPage: number, charIndex: number): number;
@@ -213,7 +233,7 @@ export interface PDFiumModule {
     rPtr: number,
     gPtr: number,
     bPtr: number,
-    aPtr: number
+    aPtr: number,
   ): number;
   /** Get text stroke color */
   _PDFium_GetStrokeColor(
@@ -222,7 +242,7 @@ export interface PDFiumModule {
     rPtr: number,
     gPtr: number,
     bPtr: number,
-    aPtr: number
+    aPtr: number,
   ): number;
 
   // ============================================================================
@@ -237,7 +257,7 @@ export interface PDFiumModule {
     leftPtr: number,
     topPtr: number,
     rightPtr: number,
-    bottomPtr: number
+    bottomPtr: number,
   ): number;
   /** Get text within a bounding rectangle */
   _PDFium_GetBoundedText(
@@ -247,19 +267,14 @@ export interface PDFiumModule {
     right: number,
     bottom: number,
     buffer: number,
-    bufferLen: number
+    bufferLen: number,
   ): number;
 
   // ============================================================================
   // Text Search APIs
   // ============================================================================
   /** Start a text search */
-  _PDFium_FindStart(
-    textPage: number,
-    findWhat: number,
-    flags: number,
-    startIndex: number
-  ): number;
+  _PDFium_FindStart(textPage: number, findWhat: number, flags: number, startIndex: number): number;
   /** Find next occurrence */
   _PDFium_FindNext(searchHandle: number): number;
   /** Find previous occurrence */
@@ -339,7 +354,7 @@ export interface PDFiumModule {
     rPtr: number,
     gPtr: number,
     bPtr: number,
-    aPtr: number
+    aPtr: number,
   ): number;
   /** Set annotation color */
   _FPDFAnnot_SetColor_W(
@@ -348,7 +363,7 @@ export interface PDFiumModule {
     r: number,
     g: number,
     b: number,
-    a: number
+    a: number,
   ): number;
 
   // ============================================================================
@@ -371,7 +386,7 @@ export interface PDFiumModule {
     annot: number,
     keyPtr: number,
     buffer: number,
-    bufferLen: number
+    bufferLen: number,
   ): number;
   /** Set string value for a key */
   _FPDFAnnot_SetStringValue_W(annot: number, keyPtr: number, valuePtr: number): number;
@@ -388,7 +403,7 @@ export interface PDFiumModule {
     annot: number,
     appearanceMode: number,
     buffer: number,
-    bufferLen: number
+    bufferLen: number,
   ): number;
 
   // ============================================================================
@@ -399,17 +414,9 @@ export interface PDFiumModule {
   /** Count attachment points */
   _FPDFAnnot_CountAttachmentPoints_W(annot: number): number;
   /** Get attachment points at index (quadPointsPtr points to FS_QUADPOINTSF) */
-  _FPDFAnnot_GetAttachmentPoints_W(
-    annot: number,
-    quadIndex: number,
-    quadPointsPtr: number
-  ): number;
+  _FPDFAnnot_GetAttachmentPoints_W(annot: number, quadIndex: number, quadPointsPtr: number): number;
   /** Set attachment points at index */
-  _FPDFAnnot_SetAttachmentPoints_W(
-    annot: number,
-    quadIndex: number,
-    quadPointsPtr: number
-  ): number;
+  _FPDFAnnot_SetAttachmentPoints_W(annot: number, quadIndex: number, quadPointsPtr: number): number;
   /** Append attachment points */
   _FPDFAnnot_AppendAttachmentPoints_W(annot: number, quadPointsPtr: number): number;
 
@@ -427,7 +434,7 @@ export interface PDFiumModule {
     annot: number,
     pathIndex: number,
     buffer: number,
-    length: number
+    length: number,
   ): number;
 
   // ============================================================================
@@ -444,14 +451,14 @@ export interface PDFiumModule {
     annot: number,
     horizontalRadiusPtr: number,
     verticalRadiusPtr: number,
-    borderWidthPtr: number
+    borderWidthPtr: number,
   ): number;
   /** Set annotation border */
   _FPDFAnnot_SetBorder_W(
     annot: number,
     horizontalRadius: number,
     verticalRadius: number,
-    borderWidth: number
+    borderWidth: number,
   ): number;
 
   // ============================================================================
@@ -492,7 +499,7 @@ export interface PDFiumModule {
     hHandle: number,
     annot: number,
     buffer: number,
-    bufferLen: number
+    bufferLen: number,
   ): number;
   /** Get form field type */
   _FPDFAnnot_GetFormFieldType_W(hHandle: number, annot: number): number;
@@ -501,7 +508,7 @@ export interface PDFiumModule {
     hHandle: number,
     annot: number,
     buffer: number,
-    bufferLen: number
+    bufferLen: number,
   ): number;
   /** Get form field flags */
   _FPDFAnnot_GetFormFieldFlags_W(hHandle: number, annot: number): number;
@@ -513,7 +520,7 @@ export interface PDFiumModule {
     annot: number,
     index: number,
     buffer: number,
-    bufferLen: number
+    bufferLen: number,
   ): number;
   /** Check if option is selected */
   _FPDFAnnot_IsOptionSelected_W(hHandle: number, annot: number, index: number): number;
@@ -530,26 +537,18 @@ export interface PDFiumModule {
     hHandle: number,
     annot: number,
     buffer: number,
-    bufferLen: number
+    bufferLen: number,
   ): number;
 
   // ============================================================================
   // Annotation API - Focus
   // ============================================================================
   /** Set focusable annotation subtypes */
-  _FPDFAnnot_SetFocusableSubtypes_W(
-    hHandle: number,
-    subtypesPtr: number,
-    count: number
-  ): number;
+  _FPDFAnnot_SetFocusableSubtypes_W(hHandle: number, subtypesPtr: number, count: number): number;
   /** Get focusable subtypes count */
   _FPDFAnnot_GetFocusableSubtypesCount_W(hHandle: number): number;
   /** Get focusable subtypes */
-  _FPDFAnnot_GetFocusableSubtypes_W(
-    hHandle: number,
-    subtypesPtr: number,
-    count: number
-  ): number;
+  _FPDFAnnot_GetFocusableSubtypes_W(hHandle: number, subtypesPtr: number, count: number): number;
 
   // ============================================================================
   // Annotation API - Link and URI
@@ -568,6 +567,118 @@ export interface PDFiumModule {
   _FPDFAction_GetDest_W(doc: number, action: number): number;
   /** Set URI for link annotation */
   _FPDFAnnot_SetURI_W(annot: number, uriPtr: number): number;
+
+  // ============================================================================
+  // Page Object API - Create and manipulate page objects (text, path, image)
+  // ============================================================================
+  /**
+   * Load a standard PDF font (one of the 14 standard fonts)
+   * @param document Document pointer
+   * @param fontNamePtr Pointer to null-terminated font name string:
+   *   "Times-Roman", "Times-Bold", "Times-Italic", "Times-BoldItalic",
+   *   "Helvetica", "Helvetica-Bold", "Helvetica-Oblique", "Helvetica-BoldOblique",
+   *   "Courier", "Courier-Bold", "Courier-Oblique", "Courier-BoldOblique",
+   *   "Symbol", "ZapfDingbats"
+   * @returns Font handle, or 0 on failure
+   */
+  _FPDFText_LoadStandardFont_W(document: number, fontNamePtr: number): number;
+  /**
+   * Create a new text object using the specified font
+   * @param document Document pointer
+   * @param font Font handle from LoadStandardFont
+   * @param fontSize Font size in points
+   * @returns Page object handle, or 0 on failure
+   */
+  _FPDFPageObj_CreateTextObj_W(document: number, font: number, fontSize: number): number;
+  /**
+   * Set the text content for a text object
+   * @param textObject Text object handle
+   * @param textPtr Pointer to UTF-16LE encoded null-terminated string
+   * @returns Non-zero on success
+   */
+  _FPDFText_SetText_W(textObject: number, textPtr: number): number;
+  /**
+   * Set the fill color for a page object (RGBA, 0-255)
+   */
+  _FPDFPageObj_SetFillColor_W(
+    pageObject: number,
+    r: number,
+    g: number,
+    b: number,
+    a: number,
+  ): number;
+  /**
+   * Set the stroke color for a page object (RGBA, 0-255)
+   */
+  _FPDFPageObj_SetStrokeColor_W(
+    pageObject: number,
+    r: number,
+    g: number,
+    b: number,
+    a: number,
+  ): number;
+  /**
+   * Transform a page object using a matrix
+   * The transformation matrix is: [a b 0; c d 0; e f 1]
+   * For translation only: a=1, b=0, c=0, d=1, e=tx, f=ty
+   */
+  _FPDFPageObj_Transform_W(
+    pageObject: number,
+    a: number,
+    b: number,
+    c: number,
+    d: number,
+    e: number,
+    f: number,
+  ): void;
+  /**
+   * Get the bounds of a page object
+   * @returns Non-zero on success
+   */
+  _FPDFPageObj_GetBounds_W(
+    pageObject: number,
+    leftPtr: number,
+    bottomPtr: number,
+    rightPtr: number,
+    topPtr: number,
+  ): number;
+  /**
+   * Destroy a page object (only call if not added to page/annotation)
+   */
+  _FPDFPageObj_Destroy_W(pageObject: number): void;
+  /**
+   * Close/release a font object
+   */
+  _FPDFFont_Close_W(font: number): void;
+  /**
+   * Set text rendering mode
+   * @param renderMode 0=Fill, 1=Stroke, 2=Fill+Stroke, 3=Invisible,
+   *   4=Fill+Clip, 5=Stroke+Clip, 6=Fill+Stroke+Clip, 7=Clip
+   */
+  _FPDFTextObj_SetTextRenderMode_W(textObject: number, renderMode: number): number;
+  /**
+   * Get text rendering mode
+   */
+  _FPDFTextObj_GetTextRenderMode_W(textObject: number): number;
+
+  // ============================================================================
+  // Page Object Manipulation API - Insert objects directly into page content
+  // ============================================================================
+  /**
+   * Insert a page object into a page's content stream.
+   * This "flattens" the object into the page (e.g., draw text directly on page).
+   * After calling this, the page object is owned by the page and should not be destroyed manually.
+   * @param page Page pointer
+   * @param pageObject Page object pointer (text, image, path, etc.)
+   */
+  _FPDFPage_InsertObject_W(page: number, pageObject: number): void;
+  /**
+   * Generate the page content stream after inserting objects.
+   * Must be called after FPDFPage_InsertObject to commit changes to the page.
+   * @param page Page pointer
+   * @returns Non-zero on success
+   */
+  _FPDFPage_GenerateContent_W(page: number): number;
 
   // ============================================================================
   // PDF Save/Download API
@@ -622,14 +733,15 @@ export interface PDFiumModule {
 }
 
 // Get the factory function from the module (handles ESM/CJS interop)
-const createPDFiumModuleFactory = (pdfiumModule as unknown as { default?: () => Promise<PDFiumModule> }).default ?? pdfiumModule;
+const createPDFiumModuleFactory =
+  (pdfiumModule as unknown as { default?: () => Promise<IPDFiumModule> }).default ?? pdfiumModule;
 
 /**
  * Create and initialize a PDFium WASM module instance
- * @returns Promise that resolves to an initialized PDFiumModule
+ * @returns Promise that resolves to an initialized IPDFiumModule
  */
-export async function createPdfiumModule(): Promise<PDFiumModule> {
-  const module = await (createPDFiumModuleFactory as () => Promise<PDFiumModule>)();
+export async function createPdfiumModule(): Promise<IPDFiumModule> {
+  const module = await (createPDFiumModuleFactory as () => Promise<IPDFiumModule>)();
   return module;
 }
 

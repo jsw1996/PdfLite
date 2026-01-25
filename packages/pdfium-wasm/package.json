@@ -10,10 +10,6 @@
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
     },
-    "./pdfium": {
-      "import": "./dist/pdfium-esm.js",
-      "types": "./wasm/pdfium.d.ts"
-    },
     "./pdfium.wasm": "./wasm/pdfium.wasm",
     "./package.json": "./package.json"
   },
@@ -31,6 +27,16 @@
     "docker": "pnpm run build:docker && pnpm run run:docker",
     "clean": "rimraf dist wasm"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/pdfviewer/pdfviewer.git",
+    "directory": "packages/pdfium-wasm"
+  },
+  "author": "PdfViewer Team",
+  "bugs": {
+    "url": "https://github.com/pdfviewer/pdfviewer/issues"
+  },
+  "homepage": "https://github.com/pdfviewer/pdfviewer/tree/main/packages/pdfium-wasm#readme",
   "devDependencies": {
     "rimraf": "^5.0.5",
     "typescript": "^5.3.0"

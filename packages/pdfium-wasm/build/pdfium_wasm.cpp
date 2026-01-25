@@ -764,6 +764,107 @@ FPDF_BOOL FPDFAnnot_SetURI_W(FPDF_ANNOTATION annot, const char* uri) {
 }
 
 // ============================================================================
+// Page Object API - Create and manipulate page objects (text, path, image)
+// ============================================================================
+
+// Load a standard PDF font (one of the 14 standard fonts)
+// font_name: "Times-Roman", "Times-Bold", "Times-Italic", "Times-BoldItalic",
+//            "Helvetica", "Helvetica-Bold", "Helvetica-Oblique", "Helvetica-BoldOblique",
+//            "Courier", "Courier-Bold", "Courier-Oblique", "Courier-BoldOblique",
+//            "Symbol", "ZapfDingbats"
+EMSCRIPTEN_KEEPALIVE
+FPDF_FONT FPDFText_LoadStandardFont_W(FPDF_DOCUMENT document, const char* font_name) {
+    return FPDFText_LoadStandardFont(document, font_name);
+}
+
+// Create a new text object using the specified font
+EMSCRIPTEN_KEEPALIVE
+FPDF_PAGEOBJECT FPDFPageObj_CreateTextObj_W(FPDF_DOCUMENT document, FPDF_FONT font, float font_size) {
+    return FPDFPageObj_CreateTextObj(document, font, font_size);
+}
+
+// Set the text for a text object (UTF-16LE encoded)
+EMSCRIPTEN_KEEPALIVE
+FPDF_BOOL FPDFText_SetText_W(FPDF_PAGEOBJECT text_object, FPDF_WIDESTRING text) {
+    return FPDFText_SetText(text_object, text);
+}
+
+// Set the fill color for a page object (RGBA, 0-255)
+EMSCRIPTEN_KEEPALIVE
+FPDF_BOOL FPDFPageObj_SetFillColor_W(FPDF_PAGEOBJECT page_object,
+                                      unsigned int R, unsigned int G,
+                                      unsigned int B, unsigned int A) {
+    return FPDFPageObj_SetFillColor(page_object, R, G, B, A);
+}
+
+// Set the stroke color for a page object (RGBA, 0-255)
+EMSCRIPTEN_KEEPALIVE
+FPDF_BOOL FPDFPageObj_SetStrokeColor_W(FPDF_PAGEOBJECT page_object,
+                                        unsigned int R, unsigned int G,
+                                        unsigned int B, unsigned int A) {
+    return FPDFPageObj_SetStrokeColor(page_object, R, G, B, A);
+}
+
+// Transform a page object using a matrix (a, b, c, d, e, f)
+// The transformation matrix is: [a b 0; c d 0; e f 1]
+EMSCRIPTEN_KEEPALIVE
+void FPDFPageObj_Transform_W(FPDF_PAGEOBJECT page_object,
+                              double a, double b, double c, double d, double e, double f) {
+    FPDFPageObj_Transform(page_object, a, b, c, d, e, f);
+}
+
+// Get the bounds of a page object
+EMSCRIPTEN_KEEPALIVE
+FPDF_BOOL FPDFPageObj_GetBounds_W(FPDF_PAGEOBJECT page_object,
+                                   float* left, float* bottom, float* right, float* top) {
+    return FPDFPageObj_GetBounds(page_object, left, bottom, right, top);
+}
+
+// Destroy a page object (only call if not added to page/annotation)
+EMSCRIPTEN_KEEPALIVE
+void FPDFPageObj_Destroy_W(FPDF_PAGEOBJECT page_object) {
+    FPDFPageObj_Destroy(page_object);
+}
+
+// Close/release a font object
+EMSCRIPTEN_KEEPALIVE
+void FPDFFont_Close_W(FPDF_FONT font) {
+    FPDFFont_Close(font);
+}
+
+// Set text rendering mode
+// 0 = Fill, 1 = Stroke, 2 = Fill+Stroke, 3 = Invisible,
+// 4 = Fill+Clip, 5 = Stroke+Clip, 6 = Fill+Stroke+Clip, 7 = Clip
+EMSCRIPTEN_KEEPALIVE
+FPDF_BOOL FPDFTextObj_SetTextRenderMode_W(FPDF_PAGEOBJECT text_object, int render_mode) {
+    return FPDFTextObj_SetTextRenderMode(text_object, static_cast<FPDF_TEXT_RENDERMODE>(render_mode));
+}
+
+// Get text rendering mode
+EMSCRIPTEN_KEEPALIVE
+int FPDFTextObj_GetTextRenderMode_W(FPDF_PAGEOBJECT text_object) {
+    return static_cast<int>(FPDFTextObj_GetTextRenderMode(text_object));
+}
+
+// ============================================================================
+// Page Object Manipulation API - Insert objects directly into page content
+// ============================================================================
+
+// Insert a page object into a page's content stream
+// This is used to "flatten" objects into the page (e.g., draw text directly on page)
+EMSCRIPTEN_KEEPALIVE
+void FPDFPage_InsertObject_W(FPDF_PAGE page, FPDF_PAGEOBJECT page_object) {
+    FPDFPage_InsertObject(page, page_object);
+}
+
+// Generate the page content stream after inserting objects
+// Must be called after FPDFPage_InsertObject to commit changes
+EMSCRIPTEN_KEEPALIVE
+FPDF_BOOL FPDFPage_GenerateContent_W(FPDF_PAGE page) {
+    return FPDFPage_GenerateContent(page);
+}
+
+// ============================================================================
 // PDF Save/Download API - Save document to memory buffer
 // ============================================================================
 
