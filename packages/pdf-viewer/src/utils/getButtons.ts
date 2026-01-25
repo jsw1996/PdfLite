@@ -5,14 +5,19 @@ import { HighlightButton } from '../components/ToolButtons/HighlightButton';
 import { DrawButton } from '../components/ToolButtons/DrawButton';
 import { AddTextButton } from '../components/ToolButtons/AddTextButton';
 import { SignatureButton } from '../components/ToolButtons/SignatureButton';
-import { SidebarTriggerButton } from '@/components/ToolButtons/SidebarTriggerButton';
+import { useSidebarTriggerButton } from '@/components/ToolButtons/SidebarTriggerButton';
 import { PrintButton } from '@/components/ToolButtons/PrintButton';
 import { DownloadButton } from '@/components/ToolButtons/DownloadButton';
 
-export const getButtons: () => IToolButton[] = () => {
+/**
+ * Custom hook that returns the center toolbar buttons.
+ * Named with 'use' prefix as it uses hooks internally (useSidebarTriggerButton).
+ */
+export const useButtons = (): IToolButton[] => {
+  const sidebarTriggerButton = useSidebarTriggerButton();
   return [
     // Group 0
-    SidebarTriggerButton(),
+    sidebarTriggerButton,
     PageViewButton(),
     SelectButton(),
     // Group 1
@@ -22,6 +27,11 @@ export const getButtons: () => IToolButton[] = () => {
     SignatureButton(),
   ];
 };
+
+/**
+ * @deprecated Use useButtons instead. This exists for backward compatibility.
+ */
+export const getButtons = useButtons;
 
 export const getRightButtons: () => IToolButton[] = () => {
   return [DownloadButton(), PrintButton()];

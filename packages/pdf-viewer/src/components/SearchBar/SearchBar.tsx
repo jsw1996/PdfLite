@@ -1,23 +1,37 @@
 import { Input } from '@pdfviewer/ui/components/input';
 import { Button } from '@pdfviewer/ui/components/button';
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { ChevronUp, ChevronDown } from 'lucide-react';
 import { Separator } from '@pdfviewer/ui/components/separator';
 import { usePdfController } from '@/providers/PdfControllerContextProvider';
 import type { ISearchResult } from '@pdfviewer/controller';
 import { usePdfState } from '@/providers/PdfStateContextProvider';
 import { useId } from 'react';
+import { SEARCH_CONFIG } from '@/utils/config';
 
 export const SearchBar = () => {
   const scale = usePdfState().scale;
   const [value, setValue] = useState<string>('');
+  const [debouncedValue, setDebouncedValue] = useState<string>('');
   const pdfController = usePdfController();
+  const highlightRef = useRef<HTMLDivElement | null>(null);
+
+  // Debounce the search value
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedValue(value.trim());
+    }, SEARCH_CONFIG.SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [value]);
+
   const matches: ISearchResult[] = useMemo(() => {
-    if (!value.trim()) return [];
-    return pdfController.controller.searchText(value, { scale });
-  }, [pdfController.controller, value, scale]);
+    if (!debouncedValue) return [];
+    return pdfController.controller.searchText(debouncedValue, { scale });
+  }, [pdfController.controller, debouncedValue, scale]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const searchBoxId = useId();
+  // CSS-escape the useId() result for use in querySelector
+  const escapedSearchBoxId = useMemo(() => CSS.escape(searchBoxId), [searchBoxId]);
 
   // Handler to update value and reset index
   const handleValueChange = useCallback((newValue: string) => {
@@ -27,6 +41,12 @@ export const SearchBar = () => {
 
   const drawHighlight = useCallback(
     (index: number) => {
+      // Clean up previous highlight
+      if (highlightRef.current) {
+        highlightRef.current.remove();
+        highlightRef.current = null;
+      }
+
       if (matches.length === 0 || index < 0 || index >= matches.length) return;
       const match: ISearchResult = matches[index];
       if (!match.rects || match.rects.length === 0) return;
@@ -56,7 +76,7 @@ export const SearchBar = () => {
       highlightDiv.style.top = `${rect.top}px`;
       highlightDiv.style.width = `${rect.width}px`;
       highlightDiv.style.height = `${rect.height}px`;
-      highlightDiv.style.backgroundColor = 'rgba(248, 196, 72, 0.4)';
+      highlightDiv.style.backgroundColor = SEARCH_CONFIG.HIGHLIGHT_COLOR;
       highlightDiv.style.pointerEvents = 'none';
       highlightDiv.className = 'search-highlight';
       // append to the page container
@@ -65,6 +85,7 @@ export const SearchBar = () => {
       );
       if (pageContainer) {
         pageContainer.appendChild(highlightDiv);
+        highlightRef.current = highlightDiv;
         // scroll into view
         highlightDiv.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
       }
@@ -72,24 +93,34 @@ export const SearchBar = () => {
     [matches],
   );
 
+  // Cleanup highlight on unmount or when value is cleared
+  useEffect(() => {
+    return () => {
+      if (highlightRef.current) {
+        highlightRef.current.remove();
+        highlightRef.current = null;
+      }
+    };
+  }, []);
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.ctrlKey && e.key === 'f') {
         e.preventDefault();
-        const input = document.querySelector(`#${searchBoxId}`) as HTMLInputElement | undefined;
-        input?.focus();
+        const input = document.querySelector(`#${escapedSearchBoxId}`);
+        if (input instanceof HTMLInputElement) {
+          input.focus();
+        }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [searchBoxId]);
+  }, [escapedSearchBoxId]);
 
-  // Clear previous highlights and draw new one
+  // Draw highlight when index changes or when matches change
   useEffect(() => {
-    // Remove existing search highlights
-    document.querySelectorAll('.search-highlight').forEach((el) => el.remove());
     drawHighlight(currentIndex);
   }, [currentIndex, drawHighlight, scale]);
 

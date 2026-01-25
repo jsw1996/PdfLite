@@ -160,12 +160,14 @@ export const Draggable: React.FC<IDraggableProps> = ({
       if (pendingPosition) {
         setLocalPosition(pendingPosition);
         onPositionChange?.(pendingPosition);
-        pendingPosition = null;
       }
 
       const hadMoved = hasMovedRef.current;
+      // Capture the final position before resetting pendingPosition
       const finalPosition = pendingPosition ?? localPosition;
 
+      // Reset state
+      pendingPosition = null;
       setIsDragging(false);
       startPosRef.current = null;
       startMouseRef.current = null;

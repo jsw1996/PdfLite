@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 
 interface IPdfStateContext {
   currentPage: number;
@@ -16,14 +16,18 @@ export const PdfStateContextProvider: React.FC<{ children: React.ReactNode }> = 
   const [scale, setScale] = React.useState(1);
   const [rotation, setRotation] = React.useState(0);
 
-  const value = {
-    currentPage,
-    setCurrentPage,
-    scale,
-    setScale,
-    rotation,
-    setRotation,
-  };
+  // Memoize context value to prevent unnecessary re-renders of consumers
+  const value = useMemo(
+    () => ({
+      currentPage,
+      setCurrentPage,
+      scale,
+      setScale,
+      rotation,
+      setRotation,
+    }),
+    [currentPage, scale, rotation],
+  );
 
   return <PdfStateContext.Provider value={value}>{children}</PdfStateContext.Provider>;
 };

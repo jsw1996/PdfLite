@@ -44,6 +44,20 @@ export function AnnotationContextProvider({ children }: { children: React.ReactN
   const scale = usePdfState().scale;
   const { controller } = usePdfController();
 
+  // Pre-compute a Map of annotations by pageIndex for efficient lookups
+  const annotationsByPage = useMemo(() => {
+    const map = new Map<number, IAnnotation[]>();
+    for (const annotation of annotationStack) {
+      const pageAnnotations = map.get(annotation.pageIndex);
+      if (pageAnnotations) {
+        pageAnnotations.push(annotation);
+      } else {
+        map.set(annotation.pageIndex, [annotation]);
+      }
+    }
+    return map;
+  }, [annotationStack]);
+
   const popAnnotation = useCallback(() => {
     let popped: IAnnotation | undefined;
     setAnnotationStack((prev) => {
@@ -75,12 +89,13 @@ export function AnnotationContextProvider({ children }: { children: React.ReactN
     );
   }, []);
 
+  // Memoized function that uses the pre-computed map for O(1) lookup
   const getAnnotationsForPage = useCallback(
-    (pageIndex: number) =>
-      annotationStack
-        .filter((a) => a.pageIndex === pageIndex)
-        .map((annotation) => denormalizeAnnotation(annotation, scale)),
-    [annotationStack, scale],
+    (pageIndex: number) => {
+      const pageAnnotations = annotationsByPage.get(pageIndex) ?? [];
+      return pageAnnotations.map((annotation) => denormalizeAnnotation(annotation, scale));
+    },
+    [annotationsByPage, scale],
   );
 
   const setNativeAnnotationsForPage = useCallback(

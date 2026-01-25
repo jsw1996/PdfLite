@@ -1,17 +1,35 @@
 import { usePdfController } from '@/providers/PdfControllerContextProvider';
 import { CanvasLayer } from '../CanvasLayer/CanvasLayer';
-import { useCallback } from 'react';
+import React, { useCallback } from 'react';
+import { RENDER_CONFIG } from '@/utils/config';
 
-export const PagePreview = ({ page }: { page: number }) => {
+interface IPagePreviewProps {
+  page: number;
+}
+
+export const PagePreview = React.memo(({ page }: IPagePreviewProps) => {
   const { currentPage, goToPage } = usePdfController();
   const handlePageClick = useCallback(() => {
     goToPage(page);
   }, [goToPage, page]);
+
+  // Display 1-indexed page number to users
+  const displayPageNumber = page + 1;
+
   return (
     <div
       data-slot="page-preview"
       key={`page-preview-${page}`}
       onClick={handlePageClick}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          handlePageClick();
+        }
+      }}
+      role="button"
+      tabIndex={0}
+      aria-label={`Go to page ${displayPageNumber}`}
       className={`cursor-pointer group flex flex-col items-center space-y-2 rounded-lg p-2 transition-colors ${
         currentPage === page ? 'bg-indigo-50 ring-1 ring-indigo-200' : 'hover:bg-slate-50'
       }`}
@@ -26,7 +44,7 @@ export const PagePreview = ({ page }: { page: number }) => {
           data-slot={`page-preview-canvas`}
           data-preview-index={String(page)}
           pageIndex={page}
-          scale={0.25}
+          scale={RENDER_CONFIG.PREVIEW_SCALE}
           className="mt-0"
         />
       </div>
@@ -36,8 +54,10 @@ export const PagePreview = ({ page }: { page: number }) => {
           currentPage === page ? 'text-indigo-600' : 'text-slate-500'
         }`}
       >
-        Page {page}
+        Page {displayPageNumber}
       </span>
     </div>
   );
-};
+});
+
+PagePreview.displayName = 'PagePreview';

@@ -1,7 +1,6 @@
 import React, { useMemo } from 'react';
 import { usePdfController } from '@/providers/PdfControllerContextProvider';
 import type { ITextRect } from '@pdfviewer/controller';
-// import { measureTextMetrics } from '../../components/TextLayer/TextMeasurementUtils';
 import { measureTextWidth } from '../../components/TextLayer/TextMeasurementUtils';
 
 export interface ITextLayerProps {

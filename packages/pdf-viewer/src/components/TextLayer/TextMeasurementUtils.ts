@@ -1,6 +1,8 @@
+import { CACHE_CONFIG } from '@/utils/config';
+
 let context: CanvasRenderingContext2D | null = null;
 
-const MAX_CACHE_ENTRIES = 5000;
+// Use a Map for LRU-like behavior (Map maintains insertion order)
 const widthCache = new Map<string, number>();
 
 function normalizeFontFamily(fontFamily?: string): string {
@@ -15,6 +17,7 @@ function normalizeFontFamily(fontFamily?: string): string {
 /**
  * Measures the width of a given text string with the provided font.
  * Typically used with `fontSize = "1px"` and then scaled up.
+ * Uses LRU-like cache eviction to prevent memory spikes.
  */
 export function measureTextWidth(text: string, fontSize: string, fontFamily?: string): number {
   // SSR / non-DOM environments
@@ -29,15 +32,28 @@ export function measureTextWidth(text: string, fontSize: string, fontFamily?: st
   const font = `${fontSize} ${normalizeFontFamily(fontFamily)}`;
   const cacheKey = `${font}\n${text}`;
   const cached = widthCache.get(cacheKey);
-  if (cached !== undefined) return cached;
+  if (cached !== undefined) {
+    // Move to end for LRU behavior (delete and re-add)
+    widthCache.delete(cacheKey);
+    widthCache.set(cacheKey, cached);
+    return cached;
+  }
 
   context.font = font;
   const width = context.measureText(text).width;
 
-  widthCache.set(cacheKey, width);
-  if (widthCache.size > MAX_CACHE_ENTRIES) {
-    widthCache.clear();
+  // LRU eviction: remove oldest entries (first in map) when exceeding limit
+  if (widthCache.size >= CACHE_CONFIG.MAX_CACHE_ENTRIES) {
+    // Remove oldest 10% of entries to avoid frequent evictions
+    const entriesToRemove = Math.ceil(CACHE_CONFIG.MAX_CACHE_ENTRIES * 0.1);
+    const keys = widthCache.keys();
+    for (let i = 0; i < entriesToRemove; i++) {
+      const key = keys.next().value;
+      if (key) widthCache.delete(key);
+    }
   }
+
+  widthCache.set(cacheKey, width);
 
   return width;
 }

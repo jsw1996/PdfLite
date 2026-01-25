@@ -197,15 +197,17 @@ export const Resizable: React.FC<IResizableProps> = ({
       if (pendingSize) {
         setLocalSize(pendingSize);
         onSizeChange?.(pendingSize);
-        pendingSize = null;
       }
       if (pendingPosition) {
         onPositionChange?.(pendingPosition);
-        pendingPosition = null;
       }
 
+      // Capture the final size before resetting pendingSize
       const finalSize = pendingSize ?? localSize;
 
+      // Reset state
+      pendingSize = null;
+      pendingPosition = null;
       setIsResizing(false);
       setResizeHandle(null);
       startPosRef.current = null;

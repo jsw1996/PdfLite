@@ -1,6 +1,7 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState, useEffect } from 'react';
 import { usePdfState } from '@/providers/PdfStateContextProvider';
 import { usePdfController } from '@/providers/PdfControllerContextProvider';
+import { clampFinite, scalePoints, isValidExternalUri } from '@/utils/shared';
 
 export interface ILinkItem {
   id: string;
@@ -24,17 +25,29 @@ interface ILayerMetrics {
   cssHeight: number;
 }
 
-function clampFinite(n: number, fallback = 0): number {
-  return Number.isFinite(n) ? n : fallback;
-}
-
-function scalePoints(
-  points: { x: number; y: number }[],
-  scale: number,
-): { x: number; y: number }[] {
-  return points.map((p) => ({ x: p.x * scale, y: p.y * scale }));
-}
 const FPDF_ANNOTATION_SUBTYPE_LINK = 2;
+
+/**
+ * Compute layer metrics from refs. Returns null if refs are not ready.
+ */
+function computeMetrics(
+  pdfCanvas: HTMLCanvasElement | null,
+  containerEl: HTMLElement | null,
+): ILayerMetrics | null {
+  if (!pdfCanvas || !containerEl) return null;
+
+  const rect = pdfCanvas.getBoundingClientRect();
+  const containerRect = containerEl.getBoundingClientRect();
+  const top = rect.top - containerRect.top;
+  const left = rect.left - containerRect.left;
+
+  return {
+    top: clampFinite(top, 0),
+    left: clampFinite(left, 0),
+    cssWidth: clampFinite(rect.width, 0),
+    cssHeight: clampFinite(rect.height, 0),
+  };
+}
 
 export const LinkLayer: React.FC<ILinkLayerProps> = ({
   pdfCanvas,
@@ -44,43 +57,56 @@ export const LinkLayer: React.FC<ILinkLayerProps> = ({
   pageIndex,
 }) => {
   const { controller } = usePdfController();
-  const native = controller.listNativeAnnotations(pageIndex, { scale: 1 });
   const { scale } = usePdfState();
   const rootRef = useRef<HTMLDivElement | null>(null);
-  const [metrics, setMetrics] = useState<ILayerMetrics | null>(null);
 
-  const links = native
-    .filter((a) => a.subtype === FPDF_ANNOTATION_SUBTYPE_LINK)
-    .map(
-      (a): ILinkItem => ({
-        id: a.id,
-        points: a.points,
-        uri: a.uri,
-        destPageIndex: a.destPageIndex,
-      }),
-    );
+  // Memoize native annotations fetch
+  const native = useMemo(
+    () => controller.listNativeAnnotations(pageIndex, { scale: 1 }),
+    [controller, pageIndex],
+  );
+
+  // Memoize links extraction
+  const links = useMemo(
+    () =>
+      native
+        .filter((a) => a.subtype === FPDF_ANNOTATION_SUBTYPE_LINK)
+        .map(
+          (a): ILinkItem => ({
+            id: a.id,
+            points: a.points,
+            uri: a.uri,
+            destPageIndex: a.destPageIndex,
+          }),
+        ),
+    [native],
+  );
+
+  // Track a version to force recalculation on resize
+  const [metricsVersion, setMetricsVersion] = useState(0);
+
+  // Compute metrics as derived state (will re-run when metricsVersion changes)
+  const metrics = useMemo(() => {
+    // metricsVersion is used to trigger recalculation
+    void metricsVersion;
+    return computeMetrics(pdfCanvas, containerEl);
+  }, [pdfCanvas, containerEl, metricsVersion]);
 
   const updateMetrics = useCallback(() => {
-    if (!pdfCanvas || !containerEl) return;
+    setMetricsVersion((v) => v + 1);
+  }, []);
 
-    const rect = pdfCanvas.getBoundingClientRect();
-    const containerRect = containerEl.getBoundingClientRect();
-
-    const top = rect.top - containerRect.top;
-    const left = rect.left - containerRect.left;
-
-    // 关键：这里用 rect.width/height（已经是“屏幕上的真实 CSS 尺寸”）
-    setMetrics({
-      top: clampFinite(top, 0),
-      left: clampFinite(left, 0),
-      cssWidth: clampFinite(rect.width, 0),
-      cssHeight: clampFinite(rect.height, 0),
-    });
-  }, [containerEl, pdfCanvas]);
-
-  if (metrics === null && pdfCanvas && containerEl) {
-    updateMetrics();
-  }
+  // Watch for resize events to update metrics
+  useEffect(() => {
+    if (!pdfCanvas) return;
+    const ro = new ResizeObserver(() => updateMetrics());
+    ro.observe(pdfCanvas);
+    window.addEventListener('resize', updateMetrics);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', updateMetrics);
+    };
+  }, [pdfCanvas, updateMetrics]);
 
   const layerStyle = useMemo<React.CSSProperties>(() => {
     if (!metrics) return { display: 'none' };
@@ -94,6 +120,27 @@ export const LinkLayer: React.FC<ILinkLayerProps> = ({
       pointerEvents: 'none', // 根层穿透，让子元素自己决定
     };
   }, [metrics]);
+
+  const handleLinkClick = useCallback(
+    (e: React.MouseEvent, link: ILinkItem) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (link.uri) {
+        // Validate URI before opening
+        if (isValidExternalUri(link.uri)) {
+          onOpenExternal?.(link.uri);
+        } else {
+          console.warn('Blocked potentially unsafe URI:', link.uri);
+        }
+        return;
+      }
+      if (typeof link.destPageIndex === 'number') {
+        onGoToPage?.(link.destPageIndex);
+      }
+    },
+    [onOpenExternal, onGoToPage],
+  );
 
   return (
     <div ref={rootRef} style={layerStyle} data-slot="link-layer">
@@ -118,6 +165,7 @@ export const LinkLayer: React.FC<ILinkLayerProps> = ({
             key={l.id}
             type="button"
             title={title}
+            aria-label={title}
             // tailwind classname with variables in style
             className="absolute bg-transparent border-none p-0 cursor-pointer pointer-events-auto"
             style={{
@@ -126,18 +174,7 @@ export const LinkLayer: React.FC<ILinkLayerProps> = ({
               width,
               height,
             }}
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-
-              if (l.uri) {
-                onOpenExternal?.(l.uri);
-                return;
-              }
-              if (typeof l.destPageIndex === 'number') {
-                onGoToPage?.(l.destPageIndex);
-              }
-            }}
+            onClick={(e) => handleLinkClick(e, l)}
           />
         );
       })}

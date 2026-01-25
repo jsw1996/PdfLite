@@ -1,5 +1,6 @@
 import React, { useCallback, useRef, useState } from 'react';
 import { Button } from '@pdfviewer/ui/components/button';
+import { safeBase64Decode } from '@/utils/shared';
 
 export interface IHandwritingCanvasProps {
   onSignatureReady: (args: {
@@ -102,12 +103,14 @@ export const HandwritingCanvas: React.FC<IHandwritingCanvasProps> = ({ onSignatu
         // Convert canvas to PNG data URL (base64 encoded)
         const pngDataUrl = canvas.toDataURL('image/png');
 
-        // Convert base64 string to Uint8Array
-        const pngBytes = new Uint8Array(
-          atob(pngDataUrl.split(',')[1])
-            .split('')
-            .map((c) => c.charCodeAt(0)),
-        );
+        // Convert base64 string to Uint8Array with error handling
+        const base64Data = pngDataUrl.split(',')[1];
+        const pngBytes = safeBase64Decode(base64Data);
+
+        if (!pngBytes) {
+          console.error('Failed to decode signature image data');
+          return;
+        }
 
         onSignatureReady({
           pngDataUrl,

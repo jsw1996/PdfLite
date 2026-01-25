@@ -1,7 +1,7 @@
 import type { IToolButton } from '../ToolButtons/ToolButton.type';
 import { ToolGroup } from './ToolGroup';
 import { Separator } from '@pdfviewer/ui/components/separator';
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 import { useAnnotation } from '../../providers/AnnotationContextProvider';
 import { DrawButtonId } from '../ToolButtons/DrawButton';
 import { HighlightButtonId } from '../ToolButtons/HighlightButton';
@@ -47,14 +47,17 @@ export const ToolBar: React.FC<IToobarProps> = (props: IToobarProps) => {
     boardered ? '' : 'border-0 bg-transparent',
   );
 
-  const buttonsByGroup: IToolButton[][] = buttons.reduce((groups: IToolButton[][], button) => {
-    const groupIndex = button.groupIndex;
-    if (!groups[groupIndex]) {
-      groups[groupIndex] = [];
-    }
-    groups[groupIndex].push(button);
-    return groups;
-  }, []);
+  // Memoize buttonsByGroup to avoid recomputing on every render
+  const buttonsByGroup = useMemo(() => {
+    return buttons.reduce((groups: IToolButton[][], button) => {
+      const groupIndex = button.groupIndex;
+      if (!groups[groupIndex]) {
+        groups[groupIndex] = [];
+      }
+      groups[groupIndex].push(button);
+      return groups;
+    }, []);
+  }, [buttons]);
 
   return (
     <div className={classNames}>

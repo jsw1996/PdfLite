@@ -4,6 +4,7 @@ import { type IPoint } from '../../annotations';
 import { useRenderAnnotation } from '../../hooks/useRenderAnnotation';
 import { useInk } from '../../hooks/useInk';
 import { cn } from '@pdfviewer/ui/lib/utils';
+import { clampFinite } from '@/utils/shared';
 
 export interface IAnnotationLayerProps {
   pageIndex: number;
@@ -23,8 +24,27 @@ interface ICanvasMetrics {
   pixelHeight: number;
 }
 
-function clampFinite(n: number, fallback = 0): number {
-  return Number.isFinite(n) ? n : fallback;
+/**
+ * Compute canvas metrics from refs. Returns null if refs are not ready.
+ */
+function computeMetrics(
+  pdfCanvas: HTMLCanvasElement | null,
+  containerEl: HTMLElement | null,
+): ICanvasMetrics | null {
+  if (!pdfCanvas || !containerEl) return null;
+  const rect = pdfCanvas.getBoundingClientRect();
+  const containerRect = containerEl.getBoundingClientRect();
+  const top = rect.top - containerRect.top;
+  const left = rect.left - containerRect.left;
+
+  return {
+    top: clampFinite(top, 0),
+    left: clampFinite(left, 0),
+    cssWidth: clampFinite(rect.width, 0),
+    cssHeight: clampFinite(rect.height, 0),
+    pixelWidth: pdfCanvas.width,
+    pixelHeight: pdfCanvas.height,
+  };
 }
 
 export const AnnotationLayer: React.FC<IAnnotationLayerProps> = ({
@@ -38,39 +58,20 @@ export const AnnotationLayer: React.FC<IAnnotationLayerProps> = ({
 
   const highlightCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const drawCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [metrics, setMetrics] = useState<ICanvasMetrics | null>(null);
+
+  // Track a version to force recalculation on resize
+  const [metricsVersion, setMetricsVersion] = useState(0);
+
+  // Compute metrics as derived state (will re-run when metricsVersion changes)
+  const metrics = useMemo(() => {
+    // metricsVersion is used to trigger recalculation
+    void metricsVersion;
+    return computeMetrics(pdfCanvas, containerEl);
+  }, [pdfCanvas, containerEl, metricsVersion]);
 
   const updateMetrics = useCallback(() => {
-    if (!pdfCanvas || !containerEl) return;
-    const rect = pdfCanvas.getBoundingClientRect();
-    const containerRect = containerEl.getBoundingClientRect();
-    // Calculate offset relative to container (stable across margin/scroll/offsetParent changes)
-    const top = rect.top - containerRect.top;
-    const left = rect.left - containerRect.left;
-
-    setMetrics({
-      top: clampFinite(top, 0),
-      left: clampFinite(left, 0),
-      cssWidth: clampFinite(rect.width, 0),
-      cssHeight: clampFinite(rect.height, 0),
-      pixelWidth: pdfCanvas.width,
-      pixelHeight: pdfCanvas.height,
-    });
-  }, [containerEl, pdfCanvas]);
-
-  // 首次渲染时直接计算一次（避免 useEffect 中同步 setState 的 lint 报错）
-  if (metrics === null && pdfCanvas && containerEl) {
-    const rect = pdfCanvas.getBoundingClientRect();
-    const containerRect = containerEl.getBoundingClientRect();
-    setMetrics({
-      top: clampFinite(rect.top - containerRect.top, 0),
-      left: clampFinite(rect.left - containerRect.left, 0),
-      cssWidth: clampFinite(rect.width, 0),
-      cssHeight: clampFinite(rect.height, 0),
-      pixelWidth: pdfCanvas.width,
-      pixelHeight: pdfCanvas.height,
-    });
-  }
+    setMetricsVersion((v) => v + 1);
+  }, []);
 
   useEffect(() => {
     if (!pdfCanvas) return;

@@ -8,9 +8,10 @@
  *    then do the high quality render.
  */
 
-import React, { useEffect, useRef, useState, useMemo } from 'react';
+import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { useInViewport } from '../../hooks/useInViewport';
 import { usePdfController } from '../../providers/PdfControllerContextProvider';
+import { RENDER_CONFIG } from '@/utils/config';
 
 export interface ICanvasLayerProps extends React.ComponentProps<'canvas'> {
   pageIndex?: number;
@@ -42,8 +43,8 @@ export const CanvasLayer: React.FC<ICanvasLayerProps> = ({
     return scale / renderedScale;
   }, [scale, renderedScale]);
 
-  // 2. The Heavy Render Function
-  const renderPdfCanvas = () => {
+  // 2. The Heavy Render Function - memoized with useCallback
+  const renderPdfCanvas = useCallback(() => {
     if (!canvasRef.current || !isInitialized) return;
 
     try {
@@ -59,7 +60,7 @@ export const CanvasLayer: React.FC<ICanvasLayerProps> = ({
     } catch (error) {
       console.warn('Failed to render PDF on canvas.', error);
     }
-  };
+  }, [controller, isInitialized, pageIndex, scale, onCanvasReady]);
 
   useEffect(() => {
     if (renderTimeoutRef.current) {
@@ -69,13 +70,12 @@ export const CanvasLayer: React.FC<ICanvasLayerProps> = ({
     // If scales differ (Zooming), delay the heavy render
     renderTimeoutRef.current = setTimeout(() => {
       renderPdfCanvas();
-    }, 200); // 200ms delay allows smooth 60fps zooming before heavy lifting
+    }, RENDER_CONFIG.RENDER_DEBOUNCE_MS);
 
     return () => {
       if (renderTimeoutRef.current) clearTimeout(renderTimeoutRef.current);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scale, isInViewport, isInitialized, controller]);
+  }, [scale, isInViewport, renderPdfCanvas]);
 
   return (
     // div wrapper for the layout update on zooming

@@ -1,5 +1,5 @@
 import { cn } from '@pdfviewer/ui/lib/utils';
-import type { IPoint } from '../../annotations';
+import type { IPoint, ITextAnnotation } from '../../annotations';
 import React from 'react';
 import { useAnnotation } from '../../providers/AnnotationContextProvider';
 
@@ -65,7 +65,7 @@ export const TextBox = ({ id, content, position, fontSize, fontColor }: ITextBox
         updateAnnotation(id, {
           position: currentPos,
           dimensions: rect ? { width: rect.width, height: rect.height } : undefined,
-        } as Partial<never>);
+        } as Partial<ITextAnnotation>);
         setIsDragging(false);
       }
       window.removeEventListener('mousemove', handleMouseMove);
@@ -91,7 +91,7 @@ export const TextBox = ({ id, content, position, fontSize, fontColor }: ITextBox
     setMode('idle');
     const newContent = textareaRef.current?.value ?? '';
     if (newContent !== content) {
-      updateAnnotation(id, { content: newContent } as Partial<never>);
+      updateAnnotation(id, { content: newContent } as Partial<ITextAnnotation>);
     }
   };
 
