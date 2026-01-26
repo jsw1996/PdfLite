@@ -12,9 +12,14 @@ export type ToolButtonProps = IToolButton & {
 export const ToolButton: React.FC<ToolButtonProps> = (props: ToolButtonProps) => {
   const toolId = props.id ?? props.name;
   const className = cn(
-    'text-muted-foreground',
-    'hover:bg-indigo-100 hover:text-muted-foreground!',
-    props.isActive && 'bg-accent text-primary! border border-border',
+    // Base styles
+    'text-muted-foreground relative overflow-hidden rounded-lg transition-all duration-200',
+    // Hover state - vibrant primary color
+    'hover:bg-primary/10 hover:text-primary',
+    // Active state - filled with primary
+    props.isActive && 'bg-primary text-primary-foreground! shadow-md shadow-primary/25',
+    // Disabled state
+    props.isEnabled === false && 'opacity-50 cursor-not-allowed',
   );
   const { controller } = usePdfController();
   const { commitAnnotations } = useAnnotation();
@@ -39,7 +44,7 @@ export const ToolButton: React.FC<ToolButtonProps> = (props: ToolButtonProps) =>
           props.onClick?.(controller, commitAnnotations);
         }}
       >
-        <props.icon className="w-[24px] h-[24px] stroke-2" />
+        <props.icon className="w-5 h-5 stroke-[1.75]" />
       </TooltipButton>
     </>
   );

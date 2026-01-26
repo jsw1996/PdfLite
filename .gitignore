@@ -17,3 +17,6 @@ Thumbs.db
 npm-debug.log*
 
 .turbo/
+
+# OpenCode
+.opencode/

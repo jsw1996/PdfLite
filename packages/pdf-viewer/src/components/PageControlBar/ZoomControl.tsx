@@ -14,13 +14,25 @@ export const ZoomControl: React.FC = () => {
     setScale(Math.max(zoomStep, scale - zoomStep));
   };
   return (
-    <div className="bg-background flex items-center">
-      <TooltipButton variant="ghost" onClick={handleZoomOut} title="Zoom Out">
-        <ZoomOut />
+    <div className="flex items-center gap-1">
+      <TooltipButton
+        variant="ghost"
+        onClick={handleZoomOut}
+        title="Zoom Out"
+        className="w-8 h-8 rounded-lg hover:bg-primary/10 hover:text-primary transition-colors duration-200"
+      >
+        <ZoomOut className="w-4 h-4" />
       </TooltipButton>
-      <span className="mx-2">{(scale * 100).toFixed(0)}%</span>
-      <TooltipButton variant="ghost" onClick={handleZoomIn} title="Zoom In">
-        <ZoomIn />
+      <span className="w-12 text-center text-sm font-medium tabular-nums">
+        {(scale * 100).toFixed(0)}%
+      </span>
+      <TooltipButton
+        variant="ghost"
+        onClick={handleZoomIn}
+        title="Zoom In"
+        className="w-8 h-8 rounded-lg hover:bg-primary/10 hover:text-primary transition-colors duration-200"
+      >
+        <ZoomIn className="w-4 h-4" />
       </TooltipButton>
     </div>
   );

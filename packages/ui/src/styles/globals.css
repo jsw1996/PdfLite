@@ -5,75 +5,111 @@
 @source "../**/*.{ts,tsx}";
 @custom-variant dark (&:is(.dark *));
 
+/* Modern Tech Theme - Indigo/Violet with Glassmorphism */
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
+  /* Core Brand Colors - Indigo Primary + Emerald Accent */
+  --background: oklch(0.985 0.008 270);
+  --foreground: oklch(0.2 0.02 270);
+
+  /* Cards & Surfaces */
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
+  --card-foreground: oklch(0.2 0.02 270);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --destructive-foreground: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --popover-foreground: oklch(0.2 0.02 270);
+
+  /* Primary - Indigo (modern tech color) */
+  --primary: oklch(0.55 0.2 270);
+  --primary-foreground: oklch(1 0 0);
+
+  /* Secondary - Soft violet tinted surface */
+  --secondary: oklch(0.96 0.015 270);
+  --secondary-foreground: oklch(0.3 0.03 270);
+
+  /* Muted elements */
+  --muted: oklch(0.95 0.01 270);
+  --muted-foreground: oklch(0.5 0.02 270);
+
+  /* Accent - Emerald for CTAs and success states */
+  --accent: oklch(0.7 0.17 160);
+  --accent-foreground: oklch(1 0 0);
+
+  /* Status colors */
+  --destructive: oklch(0.6 0.22 25);
+  --destructive-foreground: oklch(1 0 0);
+
+  /* Borders & Inputs */
+  --border: oklch(0.9 0.01 270);
+  --input: oklch(0.95 0.008 270);
+  --ring: oklch(0.55 0.2 270);
+
+  /* Chart colors - Modern tech palette */
+  --chart-1: oklch(0.55 0.2 270);
+  --chart-2: oklch(0.7 0.17 160);
+  --chart-3: oklch(0.65 0.18 200);
+  --chart-4: oklch(0.7 0.15 320);
+  --chart-5: oklch(0.6 0.2 290);
+
+  /* Radius - Modern rounded feel */
+  --radius: 0.75rem;
+
+  /* Sidebar - Glassmorphic with violet tint */
+  --sidebar: oklch(0.98 0.01 270 / 0.9);
+  --sidebar-foreground: oklch(0.2 0.02 270);
+  --sidebar-primary: oklch(0.55 0.2 270);
+  --sidebar-primary-foreground: oklch(1 0 0);
+  --sidebar-accent: oklch(0.95 0.015 270);
+  --sidebar-accent-foreground: oklch(0.3 0.03 270);
+  --sidebar-border: oklch(0.92 0.01 270);
+  --sidebar-ring: oklch(0.55 0.2 270);
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.145 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.145 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.985 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.396 0.141 25.723);
-  --destructive-foreground: oklch(0.637 0.237 25.331);
-  --border: oklch(0.269 0 0);
-  --input: oklch(0.269 0 0);
-  --ring: oklch(0.439 0 0);
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(0.269 0 0);
-  --sidebar-ring: oklch(0.439 0 0);
+  /* Dark mode - Deep slate with indigo accents */
+  --background: oklch(0.13 0.015 270);
+  --foreground: oklch(0.95 0.01 270);
+
+  --card: oklch(0.16 0.015 270);
+  --card-foreground: oklch(0.95 0.01 270);
+  --popover: oklch(0.16 0.015 270);
+  --popover-foreground: oklch(0.95 0.01 270);
+
+  /* Primary - Brighter indigo in dark mode */
+  --primary: oklch(0.65 0.2 270);
+  --primary-foreground: oklch(0.13 0.015 270);
+
+  --secondary: oklch(0.2 0.015 270);
+  --secondary-foreground: oklch(0.9 0.01 270);
+
+  --muted: oklch(0.22 0.015 270);
+  --muted-foreground: oklch(0.6 0.02 270);
+
+  /* Accent - Emerald stays vibrant */
+  --accent: oklch(0.75 0.17 160);
+  --accent-foreground: oklch(0.13 0.015 270);
+
+  --destructive: oklch(0.5 0.2 25);
+  --destructive-foreground: oklch(0.9 0.15 25);
+
+  --border: oklch(0.38 0.02 270);
+  --input: oklch(0.22 0.015 270);
+  --ring: oklch(0.65 0.2 270);
+
+  /* Chart colors - Brighter for dark mode */
+  --chart-1: oklch(0.65 0.2 270);
+  --chart-2: oklch(0.75 0.17 160);
+  --chart-3: oklch(0.7 0.18 200);
+  --chart-4: oklch(0.75 0.15 320);
+  --chart-5: oklch(0.7 0.2 290);
+
+  /* Sidebar - Dark glassmorphic */
+  --sidebar: oklch(0.16 0.015 270 / 0.95);
+  --sidebar-foreground: oklch(0.95 0.01 270);
+  --sidebar-primary: oklch(0.65 0.2 270);
+  --sidebar-primary-foreground: oklch(0.13 0.015 270);
+  --sidebar-accent: oklch(0.22 0.015 270);
+  --sidebar-accent-foreground: oklch(0.95 0.01 270);
+  --sidebar-border: oklch(0.38 0.02 270);
+  --sidebar-ring: oklch(0.65 0.2 270);
 }
 
 @theme inline {
@@ -121,5 +157,36 @@
   }
   body {
     @apply bg-background text-foreground;
+    font-family: 'Inter', 'DM Sans', system-ui, sans-serif;
+  }
+}
+
+/* Glassmorphism utility classes */
+@layer utilities {
+  .glass {
+    @apply bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl border border-white/20 dark:border-white/10;
+  }
+
+  .glass-hover {
+    @apply transition-all duration-200 hover:bg-white/90 dark:hover:bg-slate-900/90 hover:shadow-lg;
+  }
+
+  /* Modern tech gradient backgrounds */
+  .gradient-playful {
+    background: linear-gradient(
+      135deg,
+      oklch(0.98 0.015 270) 0%,
+      oklch(0.97 0.02 290) 50%,
+      oklch(0.98 0.01 250) 100%
+    );
+  }
+
+  .dark .gradient-playful {
+    background: linear-gradient(
+      135deg,
+      oklch(0.14 0.02 270) 0%,
+      oklch(0.12 0.025 290) 50%,
+      oklch(0.15 0.015 250) 100%
+    );
   }
 }

@@ -10,6 +10,7 @@ import { usePdfController } from '@/providers/PdfControllerContextProvider';
 import { PagePreview } from './PagePreview';
 import { useLazyPageLoader } from '../../hooks/useLazyPageLoader';
 import { useEffect, useRef } from 'react';
+import { Loader2 } from 'lucide-react';
 
 export function AppSidebar() {
   const { controller, currentPage } = usePdfController();
@@ -47,19 +48,20 @@ export function AppSidebar() {
   }, [loadedPages]);
 
   return (
-    <Sidebar>
-      <SidebarContent>
-        <SidebarGroup>
-          <SidebarGroupContent>
+    <Sidebar className="border-r-0">
+      <SidebarContent className="bg-sidebar/80 dark:bg-sidebar/70 backdrop-blur-xl">
+        <SidebarGroup className="p-3">
+          <SidebarGroupContent className="space-y-2">
             {Array.from({ length: loadedPages }, (_, i) => i).map((page) => (
               <PagePreview key={`page-preview-${page}`} page={page} />
             ))}
             {hasMorePages && (
               <div
                 ref={sentinelRef}
-                className="h-8 flex items-center justify-center text-gray-400 text-sm"
+                className="h-10 flex items-center justify-center gap-2 text-muted-foreground text-xs"
               >
-                Loading...
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>Loading more...</span>
               </div>
             )}
           </SidebarGroupContent>

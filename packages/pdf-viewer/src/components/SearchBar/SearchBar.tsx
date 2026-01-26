@@ -136,33 +136,35 @@ export const SearchBar = () => {
             }
           }}
           type="text"
-          placeholder="Find in document"
+          placeholder="Find in document..."
           value={value}
           onChange={(e) => handleValueChange(e.target.value)}
-          className="pr-28"
+          className="pr-28 rounded-xl bg-secondary/50 border border-border dark:border-border/80 focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all duration-200 placeholder:text-muted-foreground/60"
           id={searchBoxId}
         />
         {value && (
-          <span className="absolute inset-y-0 right-0 flex items-center pr-2 text-gray-500">
-            <Separator orientation="vertical" className="mx-2 !h-6" />
-            <span className="px-1">
-              {matches.length > 0 ? `${currentIndex + 1} / ${matches.length}` : '0 / 0'}
+          <span className="absolute inset-y-0 right-0 flex items-center pr-2 text-muted-foreground">
+            <Separator orientation="vertical" className="mx-2 !h-5 bg-border/50" />
+            <span className="px-1 text-xs font-medium tabular-nums">
+              {matches.length > 0 ? `${currentIndex + 1}/${matches.length}` : '0/0'}
             </span>
             <Button
               variant="ghost"
-              className="px-[2px]!"
+              size="icon"
+              className="w-6 h-6 rounded-lg hover:bg-primary/10 hover:text-primary transition-colors duration-200"
               onClick={() => setCurrentIndex((prev) => (prev > 0 ? prev - 1 : matches.length - 1))}
               disabled={matches.length === 0}
             >
-              <ChevronUp />
+              <ChevronUp className="w-3.5 h-3.5" />
             </Button>
             <Button
               variant="ghost"
-              className="px-[2px]!"
+              size="icon"
+              className="w-6 h-6 rounded-lg hover:bg-primary/10 hover:text-primary transition-colors duration-200"
               onClick={() => setCurrentIndex((prev) => (prev < matches.length - 1 ? prev + 1 : 0))}
               disabled={matches.length === 0}
             >
-              <ChevronDown />
+              <ChevronDown className="w-3.5 h-3.5" />
             </Button>
           </span>
         )}

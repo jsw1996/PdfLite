@@ -46,11 +46,17 @@ export const PageStepper: React.FC<IPageStepperProps> = ({ pageCount, onJumpToPa
   }, [clampPageIndex, onJumpToPage, parsedDraft]);
 
   return (
-    <div className="flex m-0">
-      <TooltipButton title="Previous Page" variant="ghost" onClick={onPrev} disabled={!canPrev}>
-        <ChevronLeft />
+    <div className="flex items-center gap-1">
+      <TooltipButton
+        title="Previous Page"
+        variant="ghost"
+        onClick={onPrev}
+        disabled={!canPrev}
+        className="w-8 h-8 rounded-lg hover:bg-primary/10 hover:text-primary transition-colors duration-200 disabled:opacity-40"
+      >
+        <ChevronLeft className="w-4 h-4" />
       </TooltipButton>
-      <div className="font-medium self-center flex items-center">
+      <div className="font-medium flex items-center gap-1.5 text-sm">
         <input
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
@@ -58,14 +64,20 @@ export const PageStepper: React.FC<IPageStepperProps> = ({ pageCount, onJumpToPa
           onKeyDown={(e) => {
             if (e.key === 'Enter') commitDraft();
           }}
-          className="w-10 text-center outline-none border border-border rounded px-1 py-0.5 bg-background text-foreground"
+          className="w-10 text-center outline-none border border-border/50 rounded-lg px-1.5 py-1 bg-secondary/50 text-foreground focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all duration-200"
           inputMode="numeric"
         />
-        <span className="mx-1">/</span>
-        <span>{pageCount}</span>
+        <span className="text-muted-foreground">/</span>
+        <span className="text-muted-foreground">{pageCount}</span>
       </div>
-      <TooltipButton title="Next Page" variant="ghost" onClick={onNext} disabled={!canNext}>
-        <ChevronRight />
+      <TooltipButton
+        title="Next Page"
+        variant="ghost"
+        onClick={onNext}
+        disabled={!canNext}
+        className="w-8 h-8 rounded-lg hover:bg-primary/10 hover:text-primary transition-colors duration-200 disabled:opacity-40"
+      >
+        <ChevronRight className="w-4 h-4" />
       </TooltipButton>
     </div>
   );
