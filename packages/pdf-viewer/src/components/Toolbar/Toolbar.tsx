@@ -43,7 +43,7 @@ export const ToolBar: React.FC<IToobarProps> = (props: IToobarProps) => {
   );
 
   const classNames = cn(
-    'flex flex-row p-[5px] bg-[#f8fafc] border border-gray-300 rounded-[14px] space-x-1',
+    'flex flex-row p-[5px] bg-secondary border border-border rounded-[14px] space-x-1',
     boardered ? '' : 'border-0 bg-transparent',
   );
 
@@ -69,7 +69,7 @@ export const ToolBar: React.FC<IToobarProps> = (props: IToobarProps) => {
             onActivate={handleActivate}
           />
           {index < buttonsByGroup.length - 1 && (
-            <Separator orientation="vertical" className="mx-2 h-6!" />
+            <Separator orientation="vertical" className="mx-2 h-6! bg-muted-foreground/30" />
           )}
         </div>
       ))}

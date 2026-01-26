@@ -58,7 +58,7 @@ export const PageStepper: React.FC<IPageStepperProps> = ({ pageCount, onJumpToPa
           onKeyDown={(e) => {
             if (e.key === 'Enter') commitDraft();
           }}
-          className="w-10 text-center outline-none border border-gray-200 rounded px-1 py-0.5"
+          className="w-10 text-center outline-none border border-border rounded px-1 py-0.5 bg-background text-foreground"
           inputMode="numeric"
         />
         <span className="mx-1">/</span>

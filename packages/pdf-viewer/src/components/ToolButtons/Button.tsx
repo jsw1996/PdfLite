@@ -12,9 +12,9 @@ export type ToolButtonProps = IToolButton & {
 export const ToolButton: React.FC<ToolButtonProps> = (props: ToolButtonProps) => {
   const toolId = props.id ?? props.name;
   const className = cn(
-    'hover:bg-indigo-100',
-    'text-[#65758D]',
-    props.isActive && 'bg-blue-100 text-[#4f46e5] bg-white border border-gray-300',
+    'text-muted-foreground',
+    'hover:bg-indigo-100 hover:text-muted-foreground!',
+    props.isActive && 'bg-accent text-primary! border border-border',
   );
   const { controller } = usePdfController();
   const { commitAnnotations } = useAnnotation();

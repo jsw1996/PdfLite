@@ -31,13 +31,13 @@ export const PagePreview = React.memo(({ page }: IPagePreviewProps) => {
       tabIndex={0}
       aria-label={`Go to page ${displayPageNumber}`}
       className={`cursor-pointer group flex flex-col items-center space-y-2 rounded-lg p-2 transition-colors ${
-        currentPage === page ? 'bg-indigo-50 ring-1 ring-indigo-200' : 'hover:bg-slate-50'
+        currentPage === page ? 'bg-accent ring-1 ring-ring' : 'hover:bg-muted'
       }`}
     >
       <div
         data-slot="page-preview-canvas-container"
-        className={`w-full aspect-[1/1.4] bg-white border shadow-sm rounded flex items-center justify-center text-slate-200 overflow-hidden ${
-          currentPage === page ? 'border-indigo-300' : 'border-slate-200'
+        className={`w-full aspect-[1/1.4] bg-white border shadow-sm rounded flex items-center justify-center text-muted-foreground overflow-hidden ${
+          currentPage === page ? 'border-primary' : 'border-border'
         }`}
       >
         <CanvasLayer
@@ -51,7 +51,7 @@ export const PagePreview = React.memo(({ page }: IPagePreviewProps) => {
       <span
         data-slot="page-preview-page-number"
         className={`text-xs font-medium ${
-          currentPage === page ? 'text-indigo-600' : 'text-slate-500'
+          currentPage === page ? 'text-primary' : 'text-muted-foreground'
         }`}
       >
         Page {displayPageNumber}

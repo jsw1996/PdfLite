@@ -4,6 +4,7 @@ import { PdfEditor } from './components/PdfEditor';
 import { SidebarProvider } from '@pdfviewer/ui/components/sidebar';
 import type { CSSProperties } from 'react';
 import { PdfControllerContextProvider } from './providers/PdfControllerContextProvider';
+import { ThemeContextProvider } from './providers/ThemeContextProvider';
 
 function App() {
   const [isFileOpened, setIsFileOpened] = useState<boolean>(false);
@@ -18,11 +19,13 @@ function App() {
   return !isFileOpened ? (
     <LandingPage onFileSelect={onFileSelected} />
   ) : (
-    <PdfControllerContextProvider>
-      <SidebarProvider style={{ '--sidebar-width': '12rem' } as CSSProperties}>
-        <PdfEditor file={file!} />
-      </SidebarProvider>
-    </PdfControllerContextProvider>
+    <ThemeContextProvider>
+      <PdfControllerContextProvider>
+        <SidebarProvider style={{ '--sidebar-width': '12rem' } as CSSProperties}>
+          <PdfEditor file={file!} />
+        </SidebarProvider>
+      </PdfControllerContextProvider>
+    </ThemeContextProvider>
   );
 }
 
