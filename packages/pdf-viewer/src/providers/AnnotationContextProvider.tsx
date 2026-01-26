@@ -28,6 +28,8 @@ export interface IAnnotationContextValue {
   commitAnnotations: () => void;
   /** Update an existing annotation by ID */
   updateAnnotation: (id: string, updates: Partial<IAnnotation>) => void;
+  /** Version counter that increments when page content changes (e.g., text flattened) */
+  renderVersion: number;
 }
 
 const AnnotationContext = createContext<IAnnotationContextValue | null>(null);
@@ -41,6 +43,7 @@ export function useAnnotation(): IAnnotationContextValue {
 export function AnnotationContextProvider({ children }: { children: React.ReactNode }) {
   const [selectedTool, setSelectedTool] = useState<AnnotationType | null>(null);
   const [annotationStack, setAnnotationStack] = useState<IAnnotation[]>([]);
+  const [renderVersion, setRenderVersion] = useState(0);
   const scale = usePdfState().scale;
   const { controller } = usePdfController();
 
@@ -113,14 +116,32 @@ export function AnnotationContextProvider({ children }: { children: React.ReactN
   );
 
   const commitAnnotationsCallback = useCallback(() => {
+    // Check if any flattened annotations exist (text/signature)
+    const hasFlattenedAnnotations = annotationStack.some(
+      (a) => a.source === 'overlay' && (a.type === 'text' || a.type === 'signature'),
+    );
+
     // Commit all overlay annotations to PDFium using handlers
     annotationStack.forEach((annotation) => {
       if (annotation.source === 'overlay') {
         commitAnnotation(controller, annotation);
       }
     });
-    // Mark all annotations as native after commit
-    setAnnotationStack((prev) => prev.map((a) => ({ ...a, source: 'native' as const })));
+    // After commit:
+    // - Text and signature annotations are flattened into page content (not real annotations),
+    //   so they must be REMOVED from the stack (PDFium won't list them as annotations)
+    // - Other annotations (ink, highlight) become real PDF annotations,
+    //   so mark them as 'native' (they'll be found by listNativeAnnotations)
+    setAnnotationStack((prev) =>
+      prev
+        .filter((a) => a.source !== 'overlay' || (a.type !== 'text' && a.type !== 'signature'))
+        .map((a) => ({ ...a, source: 'native' as const })),
+    );
+
+    // Increment render version to trigger canvas re-render for flattened content
+    if (hasFlattenedAnnotations) {
+      setRenderVersion((v) => v + 1);
+    }
   }, [annotationStack, controller]);
 
   const value = useMemo<IAnnotationContextValue>(
@@ -134,6 +155,7 @@ export function AnnotationContextProvider({ children }: { children: React.ReactN
       popAnnotation,
       commitAnnotations: commitAnnotationsCallback,
       updateAnnotation,
+      renderVersion,
     }),
     [
       addAnnotation,
@@ -142,6 +164,7 @@ export function AnnotationContextProvider({ children }: { children: React.ReactN
       setNativeAnnotationsForPage,
       annotationStack,
       popAnnotation,
+      renderVersion,
       commitAnnotationsCallback,
       updateAnnotation,
     ],

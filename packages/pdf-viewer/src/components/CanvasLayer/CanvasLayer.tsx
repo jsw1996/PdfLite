@@ -11,6 +11,7 @@
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { useInViewport } from '../../hooks/useInViewport';
 import { usePdfController } from '../../providers/PdfControllerContextProvider';
+import { useAnnotation } from '../../providers/AnnotationContextProvider';
 import { RENDER_CONFIG } from '@/utils/config';
 
 export interface ICanvasLayerProps extends React.ComponentProps<'canvas'> {
@@ -27,6 +28,7 @@ export const CanvasLayer: React.FC<ICanvasLayerProps> = ({
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const { controller, isInitialized } = usePdfController();
+  const { renderVersion } = useAnnotation();
   const isInViewport = useInViewport(canvasRef);
 
   // Track what scale the PDF is *currently* drawn at on the canvas
@@ -75,7 +77,7 @@ export const CanvasLayer: React.FC<ICanvasLayerProps> = ({
     return () => {
       if (renderTimeoutRef.current) clearTimeout(renderTimeoutRef.current);
     };
-  }, [scale, isInViewport, renderPdfCanvas]);
+  }, [scale, isInViewport, renderPdfCanvas, renderVersion]);
 
   return (
     // div wrapper for the layout update on zooming
