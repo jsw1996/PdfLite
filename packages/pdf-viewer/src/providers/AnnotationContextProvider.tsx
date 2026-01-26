@@ -82,15 +82,22 @@ export function AnnotationContextProvider({ children }: { children: React.ReactN
     [scale],
   );
 
-  const updateAnnotation = useCallback((id: string, updates: Partial<IAnnotation>) => {
-    setAnnotationStack((prev) =>
-      prev.map((ann) => {
-        if (ann.id !== id) return ann;
-        // Merge updates, ensuring type compatibility
-        return { ...ann, ...updates } as IAnnotation;
-      }),
-    );
-  }, []);
+  const updateAnnotation = useCallback(
+    (id: string, updates: Partial<IAnnotation>) => {
+      setAnnotationStack((prev) =>
+        prev.map((ann) => {
+          if (ann.id !== id) return ann;
+          // Stored annotations are normalized (scale=1).
+          // Updates come from UI in denormalized (current scale) coordinates.
+          // Denormalize the stored annotation, merge with updates, then re-normalize.
+          const denormalized = denormalizeAnnotation(ann, scale);
+          const merged = { ...denormalized, ...updates } as IAnnotation;
+          return normalizeAnnotation(merged, scale);
+        }),
+      );
+    },
+    [scale],
+  );
 
   // Memoized function that uses the pre-computed map for O(1) lookup
   const getAnnotationsForPage = useCallback(

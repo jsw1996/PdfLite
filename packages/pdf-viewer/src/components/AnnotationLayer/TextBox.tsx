@@ -40,9 +40,16 @@ export const TextBox = ({ id, content, position, fontSize, fontColor }: ITextBox
   const handleMouseDown = (e: React.MouseEvent) => {
     if (mode !== 'selected') return;
 
+    // Get the annotation layer container (parent of TextBox)
+    const container = textareaRef.current?.parentElement;
+    if (!container) return;
+
+    const containerRect = container.getBoundingClientRect();
+
+    // Calculate offset relative to the container, accounting for the element's position within it
     const offset = {
-      x: e.clientX - localPosition.x,
-      y: e.clientY - localPosition.y,
+      x: e.clientX - containerRect.left - localPosition.x,
+      y: e.clientY - containerRect.top - localPosition.y,
     };
     let currentPos = localPosition;
     let dragged = false;
@@ -52,9 +59,11 @@ export const TextBox = ({ id, content, position, fontSize, fontColor }: ITextBox
         dragged = true;
         setIsDragging(true);
       }
+      // Calculate new position relative to the container
+      const newContainerRect = container.getBoundingClientRect();
       currentPos = {
-        x: Math.max(moveEvent.clientX - offset.x, 0),
-        y: Math.max(moveEvent.clientY - offset.y, 0),
+        x: Math.max(moveEvent.clientX - newContainerRect.left - offset.x, 0),
+        y: Math.max(moveEvent.clientY - newContainerRect.top - offset.y, 0),
       };
       setLocalPosition(currentPos);
     };
