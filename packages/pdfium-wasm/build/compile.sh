@@ -1,5 +1,50 @@
 #!/bin/bash
 # compile.sh - Script to compile PDFium to WebAssembly using Emscripten
+#
+# BUILD PROCESS OVERVIEW:
+# =======================
+#
+# How depot_tools and Emscripten work together:
+#
+#                      depot_tools                    Emscripten
+#                    ┌─────────────┐               ┌──────────────┐
+#                    │             │               │              │
+# GN reads args.gn ──┤     gn      │               │              │
+#                    │             │               │              │
+#                    └──────┬──────┘               │              │
+#                           │                      │              │
+#                    Generates build.ninja         │              │
+#                    (with em++ commands)          │              │
+#                           │                      │              │
+#                    ┌──────▼──────┐               │              │
+#                    │    ninja    │──executes───► │    em++      │──► .o files
+#                    │             │               │              │    (WASM object code)
+#                    │ (runs 1000s │               │ (compiles    │
+#                    │  of em++    │               │  each .cpp)  │
+#                    │  commands)  │               │              │
+#                    └─────────────┘               └──────────────┘
+#
+# Step 2: ninja -C out/Release pdfium
+# │
+# ├─ em++ -c file1.cpp -o file1.o  ──→  file1.o (WASM object code)
+# ├─ em++ -c file2.cpp -o file2.o  ──→  file2.o (WASM object code)
+# ├─ em++ -c file3.cpp -o file3.o  ──→  file3.o (WASM object code)
+# │   ... 2000+ files ...
+# └─ emar rcs libpdfium.a *.o      ──→  libpdfium.a (archive of .o files)
+#                                       ↓
+#                                       Incremental builds possible!
+#                                       Change 1 file → recompile only that file
+#
+#
+# Step 4: em++ (without -c)
+# │
+# ├─ Compile: pdfium_wasm.cpp      ──→  pdfium_wasm.o
+# ├─ Extract: libpdfium.a          ──→  file1.o, file2.o, file3.o, ...
+# ├─ Link: All .o files together   ──→  Resolves symbols, optimizes
+# └─ Package:                      ──→  pdfium.wasm + pdfium.js
+#
+# =======================
+
 set -e
 
 echo "=========================================="
