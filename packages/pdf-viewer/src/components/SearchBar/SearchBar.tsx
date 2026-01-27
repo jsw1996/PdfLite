@@ -13,7 +13,7 @@ export const SearchBar = () => {
   const scale = usePdfState().scale;
   const [value, setValue] = useState<string>('');
   const [debouncedValue, setDebouncedValue] = useState<string>('');
-  const pdfController = usePdfController();
+  const { controller, goToPage } = usePdfController();
   const highlightRef = useRef<HTMLDivElement | null>(null);
 
   // Debounce the search value
@@ -26,8 +26,8 @@ export const SearchBar = () => {
 
   const matches: ISearchResult[] = useMemo(() => {
     if (!debouncedValue) return [];
-    return pdfController.controller.searchText(debouncedValue, { scale });
-  }, [pdfController.controller, debouncedValue, scale]);
+    return controller.searchText(debouncedValue, { scale });
+  }, [controller, debouncedValue, scale]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const searchBoxId = useId();
   // CSS-escape the useId() result for use in querySelector
@@ -51,46 +51,73 @@ export const SearchBar = () => {
       const match: ISearchResult = matches[index];
       if (!match.rects || match.rects.length === 0) return;
 
-      let minLeft = match.rects[0].left;
-      let minTop = match.rects[0].top;
-      let maxRight = match.rects[0].left + match.rects[0].width;
-      let maxBottom = match.rects[0].top + match.rects[0].height;
+      // Scroll to page first - this triggers viewport observer and rendering
+      goToPage(match.pageIndex, {
+        scrollIntoView: true,
+        scrollIntoPreview: true,
+      });
 
-      for (let i = 1; i < match.rects.length; i++) {
-        minLeft = Math.min(minLeft, match.rects[i].left);
-        minTop = Math.min(minTop, match.rects[i].top);
-        maxRight = Math.max(maxRight, match.rects[i].left + match.rects[i].width);
-        maxBottom = Math.max(maxBottom, match.rects[i].top + match.rects[i].height);
-      }
+      // Helper function to draw the highlight with retry logic
+      const performHighlight = (retryCount = 0) => {
+        const maxRetries = 20; // Max 20 retries (~1 second)
+        const retryDelay = 50; // 50ms between retries
 
-      const rect = {
-        left: minLeft,
-        top: minTop,
-        width: maxRight - minLeft,
-        height: maxBottom - minTop,
+        // Calculate bounding rect from all match rects
+        let minLeft = match.rects[0].left;
+        let minTop = match.rects[0].top;
+        let maxRight = match.rects[0].left + match.rects[0].width;
+        let maxBottom = match.rects[0].top + match.rects[0].height;
+
+        for (let i = 1; i < match.rects.length; i++) {
+          minLeft = Math.min(minLeft, match.rects[i].left);
+          minTop = Math.min(minTop, match.rects[i].top);
+          maxRight = Math.max(maxRight, match.rects[i].left + match.rects[i].width);
+          maxBottom = Math.max(maxBottom, match.rects[i].top + match.rects[i].height);
+        }
+
+        const rect = {
+          left: minLeft,
+          top: minTop,
+          width: maxRight - minLeft,
+          height: maxBottom - minTop,
+        };
+
+        // Try to find the text layer (waits for page to render)
+        const pageContainer = document.querySelector(
+          `[data-slot="viewer-page-container-${match.pageIndex}"] .text-layer`,
+        );
+
+        if (pageContainer) {
+          // Found it! Create and append highlight
+          const highlightDiv = document.createElement('div');
+          highlightDiv.style.position = 'absolute';
+          highlightDiv.style.left = `${rect.left}px`;
+          highlightDiv.style.top = `${rect.top}px`;
+          highlightDiv.style.width = `${rect.width}px`;
+          highlightDiv.style.height = `${rect.height}px`;
+          highlightDiv.style.backgroundColor = SEARCH_CONFIG.HIGHLIGHT_COLOR;
+          highlightDiv.style.pointerEvents = 'none';
+          highlightDiv.className = 'search-highlight';
+
+          pageContainer.appendChild(highlightDiv);
+          highlightRef.current = highlightDiv;
+
+          // Scroll highlight into view
+          highlightDiv.scrollIntoView({
+            behavior: 'smooth',
+            block: 'center',
+            inline: 'center',
+          });
+        } else if (retryCount < maxRetries) {
+          // Text layer not ready yet, retry after delay
+          setTimeout(() => performHighlight(retryCount + 1), retryDelay);
+        }
       };
-      // create the element
-      const highlightDiv = document.createElement('div');
-      highlightDiv.style.position = 'absolute';
-      highlightDiv.style.left = `${rect.left}px`;
-      highlightDiv.style.top = `${rect.top}px`;
-      highlightDiv.style.width = `${rect.width}px`;
-      highlightDiv.style.height = `${rect.height}px`;
-      highlightDiv.style.backgroundColor = SEARCH_CONFIG.HIGHLIGHT_COLOR;
-      highlightDiv.style.pointerEvents = 'none';
-      highlightDiv.className = 'search-highlight';
-      // append to the page container
-      const pageContainer = document.querySelector(
-        `[data-slot="viewer-page-container-${match.pageIndex}"] .text-layer`,
-      );
-      if (pageContainer) {
-        pageContainer.appendChild(highlightDiv);
-        highlightRef.current = highlightDiv;
-        // scroll into view
-        highlightDiv.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
-      }
+
+      // Wait for page to scroll and render, then highlight
+      setTimeout(() => performHighlight(), 100);
     },
-    [matches],
+    [matches, goToPage],
   );
 
   // Cleanup highlight on unmount or when value is cleared

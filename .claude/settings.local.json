@@ -1,5 +1,5 @@
 {
   "permissions": {
-    "allow": ["WebFetch(domain:www.shadcn.io)"]
+    "allow": ["WebFetch(domain:www.shadcn.io)", "Bash(python:*)", "Bash(python3:*)"]
   }
 }

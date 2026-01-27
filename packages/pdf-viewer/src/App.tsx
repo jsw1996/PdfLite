@@ -11,7 +11,6 @@ function App() {
   const [file, setFile] = useState<File | null>(null);
 
   const onFileSelected = (file: File) => {
-    console.log('File selected:', file);
     setFile(file);
     setIsFileOpened(true);
   };

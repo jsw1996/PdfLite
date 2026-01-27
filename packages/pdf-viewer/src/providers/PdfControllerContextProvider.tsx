@@ -53,7 +53,6 @@ export function PdfControllerContextProvider({
     (page: number, options?: { scrollIntoView?: boolean; scrollIntoPreview?: boolean }) => {
       const { scrollIntoView = true, scrollIntoPreview = true } = options ?? {};
       setCurrentPage(page);
-      console.log('[goToPage] Set currentPage to:', page);
 
       const isInViewport = (element: Element | null) => {
         if (!element) return false;

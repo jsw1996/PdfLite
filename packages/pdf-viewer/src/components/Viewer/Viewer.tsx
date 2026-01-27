@@ -1,42 +1,28 @@
 import React, { useEffect } from 'react';
 import throttle from 'lodash.throttle';
-import { ViewerPage } from './ViewerPage';
-import { useLazyPageLoader } from '../../hooks/useLazyPageLoader';
+import { LazyViewerPage } from './LazyViewerPage';
 import { useCurrentPageTracker } from '../../hooks/useCurrentPageTracker';
 import { usePreserveScrollOnZoom } from '../../hooks/usePreserveScrollOnZoom';
 import { usePdfController } from '@/providers/PdfControllerContextProvider';
 import { PageControlBar } from '../PageControlBar/PageControlBar';
 import { usePdfState } from '@/providers/PdfStateContextProvider';
 import { useUndo } from '../../hooks/useUndo';
+
 export interface IViewerProps {
   /** Total number of pages in the PDF document */
   pageCount: number;
-  /** Number of pages to render initially (default: 10) */
-  initialPageLoad?: number;
-  /** Number of additional pages to load when scrolling (default: 10) */
-  pageLoadIncrement?: number;
 }
 
 /**
- * Viewer component that renders PDF pages with lazy loading for performance.
+ * Viewer component that renders PDF pages.
  *
- * Instead of rendering all pages at once, it initially renders only a subset
- * of pages and loads more as the user scrolls down. This significantly improves
- * performance for large PDF documents.
+ * Renders placeholder containers for all pages upfront. The actual content
+ * (canvas, text layers) loads on-demand when pages enter the viewport.
  */
-export const Viewer: React.FC<IViewerProps> = ({
-  pageCount,
-  initialPageLoad = 10,
-  pageLoadIncrement = 10,
-}) => {
-  const { loadedPages, sentinelRef, hasMorePages, ensurePageLoaded } = useLazyPageLoader({
-    pageCount,
-    initialPageLoad,
-    pageLoadIncrement,
-  });
+export const Viewer: React.FC<IViewerProps> = ({ pageCount }) => {
   const { goToPage } = usePdfController();
   const { registerPageElement } = useCurrentPageTracker({
-    pageCount: loadedPages,
+    pageCount: pageCount,
     onPageChange: (page) => goToPage(page, { scrollIntoView: false, scrollIntoPreview: true }),
     rootMargin: '0px',
     threshold: 0.7,
@@ -88,29 +74,17 @@ export const Viewer: React.FC<IViewerProps> = ({
 
   return (
     <div className="h-full relative" ref={divRef}>
-      {/* Render only the loaded pages */}
-      {Array.from({ length: loadedPages }, (_, index) => (
-        <ViewerPage key={index} pageIndex={index} registerPageElement={registerPageElement} />
+      {/* Render ALL pages as lazy containers - full content loads on-demand when near viewport */}
+      {Array.from({ length: pageCount }, (_, index) => (
+        <LazyViewerPage key={index} pageIndex={index} registerPageElement={registerPageElement} />
       ))}
-      {/* Sentinel element - when this becomes visible, load more pages */}
-      {hasMorePages && (
-        <div ref={sentinelRef} className="h-10 flex items-center justify-center text-gray-500">
-          Loading more pages...
-        </div>
-      )}
       {/* Floating page control bar - fixed to viewport bottom, centered on container */}
       <div className="fixed bottom-6 z-50 pointer-events-none flex justify-center w-[stretch]">
         <div className="pointer-events-auto margin">
           <PageControlBar
             pageCount={pageCount}
             onJumpToPage={(target) => {
-              ensurePageLoaded(target);
-              // Wait for React to render the target page before scrolling to it
-              requestAnimationFrame(() => {
-                requestAnimationFrame(() => {
-                  goToPage(target, { scrollIntoView: true, scrollIntoPreview: true });
-                });
-              });
+              goToPage(target, { scrollIntoView: true, scrollIntoPreview: true });
             }}
           />
         </div>
