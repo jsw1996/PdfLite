@@ -111,6 +111,20 @@ export enum FPDF_ERR {
 }
 
 /**
+ * Progressive rendering status codes returned by _PDFium_RenderPageBitmap_Start and _PDFium_RenderPage_Continue
+ */
+export enum FPDF_RENDER_STATUS {
+  /** Cyclic rendering - needs more cycles (call Continue) */
+  CYCLIC = 1,
+  /** Render is complete */
+  DONE = 2,
+  /** Render is paused and can be continued */
+  TOBECONTINUED = 3,
+  /** Render failed */
+  FAILED = 4,
+}
+
+/**
  * PDFium Module interface - the raw WASM module exports
  */
 export interface IPDFiumModule {
@@ -179,6 +193,58 @@ export interface IPDFiumModule {
   _PDFium_BitmapGetBuffer(bitmap: number): number;
   _PDFium_BitmapGetStride(bitmap: number): number;
   _PDFium_FreeBuffer(buffer: number): void;
+
+  // ============================================================================
+  // Progressive Rendering Functions - Interruptible page rendering
+  // ============================================================================
+  /**
+   * Set the global cancel flag for progressive rendering.
+   * Call with 1 to request cancellation, 0 to reset.
+   * When set to 1, ongoing progressive renders will stop at the next pause point.
+   * @param cancel 1 to request cancellation, 0 to reset
+   */
+  _PDFium_SetRenderCancelFlag(cancel: number): void;
+  /**
+   * Get the current cancel flag state.
+   * @returns 1 if cancellation is requested, 0 otherwise
+   */
+  _PDFium_GetRenderCancelFlag(): number;
+  /**
+   * Start progressive rendering of a page to a bitmap.
+   * This allows rendering to be cancelled mid-operation by setting the cancel flag.
+   * @param bitmap Bitmap handle from _PDFium_BitmapCreate
+   * @param page Page handle from _PDFium_LoadPage
+   * @param startX Start X position
+   * @param startY Start Y position
+   * @param sizeX Width in pixels
+   * @param sizeY Height in pixels
+   * @param rotate Rotation (0, 1, 2, 3 for 0, 90, 180, 270 degrees)
+   * @param flags Render flags (0 for normal)
+   * @returns FPDF_RENDER_STATUS: CYCLIC(1)=needs continue, DONE(2)=finished, TOBECONTINUED(3)=paused, FAILED(4)=error
+   */
+  _PDFium_RenderPageBitmap_Start(
+    bitmap: number,
+    page: number,
+    startX: number,
+    startY: number,
+    sizeX: number,
+    sizeY: number,
+    rotate: number,
+    flags: number,
+  ): number;
+  /**
+   * Continue progressive rendering after it was paused.
+   * Call this in a loop until status is DONE or FAILED.
+   * @param page Page handle
+   * @returns FPDF_RENDER_STATUS: CYCLIC(1)=needs continue, DONE(2)=finished, TOBECONTINUED(3)=paused, FAILED(4)=error
+   */
+  _PDFium_RenderPage_Continue(page: number): number;
+  /**
+   * Close/cancel progressive rendering - releases resources.
+   * Must be called after progressive rendering is complete or cancelled.
+   * @param page Page handle
+   */
+  _PDFium_RenderPage_Close(page: number): void;
 
   // ============================================================================
   // Text Functions

@@ -6,6 +6,7 @@
  * 2. Meanwhile, schedule a high quality render after a short delay (200ms) for debouncing.
  * 3. If user keeps zooming, keep rendering at low quality until user stops zooming for 200ms,
  *    then do the high quality render.
+ * 4. When a new render is requested, cancel any in-progress render to avoid wasted work.
  */
 
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
@@ -33,12 +34,17 @@ export const CanvasLayer: React.FC<ICanvasLayerProps> = ({
   const isInViewport = useInViewport(canvasRef);
 
   // Track what scale the PDF is *currently* drawn at on the canvas
-  const [renderedScale, setRenderedScale] = useState(scale);
+  // Initialize to 0 to indicate "not yet rendered" - this shows loader on initial load
+  const [renderedScale, setRenderedScale] = useState(0);
   const renderTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wasInViewportRef = useRef(isInViewport);
+  // AbortController for cancelling in-progress renders
+  const abortControllerRef = useRef<AbortController | null>(null);
   const { width: pageWidth, height: pageHeight } = controller.getPageDimension(pageIndex);
 
-  // Derive loading state: loading when scales differ and page is in viewport
+  // Derive loading state: loading when page is in viewport and either:
+  // - Not yet rendered (renderedScale === 0), or
+  // - Being re-rendered at a different scale (zoom)
   const isLoading = isInViewport && Math.abs(scale - renderedScale) > 0.01;
 
   // 1. Calculate CSS Transform
@@ -51,20 +57,35 @@ export const CanvasLayer: React.FC<ICanvasLayerProps> = ({
   }, [scale, renderedScale]);
 
   // 2. The Heavy Render Function - memoized with useCallback
-  const renderPdfCanvas = useCallback(() => {
+  // Supports cancellation of in-progress renders when a new render is requested
+  const renderPdfCanvas = useCallback(async () => {
     if (!canvasRef.current || !isInitialized) return;
 
+    // Cancel any previous in-progress render
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+
+    // Create new AbortController for this render
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+
     try {
-      controller.renderPdf(canvasRef.current, {
+      await controller.renderPdf(canvasRef.current, {
         pageIndex,
         scale,
         pixelRatio: window.devicePixelRatio || 1,
+        signal: abortController.signal,
       });
 
       // Update our tracker so we know the canvas is now sharp at this scale
       setRenderedScale(scale);
       onCanvasReady?.(canvasRef.current);
     } catch (error) {
+      // Ignore AbortError - this is expected when render is cancelled
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        return;
+      }
       console.warn('Failed to render PDF on canvas.', error);
     }
   }, [controller, isInitialized, pageIndex, scale, onCanvasReady]);
@@ -77,6 +98,11 @@ export const CanvasLayer: React.FC<ICanvasLayerProps> = ({
     // Skip rendering if page is not in viewport to prioritize visible pages
     if (!isInViewport) {
       wasInViewportRef.current = false;
+      // Cancel any in-progress render when page leaves viewport
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
+      }
       return;
     }
 
@@ -85,14 +111,20 @@ export const CanvasLayer: React.FC<ICanvasLayerProps> = ({
     wasInViewportRef.current = true;
 
     // Use shorter delay for pages entering viewport, normal debounce for zoom changes
-    const delay = justEnteredViewport ? 0 : RENDER_CONFIG.RENDER_DEBOUNCE_MS;
+    // Always use at least 1 frame delay (~16ms) to yield to browser for layout/paint
+    const delay = justEnteredViewport ? 16 : RENDER_CONFIG.RENDER_DEBOUNCE_MS;
 
     renderTimeoutRef.current = setTimeout(() => {
-      renderPdfCanvas();
+      void renderPdfCanvas();
     }, delay);
 
     return () => {
       if (renderTimeoutRef.current) clearTimeout(renderTimeoutRef.current);
+      // Cancel any in-progress render on cleanup
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
+      }
     };
   }, [scale, isInViewport, renderPdfCanvas, renderVersion]);
 

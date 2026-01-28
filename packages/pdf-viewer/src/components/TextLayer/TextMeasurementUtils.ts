@@ -3,6 +3,7 @@ import { CACHE_CONFIG } from '@/utils/config';
 let context: CanvasRenderingContext2D | null = null;
 
 // Use a Map for LRU-like behavior (Map maintains insertion order)
+// Cache key is now scale-independent: "fontFamily\ntext" at 1px base size
 const widthCache = new Map<string, number>();
 
 function normalizeFontFamily(fontFamily?: string): string {
@@ -15,11 +16,12 @@ function normalizeFontFamily(fontFamily?: string): string {
 }
 
 /**
- * Measures the width of a given text string with the provided font.
- * Typically used with `fontSize = "1px"` and then scaled up.
- * Uses LRU-like cache eviction to prevent memory spikes.
+ * Measures the width of a given text string at 1px font size.
+ * Returns the base width that can be scaled linearly for any font size.
+ * This approach allows caching to be scale-independent, dramatically reducing
+ * cache misses when zooming.
  */
-export function measureTextWidth(text: string, fontSize: string, fontFamily?: string): number {
+export function measureTextWidthAtBaseSize(text: string, fontFamily?: string): number {
   // SSR / non-DOM environments
   if (typeof document === 'undefined') return 0;
 
@@ -29,8 +31,9 @@ export function measureTextWidth(text: string, fontSize: string, fontFamily?: st
   }
   if (!context) return 0;
 
-  const font = `${fontSize} ${normalizeFontFamily(fontFamily)}`;
-  const cacheKey = `${font}\n${text}`;
+  const normalizedFont = normalizeFontFamily(fontFamily);
+  // Scale-independent cache key - measure at 1px
+  const cacheKey = `${normalizedFont}\n${text}`;
   const cached = widthCache.get(cacheKey);
   if (cached !== undefined) {
     // Move to end for LRU behavior (delete and re-add)
@@ -39,7 +42,8 @@ export function measureTextWidth(text: string, fontSize: string, fontFamily?: st
     return cached;
   }
 
-  context.font = font;
+  // Measure at 1px base size
+  context.font = `1px ${normalizedFont}`;
   const width = context.measureText(text).width;
 
   // LRU eviction: remove oldest entries (first in map) when exceeding limit
@@ -56,4 +60,19 @@ export function measureTextWidth(text: string, fontSize: string, fontFamily?: st
   widthCache.set(cacheKey, width);
 
   return width;
+}
+
+/**
+ * Measures the width of a given text string with the provided font.
+ * Uses scale-independent base measurement and linear scaling for better cache efficiency.
+ *
+ * @deprecated Use measureTextWidthAtBaseSize and scale the result manually for better performance
+ */
+export function measureTextWidth(text: string, fontSize: string, fontFamily?: string): number {
+  // Extract numeric font size for scaling
+  const fontSizeNum = parseFloat(fontSize) || 1;
+
+  // Get base width at 1px and scale it
+  const baseWidth = measureTextWidthAtBaseSize(text, fontFamily);
+  return baseWidth * fontSizeNum;
 }

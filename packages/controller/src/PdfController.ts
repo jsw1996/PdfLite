@@ -29,6 +29,8 @@ export interface IRenderOptions {
   pageIndex?: number;
   scale?: number;
   pixelRatio?: number;
+  /** AbortSignal for cancelling progressive rendering */
+  signal?: AbortSignal;
 }
 
 export interface IPageDimension {
@@ -72,7 +74,8 @@ export interface ISearchResult {
 export interface IPdfController {
   ensureInitialized(): Promise<void>;
   loadFile(file: File, opts?: { signal?: AbortSignal }): Promise<void>;
-  renderPdf(canvas: HTMLCanvasElement, options?: IRenderOptions): void;
+  /** Render a PDF page to canvas. Supports AbortSignal for cancellation when using progressive rendering. */
+  renderPdf(canvas: HTMLCanvasElement, options?: IRenderOptions): Promise<void>;
   getPageDimension(pageIndex: number): IPageDimension;
   listNativeAnnotations(pageIndex: number, opts: { scale: number }): INativeAnnotation[];
   addInkHighlight(pageIndex: number, opts: { scale: number; canvasPoints: IPoint[] }): void;
@@ -118,6 +121,86 @@ export class PdfController implements IPdfController {
   private loadSeq = 0;
   private fontMap = new Map<string, string>();
   private static utf8Decoder = new TextDecoder('utf-8');
+
+  /** Allocate a null-terminated UTF-8 string in WASM memory. Caller must free. */
+  private allocUtf8(s: string): number {
+    const { pdfium } = this.requireDoc();
+    const len = pdfium.lengthBytesUTF8(s) + 1;
+    const ptr = pdfium._malloc(len);
+    pdfium.stringToUTF8(s, ptr, len);
+    return ptr;
+  }
+
+  /** Allocate a null-terminated UTF-16LE string in WASM memory. Caller must free. */
+  private allocUtf16(s: string): number {
+    const { pdfium } = this.requireDoc();
+    const len = (s.length + 1) * 2;
+    const ptr = pdfium._malloc(len);
+    pdfium.stringToUTF16(s, ptr, len);
+    return ptr;
+  }
+
+  /**
+   * Convert a page-coordinate rect to device-coordinate rect.
+   * @returns { left, top, width, height } in device coordinates
+   */
+  private pageRectToDeviceRect(
+    pagePtr: number,
+    pageLeft: number,
+    pageTop: number,
+    pageRight: number,
+    pageBottom: number,
+    deviceWidth: number,
+    deviceHeight: number,
+  ): { left: number; top: number; width: number; height: number } {
+    const { pdfium } = this.requireDoc();
+    const deviceXPtr = pdfium._malloc(4);
+    const deviceYPtr = pdfium._malloc(4);
+
+    try {
+      // Convert top-left corner
+      pdfium._PDFium_PageToDevice(
+        pagePtr,
+        0,
+        0,
+        deviceWidth,
+        deviceHeight,
+        0,
+        pageLeft,
+        pageTop,
+        deviceXPtr,
+        deviceYPtr,
+      );
+      const deviceLeft = pdfium.getValue(deviceXPtr, 'i32');
+      const deviceTop = pdfium.getValue(deviceYPtr, 'i32');
+
+      // Convert bottom-right corner
+      pdfium._PDFium_PageToDevice(
+        pagePtr,
+        0,
+        0,
+        deviceWidth,
+        deviceHeight,
+        0,
+        pageRight,
+        pageBottom,
+        deviceXPtr,
+        deviceYPtr,
+      );
+      const deviceRight = pdfium.getValue(deviceXPtr, 'i32');
+      const deviceBottom = pdfium.getValue(deviceYPtr, 'i32');
+
+      return {
+        left: Math.min(deviceLeft, deviceRight),
+        top: Math.min(deviceTop, deviceBottom),
+        width: Math.abs(deviceRight - deviceLeft),
+        height: Math.abs(deviceBottom - deviceTop),
+      };
+    } finally {
+      pdfium._free(deviceXPtr);
+      pdfium._free(deviceYPtr);
+    }
+  }
 
   private readUtf8Z(ptr: number, maxBytes: number): string {
     const { pdfium } = this.requireDoc();
@@ -343,13 +426,18 @@ export class PdfController implements IPdfController {
     });
   }
 
-  public renderPdf(canvas: HTMLCanvasElement, options: IRenderOptions = {}): void {
+  public async renderPdf(canvas: HTMLCanvasElement, options: IRenderOptions = {}): Promise<void> {
     if (!this.pdfiumModule || !this.docPtr) {
       throw new Error('PDF not loaded. Call loadFile() first.');
     }
 
-    const { pageIndex = 0, scale = 1.0, pixelRatio = 1.0 } = options;
+    const { pageIndex = 0, scale = 1.0, pixelRatio = 1.0, signal } = options;
     const pdfium = this.pdfiumModule;
+
+    // Check if already aborted
+    if (signal?.aborted) {
+      throw new DOMException('Render aborted', 'AbortError');
+    }
 
     // Load the page
     const pagePtr = pdfium._PDFium_LoadPage(this.docPtr, pageIndex);
@@ -386,9 +474,18 @@ export class PdfController implements IPdfController {
         // Fill with white background (BGRA format: 0xffffffff)
         pdfium._PDFium_BitmapFillRect(bitmapPtr, 0, 0, width, height, 0xffffffff);
 
-        // Render page to bitmap
-        // flags: 0 = normal rendering
-        pdfium._PDFium_RenderPageBitmap(bitmapPtr, pagePtr, 0, 0, width, height, 0, 0);
+        // Use progressive rendering if AbortSignal is provided
+        if (signal) {
+          await this.renderPageProgressive(pdfium, bitmapPtr, pagePtr, width, height, signal);
+        } else {
+          // Synchronous render (original behavior for backwards compatibility)
+          pdfium._PDFium_RenderPageBitmap(bitmapPtr, pagePtr, 0, 0, width, height, 0, 0);
+        }
+
+        // Check if aborted before copying to canvas
+        if (signal?.aborted) {
+          throw new DOMException('Render aborted', 'AbortError');
+        }
 
         // Get bitmap buffer
         const bufferPtr = pdfium._PDFium_BitmapGetBuffer(bitmapPtr);
@@ -401,17 +498,30 @@ export class PdfController implements IPdfController {
         }
 
         const imageData = ctx.createImageData(width, height);
-        const src = pdfium.HEAPU8.subarray(bufferPtr, bufferPtr + stride * height);
+        const dst32 = new Uint32Array(imageData.data.buffer);
 
-        // Convert BGRA to RGBA
-        for (let y = 0; y < height; y++) {
-          for (let x = 0; x < width; x++) {
-            const srcIdx = y * stride + x * 4;
-            const dstIdx = (y * width + x) * 4;
-            imageData.data[dstIdx + 0] = src[srcIdx + 2]; // R <- B
-            imageData.data[dstIdx + 1] = src[srcIdx + 1]; // G <- G
-            imageData.data[dstIdx + 2] = src[srcIdx + 0]; // B <- R
-            imageData.data[dstIdx + 3] = src[srcIdx + 3]; // A <- A
+        // Convert BGRA to RGBA using Uint32Array for ~10-50x faster performance
+        // Fast path: no stride padding and 4-byte aligned memory (common case)
+        if (stride === width * 4 && bufferPtr % 4 === 0) {
+          const src32 = new Uint32Array(pdfium.HEAPU8.buffer, bufferPtr, width * height);
+          for (let i = 0, len = src32.length; i < len; i++) {
+            const pixel = src32[i];
+            // BGRA -> RGBA: swap R and B, keep G and A in place
+            dst32[i] = (pixel & 0xff00ff00) | ((pixel >> 16) & 0xff) | ((pixel & 0xff) << 16);
+          }
+        } else {
+          // Fallback: handle stride padding or unaligned memory
+          const src = pdfium.HEAPU8.subarray(bufferPtr, bufferPtr + stride * height);
+          for (let y = 0; y < height; y++) {
+            for (let x = 0; x < width; x++) {
+              const srcIdx = y * stride + x * 4;
+              const dstIdx = y * width + x;
+              dst32[dstIdx] =
+                src[srcIdx + 2] | // R
+                (src[srcIdx + 1] << 8) | // G
+                (src[srcIdx + 0] << 16) | // B
+                (src[srcIdx + 3] << 24); // A
+            }
           }
         }
 
@@ -421,6 +531,78 @@ export class PdfController implements IPdfController {
       }
     } finally {
       pdfium._PDFium_ClosePage(pagePtr);
+    }
+  }
+
+  /**
+   * Progressive rendering with cancellation support.
+   * Renders the page in chunks, yielding to the event loop periodically to check for cancellation.
+   */
+  private async renderPageProgressive(
+    pdfium: IPDFiumModule,
+    bitmapPtr: number,
+    pagePtr: number,
+    width: number,
+    height: number,
+    signal: AbortSignal,
+  ): Promise<void> {
+    // FPDF_RENDER_STATUS values (CYCLIC=1, DONE=2, TOBECONTINUED=3, FAILED=4)
+    const RENDER_DONE = 2;
+    const RENDER_FAILED = 4;
+
+    // Set up abort handler to set the cancel flag
+    const onAbort = () => {
+      pdfium._PDFium_SetRenderCancelFlag(1);
+    };
+    signal.addEventListener('abort', onAbort);
+
+    try {
+      // Reset cancel flag before starting
+      pdfium._PDFium_SetRenderCancelFlag(0);
+
+      // Start progressive rendering
+      let status = pdfium._PDFium_RenderPageBitmap_Start(
+        bitmapPtr,
+        pagePtr,
+        0,
+        0,
+        width,
+        height,
+        0,
+        0,
+      );
+
+      // Continue rendering until done, failed, or cancelled
+      while (status !== RENDER_DONE && status !== RENDER_FAILED) {
+        // Check if aborted
+        if (signal.aborted) {
+          // Close progressive rendering to release resources
+          pdfium._PDFium_RenderPage_Close(pagePtr);
+          throw new DOMException('Render aborted', 'AbortError');
+        }
+
+        // Yield to event loop to allow UI updates and abort signal processing
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        // Continue rendering
+        status = pdfium._PDFium_RenderPage_Continue(pagePtr);
+      }
+
+      // Close progressive rendering
+      pdfium._PDFium_RenderPage_Close(pagePtr);
+
+      if (status === RENDER_FAILED) {
+        throw new Error('Progressive rendering failed');
+      }
+
+      // Check if cancelled during final phase
+      if (signal.aborted) {
+        throw new DOMException('Render aborted', 'AbortError');
+      }
+    } finally {
+      signal.removeEventListener('abort', onAbort);
+      // Reset cancel flag
+      pdfium._PDFium_SetRenderCancelFlag(0);
     }
   }
 
@@ -462,10 +644,6 @@ export class PdfController implements IPdfController {
         const rightPtr = pdfium._malloc(8);
         const bottomPtr = pdfium._malloc(8);
 
-        // Allocate output pointers for device coords (ints)
-        const deviceXPtr = pdfium._malloc(4);
-        const deviceYPtr = pdfium._malloc(4);
-
         // Use page dimensions as device size (1:1 mapping, no scaling here)
         const deviceWidth = Math.round(pageWidth);
         const deviceHeight = Math.round(pageHeight);
@@ -482,37 +660,16 @@ export class PdfController implements IPdfController {
             const right = pdfium.getValue(rightPtr, 'double');
             const bottom = pdfium.getValue(bottomPtr, 'double');
 
-            // Convert top-left corner from page to device coordinates
-            pdfium._PDFium_PageToDevice(
+            // Convert page rect to device coordinates
+            const deviceRect = this.pageRectToDeviceRect(
               pagePtr,
-              0,
-              0,
-              deviceWidth,
-              deviceHeight,
-              0, // rotate = 0
               left,
               top,
-              deviceXPtr,
-              deviceYPtr,
-            );
-            const deviceLeft = pdfium.getValue(deviceXPtr, 'i32');
-            const deviceTop = pdfium.getValue(deviceYPtr, 'i32');
-
-            // Convert bottom-right corner from page to device coordinates
-            pdfium._PDFium_PageToDevice(
-              pagePtr,
-              0,
-              0,
-              deviceWidth,
-              deviceHeight,
-              0,
               right,
               bottom,
-              deviceXPtr,
-              deviceYPtr,
+              deviceWidth,
+              deviceHeight,
             );
-            const deviceRight = pdfium.getValue(deviceXPtr, 'i32');
-            const deviceBottom = pdfium.getValue(deviceYPtr, 'i32');
 
             // Get the text content within this rect (using original page coords)
             const utf16Length = pdfium._PDFium_GetBoundedText(
@@ -590,15 +747,9 @@ export class PdfController implements IPdfController {
               }
             }
 
-            // Convert to device coordinates using PageToDevice result
             textRects.push({
               content,
-              rect: {
-                left: deviceLeft,
-                top: deviceTop,
-                width: Math.abs(deviceRight - deviceLeft),
-                height: Math.abs(deviceBottom - deviceTop),
-              },
+              rect: deviceRect,
               font: {
                 family: fontFamily,
                 size: fontSize,
@@ -610,8 +761,6 @@ export class PdfController implements IPdfController {
           pdfium._free(topPtr);
           pdfium._free(rightPtr);
           pdfium._free(bottomPtr);
-          pdfium._free(deviceXPtr);
-          pdfium._free(deviceYPtr);
         }
 
         // Merge adjacent rects on the same line with similar font properties
@@ -888,18 +1037,7 @@ export class PdfController implements IPdfController {
     const { pdfium } = this.requireDoc();
     const scale = opts?.scale ?? 1;
 
-    // Encode search text as UTF-16LE (PDFium expects UTF-16)
-    const utf16 = new Uint16Array(text.length + 1);
-    for (let i = 0; i < text.length; i++) {
-      utf16[i] = text.charCodeAt(i);
-    }
-    utf16[text.length] = 0; // null terminator
-
-    // Allocate memory and copy UTF-16 string
-    const textPtr = pdfium._malloc(utf16.length * 2);
-    new Uint8Array(pdfium.HEAPU8.buffer, textPtr, utf16.length * 2).set(
-      new Uint8Array(utf16.buffer),
-    );
+    const textPtr = this.allocUtf16(text);
 
     try {
       const results: ISearchResult[] = [];
@@ -924,7 +1062,6 @@ export class PdfController implements IPdfController {
                 const pageHeight = pdfium._PDFium_GetPageHeight(pagePtr);
 
                 const rects = this.getTextRects(
-                  pdfium,
                   pagePtr,
                   textPagePtr,
                   charIndex,
@@ -956,7 +1093,6 @@ export class PdfController implements IPdfController {
   }
 
   private getTextRects(
-    pdfium: IPDFiumModule,
     pagePtr: number,
     textPagePtr: number,
     startIndex: number,
@@ -965,6 +1101,7 @@ export class PdfController implements IPdfController {
     pageHeight: number,
     scale = 1,
   ): { left: number; top: number; width: number; height: number }[] {
+    const { pdfium } = this.requireDoc();
     const rectsCount = pdfium._PDFium_CountRects(textPagePtr, startIndex, count);
     const rects: { left: number; top: number; width: number; height: number }[] = [];
 
@@ -972,9 +1109,6 @@ export class PdfController implements IPdfController {
     const topPtr = pdfium._malloc(8);
     const rightPtr = pdfium._malloc(8);
     const bottomPtr = pdfium._malloc(8);
-
-    const deviceXPtr = pdfium._malloc(4);
-    const deviceYPtr = pdfium._malloc(4);
 
     // Use page dimensions scaled as device size
     const deviceWidth = Math.round(pageWidth * scale);
@@ -990,53 +1124,15 @@ export class PdfController implements IPdfController {
         const right = pdfium.getValue(rightPtr, 'double');
         const bottom = pdfium.getValue(bottomPtr, 'double');
 
-        // Convert to device coords (top-left origin)
-        // TL
-        pdfium._PDFium_PageToDevice(
-          pagePtr,
-          0,
-          0,
-          deviceWidth,
-          deviceHeight,
-          0,
-          left,
-          top,
-          deviceXPtr,
-          deviceYPtr,
+        rects.push(
+          this.pageRectToDeviceRect(pagePtr, left, top, right, bottom, deviceWidth, deviceHeight),
         );
-        const deviceLeft = pdfium.getValue(deviceXPtr, 'i32');
-        const deviceTop = pdfium.getValue(deviceYPtr, 'i32');
-
-        // BR
-        pdfium._PDFium_PageToDevice(
-          pagePtr,
-          0,
-          0,
-          deviceWidth,
-          deviceHeight,
-          0,
-          right,
-          bottom,
-          deviceXPtr,
-          deviceYPtr,
-        );
-        const deviceRight = pdfium.getValue(deviceXPtr, 'i32');
-        const deviceBottom = pdfium.getValue(deviceYPtr, 'i32');
-
-        rects.push({
-          left: Math.min(deviceLeft, deviceRight),
-          top: Math.min(deviceTop, deviceBottom),
-          width: Math.abs(deviceRight - deviceLeft),
-          height: Math.abs(deviceBottom - deviceTop),
-        });
       }
     } finally {
       pdfium._free(leftPtr);
       pdfium._free(topPtr);
       pdfium._free(rightPtr);
       pdfium._free(bottomPtr);
-      pdfium._free(deviceXPtr);
-      pdfium._free(deviceYPtr);
     }
     return rects;
   }
@@ -1268,22 +1364,6 @@ export class PdfController implements IPdfController {
       const pageW = pdfium._PDFium_GetPageWidth(pagePtr);
       const pageH = pdfium._PDFium_GetPageHeight(pagePtr);
 
-      // Helper: allocate null-terminated UTF-8 string
-      const allocUtf8 = (s: string): number => {
-        const len = pdfium.lengthBytesUTF8(s) + 1;
-        const ptr = pdfium._malloc(len);
-        pdfium.stringToUTF8(s, ptr, len);
-        return ptr;
-      };
-
-      // Helper: allocate null-terminated UTF-16LE string
-      const allocUtf16 = (s: string): number => {
-        const len = (s.length + 1) * 2;
-        const ptr = pdfium._malloc(len);
-        pdfium.stringToUTF16(s, ptr, len);
-        return ptr;
-      };
-
       // Convert canvas rectangle corners to PDF page coordinates
       // Canvas: top-left origin, Y down. PDF: bottom-left origin, Y up.
       const topLeftPage = this.canvasToPagePoint(
@@ -1317,7 +1397,7 @@ export class PdfController implements IPdfController {
 
       try {
         // Load standard Helvetica font
-        const fontNamePtr = allocUtf8('Helvetica');
+        const fontNamePtr = this.allocUtf8('Helvetica');
         ptrsToFree.push(fontNamePtr);
         font = pdfium._FPDFText_LoadStandardFont_W(docPtr, fontNamePtr);
 
@@ -1332,7 +1412,7 @@ export class PdfController implements IPdfController {
         }
 
         // Set the text content
-        const textPtr = allocUtf16(text);
+        const textPtr = this.allocUtf16(text);
         ptrsToFree.push(textPtr);
         pdfium._FPDFText_SetText_W(textObj, textPtr);
 

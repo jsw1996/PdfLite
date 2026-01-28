@@ -34,7 +34,7 @@ export const PAGE_LOAD_CONFIG = {
  */
 export const RENDER_CONFIG = {
   /** Debounce delay for high-quality rendering (ms) */
-  RENDER_DEBOUNCE_MS: 200,
+  RENDER_DEBOUNCE_MS: 1000,
   /** Preview scale for sidebar thumbnails */
   PREVIEW_SCALE: 0.25,
 } as const;

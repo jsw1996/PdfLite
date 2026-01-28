@@ -1,7 +1,7 @@
-import React, { useEffect } from 'react';
+import React, { useCallback, useEffect, useRef } from 'react';
 import throttle from 'lodash.throttle';
-import { LazyViewerPage } from './LazyViewerPage';
-import { useCurrentPageTracker } from '../../hooks/useCurrentPageTracker';
+import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
+import { ViewerPage } from './ViewerPage';
 import { usePreserveScrollOnZoom } from '../../hooks/usePreserveScrollOnZoom';
 import { usePdfController } from '@/providers/PdfControllerContextProvider';
 import { PageControlBar } from '../PageControlBar/PageControlBar';
@@ -14,37 +14,53 @@ export interface IViewerProps {
 }
 
 /**
- * Viewer component that renders PDF pages.
+ * Viewer component that renders PDF pages with virtualization.
  *
- * Renders placeholder containers for all pages upfront. The actual content
- * (canvas, text layers) loads on-demand when pages enter the viewport.
+ * Uses react-virtuoso for efficient rendering of large documents.
+ * Only renders pages that are in or near the viewport.
  */
 export const Viewer: React.FC<IViewerProps> = ({ pageCount }) => {
-  const { goToPage } = usePdfController();
-  const { registerPageElement } = useCurrentPageTracker({
-    pageCount: pageCount,
-    onPageChange: (page) => goToPage(page, { scrollIntoView: false, scrollIntoPreview: true }),
-    rootMargin: '0px',
-    threshold: 0.7,
-  });
-  useUndo();
+  const { goToPage, controller, registerScrollToIndex } = usePdfController();
   const { scale, setScale } = usePdfState();
+  const virtuosoRef = useRef<VirtuosoHandle>(null);
+
+  useUndo();
+
+  // Register scrollToIndex handler with context for goToPage support
+  useEffect(() => {
+    registerScrollToIndex((index: number) => {
+      virtuosoRef.current?.scrollToIndex({
+        index,
+        align: 'start',
+        behavior: 'auto',
+      });
+    });
+  }, [registerScrollToIndex]);
+
+  // Track current page based on what's visible
+  const handleRangeChanged = useCallback(
+    (range: { startIndex: number; endIndex: number }) => {
+      // Use the first visible page as the current page
+      goToPage(range.startIndex, { scrollIntoView: false, scrollIntoPreview: true });
+    },
+    [goToPage],
+  );
 
   // Preserve scroll position when zooming
   usePreserveScrollOnZoom(scale);
 
   // Keep scale in a ref so wheel handler doesn't rebind every render
-  const scaleRef = React.useRef(scale);
+  const scaleRef = useRef(scale);
   useEffect(() => {
     scaleRef.current = scale;
   }, [scale]);
 
   const minScale = 0.25;
   const maxScale = 2.5;
-  const wheelStep = 0.25;
-  const wheelThrottleMs = 60;
+  const wheelStep = 0.05;
+  const wheelThrottleMs = 0;
 
-  const divRef = React.useRef<HTMLDivElement | null>(null);
+  const divRef = useRef<HTMLDivElement | null>(null);
 
   // Handle Ctrl + Mouse Wheel for zooming
   useEffect(() => {
@@ -72,12 +88,33 @@ export const Viewer: React.FC<IViewerProps> = ({ pageCount }) => {
     };
   }, [setScale]);
 
+  // Render a page item
+  const itemContent = useCallback((index: number) => {
+    return <ViewerPage pageIndex={index} />;
+  }, []);
+
+  // Calculate default item height based on first page dimensions
+  const defaultItemHeight = useCallback(
+    (index: number) => {
+      const dim = controller.getPageDimension(index);
+      // Return scaled height + margin (mb-4 = 16px)
+      return dim ? dim.height * scale + 16 : 800 * scale + 16;
+    },
+    [controller, scale],
+  );
+
   return (
     <div className="h-full relative" ref={divRef}>
-      {/* Render ALL pages as lazy containers - full content loads on-demand when near viewport */}
-      {Array.from({ length: pageCount }, (_, index) => (
-        <LazyViewerPage key={index} pageIndex={index} registerPageElement={registerPageElement} />
-      ))}
+      <Virtuoso
+        ref={virtuosoRef}
+        totalCount={pageCount}
+        itemContent={itemContent}
+        defaultItemHeight={defaultItemHeight(0)}
+        overscan={2000}
+        rangeChanged={handleRangeChanged}
+        className="h-full"
+        data-slot="viewer-scroll-container"
+      />
       {/* Floating page control bar - fixed to viewport bottom, centered on container */}
       <div className="fixed bottom-6 z-50 pointer-events-none flex justify-center w-[stretch]">
         <div className="pointer-events-auto margin">

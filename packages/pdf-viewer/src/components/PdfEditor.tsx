@@ -4,7 +4,7 @@ import { usePdfController } from '@/providers/PdfControllerContextProvider';
 import { AnnotationContextProvider } from '../providers/AnnotationContextProvider';
 import { Viewer } from './Viewer/Viewer';
 import { SidebarInset } from '@pdfviewer/ui/components/sidebar';
-import { AppSidebar } from './SideBar/SideBar';
+// import { AppSidebar } from './SideBar/SideBar';
 import { Header } from './Header/Header';
 import { PdfStateContextProvider } from '@/providers/PdfStateContextProvider';
 
@@ -69,7 +69,7 @@ export const PdfEditor: React.FC<IPdfEditorProps> = ({ file }) => {
   return (
     <PdfStateContextProvider>
       <AnnotationContextProvider>
-        <AppSidebar />
+        {/* <AppSidebar /> */}
         <SidebarInset className="bg-[#e2e8f061]">
           <Header fileName={file.name} centerButtons={buttons} rightButtons={rightButtons} />
           {renderContent()}

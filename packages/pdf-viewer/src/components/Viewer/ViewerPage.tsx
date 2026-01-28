@@ -23,7 +23,8 @@ const FPDF_ANNOTATION_SUBTYPE_INK = 15;
 
 export interface IViewerPageProps {
   pageIndex: number;
-  registerPageElement: (index: number, el: HTMLDivElement | null) => void;
+  /** Optional callback to register the page element for tracking. Used by non-virtualized viewers. */
+  registerPageElement?: (index: number, el: HTMLDivElement | null) => void;
 }
 
 export const ViewerPage: React.FC<IViewerPageProps> = ({ pageIndex, registerPageElement }) => {
@@ -113,7 +114,7 @@ export const ViewerPage: React.FC<IViewerPageProps> = ({ pageIndex, registerPage
     <div
       ref={(el) => {
         setContainerEl(el);
-        registerPageElement(pageIndex, el);
+        registerPageElement?.(pageIndex, el);
       }}
       data-slot={`viewer-page-container-${pageIndex}`}
       data-page-index={pageIndex}

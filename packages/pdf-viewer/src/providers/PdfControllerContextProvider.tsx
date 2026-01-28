@@ -1,10 +1,21 @@
 /* eslint-disable react-refresh/only-export-components */
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import type { ReactNode } from 'react';
 
 import type { PdfController } from '@pdfviewer/controller';
 import { PdfController as PdfControllerClass } from '@pdfviewer/controller';
+
+/** Handler type for scrolling to a specific page index */
+export type ScrollToIndexHandler = (index: number) => void;
 
 export interface IPdfControllerContextValue {
   controller: PdfController;
@@ -18,6 +29,8 @@ export interface IPdfControllerContextValue {
     page: number,
     options?: { scrollIntoView?: boolean; scrollIntoPreview?: boolean },
   ) => void;
+  /** Register a scroll handler from the virtualized viewer */
+  registerScrollToIndex: (handler: ScrollToIndexHandler) => void;
 }
 
 const PdfControllerContext = createContext<IPdfControllerContextValue | null>(null);
@@ -49,6 +62,13 @@ export function PdfControllerContextProvider({
   const [error, setError] = useState<Error | null>(null);
   const [currentPage, setCurrentPage] = useState(0);
 
+  // Ref for virtualized viewer's scrollToIndex handler
+  const scrollToIndexRef = useRef<ScrollToIndexHandler | null>(null);
+
+  const registerScrollToIndex = useCallback((handler: ScrollToIndexHandler) => {
+    scrollToIndexRef.current = handler;
+  }, []);
+
   const goToPage = useCallback(
     (page: number, options?: { scrollIntoView?: boolean; scrollIntoPreview?: boolean }) => {
       const { scrollIntoView = true, scrollIntoPreview = true } = options ?? {};
@@ -65,14 +85,27 @@ export function PdfControllerContextProvider({
         );
       };
 
-      // if not in viewport, scroll into view
+      // Scroll preview sidebar
       const previewCanvas = document.querySelector(`[data-preview-index="${page}"]`);
       if (scrollIntoPreview && !isInViewport(previewCanvas)) {
         previewCanvas?.scrollIntoView({ behavior: 'smooth' });
       }
-      const viewerCanvas = document.querySelector(`[data-page-index="${page}"]`);
-      if (scrollIntoView && !isInViewport(viewerCanvas)) {
-        viewerCanvas?.scrollIntoView({ behavior: 'instant', block: 'center', inline: 'center' });
+
+      // Scroll main viewer - use virtualized handler if available
+      if (scrollIntoView) {
+        if (scrollToIndexRef.current) {
+          scrollToIndexRef.current(page);
+        } else {
+          // Fallback to DOM query
+          const viewerCanvas = document.querySelector(`[data-page-index="${page}"]`);
+          if (!isInViewport(viewerCanvas)) {
+            viewerCanvas?.scrollIntoView({
+              behavior: 'instant',
+              block: 'center',
+              inline: 'center',
+            });
+          }
+        }
       }
     },
     [],
@@ -107,8 +140,18 @@ export function PdfControllerContextProvider({
       setIsLoaded,
       currentPage,
       goToPage,
+      registerScrollToIndex,
     }),
-    [controller, currentPage, error, initialize, isInitialized, isLoaded, goToPage],
+    [
+      controller,
+      currentPage,
+      error,
+      initialize,
+      isInitialized,
+      isLoaded,
+      goToPage,
+      registerScrollToIndex,
+    ],
   );
 
   return <PdfControllerContext.Provider value={value}>{children}</PdfControllerContext.Provider>;

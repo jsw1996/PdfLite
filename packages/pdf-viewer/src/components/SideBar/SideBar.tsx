@@ -7,7 +7,7 @@ import {
   SidebarGroupContent,
 } from '@pdfviewer/ui/components/sidebar';
 import { usePdfController } from '@/providers/PdfControllerContextProvider';
-import { PagePreview } from './PagePreview';
+import { LazyPagePreview } from './LazyPagePreview';
 import { useEffect } from 'react';
 
 export function AppSidebar() {
@@ -19,11 +19,10 @@ export function AppSidebar() {
     if (pageCount <= 0) return;
     if (currentPage < 0 || currentPage >= pageCount) return;
 
+    // Single RAF is sufficient - double RAF was causing unnecessary frame delays
     requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        const previewCanvas = document.querySelector(`[data-preview-index="${currentPage}"]`);
-        previewCanvas?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      });
+      const previewCanvas = document.querySelector(`[data-preview-index="${currentPage}"]`);
+      previewCanvas?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     });
   }, [currentPage, pageCount]);
 
@@ -33,7 +32,7 @@ export function AppSidebar() {
         <SidebarGroup className="p-3">
           <SidebarGroupContent className="space-y-2">
             {Array.from({ length: pageCount }, (_, i) => i).map((page) => (
-              <PagePreview key={`page-preview-${page}`} page={page} />
+              <LazyPagePreview key={`page-preview-${page}`} page={page} />
             ))}
           </SidebarGroupContent>
         </SidebarGroup>

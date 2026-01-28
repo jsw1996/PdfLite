@@ -16,6 +16,7 @@
 #include "public/fpdf_edit.h"
 #include "public/fpdf_save.h"
 #include "public/fpdf_annot.h"
+#include "public/fpdf_progressive.h"
 
 // Platform interface stub for WASM - CFX_GEModule requires a platform implementation
 #include "core/fxge/cfx_gemodule.h"
@@ -43,6 +44,28 @@ std::unique_ptr<CFX_GEModule::PlatformIface> CFX_GEModule::PlatformIface::Create
 
 // Global library state
 static bool g_libraryInitialized = false;
+
+// ============================================================================
+// Progressive Rendering Support
+// ============================================================================
+// Global cancel flag for progressive rendering - can be set from JavaScript
+static volatile bool g_renderCancelFlag = false;
+
+// Pause callback structure for progressive rendering
+struct WasmPauseHandler : IFSDK_PAUSE {
+    WasmPauseHandler() {
+        version = 1;
+        NeedToPauseNow = &WasmPauseHandler::CheckCancel;
+    }
+
+    static FPDF_BOOL CheckCancel(IFSDK_PAUSE* pThis) {
+        // Return non-zero to pause/cancel, zero to continue
+        return g_renderCancelFlag ? 1 : 0;
+    }
+};
+
+// Global pause handler instance
+static WasmPauseHandler g_pauseHandler;
 
 extern "C" {
 
@@ -137,6 +160,59 @@ EMSCRIPTEN_KEEPALIVE
 void PDFium_RenderPageBitmap(FPDF_BITMAP bitmap, FPDF_PAGE page, int start_x, int start_y,
                               int size_x, int size_y, int rotate, int flags) {
     FPDF_RenderPageBitmap(bitmap, page, start_x, start_y, size_x, size_y, rotate, flags);
+}
+
+// ============================================================================
+// Progressive Rendering API - Interruptible page rendering
+// ============================================================================
+
+// Set the global cancel flag for progressive rendering
+// Call with 1 to request cancellation, 0 to reset
+EMSCRIPTEN_KEEPALIVE
+void PDFium_SetRenderCancelFlag(int cancel) {
+    g_renderCancelFlag = (cancel != 0);
+}
+
+// Get the current cancel flag state
+EMSCRIPTEN_KEEPALIVE
+int PDFium_GetRenderCancelFlag() {
+    return g_renderCancelFlag ? 1 : 0;
+}
+
+// Start progressive rendering of a page to a bitmap
+// Returns: CYCLIC (1) = needs continue, DONE (2) = finished, FAILED (4) = error
+// FPDF_RENDER_STATUS values:
+//   CYCLIC (1) - Render needs more cycles (call Continue)
+//   DONE (2) - Render is complete
+//   TOBECONTINUED (3) - Render is paused and can be continued
+//   FAILED (4) - Render failed
+EMSCRIPTEN_KEEPALIVE
+int PDFium_RenderPageBitmap_Start(FPDF_BITMAP bitmap, FPDF_PAGE page,
+                                   int start_x, int start_y,
+                                   int size_x, int size_y,
+                                   int rotate, int flags) {
+    // Reset cancel flag at start of render
+    g_renderCancelFlag = false;
+
+    // Start progressive rendering with our pause handler
+    int status = FPDF_RenderPageBitmap_Start(
+        bitmap, page, start_x, start_y, size_x, size_y, rotate, flags, &g_pauseHandler);
+
+    return status;
+}
+
+// Continue progressive rendering
+// Returns: CYCLIC (1) = needs continue, DONE (2) = finished, TOBECONTINUED (3) = paused, FAILED (4) = error
+EMSCRIPTEN_KEEPALIVE
+int PDFium_RenderPage_Continue(FPDF_PAGE page) {
+    return FPDF_RenderPage_Continue(page, &g_pauseHandler);
+}
+
+// Close/cancel progressive rendering - releases resources
+// Must be called after progressive rendering is complete or cancelled
+EMSCRIPTEN_KEEPALIVE
+void PDFium_RenderPage_Close(FPDF_PAGE page) {
+    FPDF_RenderPage_Close(page);
 }
 
 EMSCRIPTEN_KEEPALIVE
