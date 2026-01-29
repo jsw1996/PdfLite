@@ -110,7 +110,7 @@ export const Viewer: React.FC<IViewerProps> = ({ pageCount }) => {
         totalCount={pageCount}
         itemContent={itemContent}
         defaultItemHeight={defaultItemHeight(0)}
-        overscan={2000}
+        overscan={10000}
         rangeChanged={handleRangeChanged}
         className="h-full"
         data-slot="viewer-scroll-container"

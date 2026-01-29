@@ -11,7 +11,6 @@
 
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { LoaderIcon } from 'lucide-react';
-import { useInViewport } from '../../hooks/useInViewport';
 import { usePdfController } from '../../providers/PdfControllerContextProvider';
 import { useAnnotation } from '../../providers/AnnotationContextProvider';
 import { RENDER_CONFIG } from '@/utils/config';
@@ -31,21 +30,17 @@ export const CanvasLayer: React.FC<ICanvasLayerProps> = ({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const { controller, isInitialized } = usePdfController();
   const { renderVersion } = useAnnotation();
-  const isInViewport = useInViewport(canvasRef);
 
   // Track what scale the PDF is *currently* drawn at on the canvas
   // Initialize to 0 to indicate "not yet rendered" - this shows loader on initial load
   const [renderedScale, setRenderedScale] = useState(0);
   const renderTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const wasInViewportRef = useRef(isInViewport);
   // AbortController for cancelling in-progress renders
   const abortControllerRef = useRef<AbortController | null>(null);
   const { width: pageWidth, height: pageHeight } = controller.getPageDimension(pageIndex);
 
-  // Derive loading state: loading when page is in viewport and either:
-  // - Not yet rendered (renderedScale === 0), or
-  // - Being re-rendered at a different scale (zoom)
-  const isLoading = isInViewport && Math.abs(scale - renderedScale) > 0.01;
+  // Derive loading state: loading when not yet rendered or being re-rendered at different scale
+  const isLoading = Math.abs(scale - renderedScale) > 0.01;
 
   // 1. Calculate CSS Transform
   // If we rendered at 1.0, and user zooms to 1.5:
@@ -95,24 +90,9 @@ export const CanvasLayer: React.FC<ICanvasLayerProps> = ({
       clearTimeout(renderTimeoutRef.current);
     }
 
-    // Skip rendering if page is not in viewport to prioritize visible pages
-    if (!isInViewport) {
-      wasInViewportRef.current = false;
-      // Cancel any in-progress render when page leaves viewport
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-        abortControllerRef.current = null;
-      }
-      return;
-    }
-
-    // If page just came into viewport, render quickly with minimal delay
-    const justEnteredViewport = !wasInViewportRef.current && isInViewport;
-    wasInViewportRef.current = true;
-
-    // Use shorter delay for pages entering viewport, normal debounce for zoom changes
-    // Always use at least 1 frame delay (~16ms) to yield to browser for layout/paint
-    const delay = justEnteredViewport ? 16 : RENDER_CONFIG.RENDER_DEBOUNCE_MS;
+    // Virtuoso handles virtualization - render immediately on mount,
+    // debounce only for scale changes (zooming)
+    const delay = renderedScale === 0 ? 16 : RENDER_CONFIG.RENDER_DEBOUNCE_MS;
 
     renderTimeoutRef.current = setTimeout(() => {
       void renderPdfCanvas();
@@ -120,13 +100,13 @@ export const CanvasLayer: React.FC<ICanvasLayerProps> = ({
 
     return () => {
       if (renderTimeoutRef.current) clearTimeout(renderTimeoutRef.current);
-      // Cancel any in-progress render on cleanup
+      // Cancel any in-progress render on cleanup (when component unmounts)
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
         abortControllerRef.current = null;
       }
     };
-  }, [scale, isInViewport, renderPdfCanvas, renderVersion]);
+  }, [scale, renderPdfCanvas, renderVersion, renderedScale]);
 
   return (
     // div wrapper for the layout update on zooming
