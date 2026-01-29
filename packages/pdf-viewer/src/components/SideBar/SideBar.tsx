@@ -40,7 +40,7 @@ export function AppSidebar() {
           totalCount={pageCount}
           itemContent={itemContent}
           overscan={500}
-          className="h-full"
+          className="h-full custom-scrollbar"
         />
       </SidebarContent>
     </Sidebar>
