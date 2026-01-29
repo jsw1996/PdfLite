@@ -161,6 +161,62 @@
   }
 }
 
+/* Modern custom scrollbar */
+@layer utilities {
+  .custom-scrollbar {
+    /* Firefox */
+    scrollbar-width: thin;
+    scrollbar-color: oklch(0.7 0.05 270 / 0.4) transparent;
+  }
+
+  .dark .custom-scrollbar {
+    scrollbar-color: oklch(0.5 0.08 270 / 0.5) transparent;
+  }
+
+  /* WebKit browsers (Chrome, Safari, Edge) */
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+    border-radius: 4px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: oklch(0.7 0.05 270 / 0.4);
+    border-radius: 4px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: oklch(0.6 0.1 270 / 0.6);
+    background-clip: padding-box;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb:active {
+    background: oklch(0.55 0.15 270 / 0.7);
+    background-clip: padding-box;
+  }
+
+  /* Dark mode WebKit scrollbar */
+  .dark .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: oklch(0.5 0.08 270 / 0.5);
+    background-clip: padding-box;
+  }
+
+  .dark .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: oklch(0.55 0.12 270 / 0.65);
+    background-clip: padding-box;
+  }
+
+  .dark .custom-scrollbar::-webkit-scrollbar-thumb:active {
+    background: oklch(0.6 0.15 270 / 0.75);
+    background-clip: padding-box;
+  }
+}
+
 /* Glassmorphism utility classes */
 @layer utilities {
   .glass {
