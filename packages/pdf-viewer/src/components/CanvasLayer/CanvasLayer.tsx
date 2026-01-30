@@ -129,6 +129,8 @@ export const CanvasLayer: React.FC<ICanvasLayerProps> = ({
           position: 'absolute',
           transformOrigin: 'top left',
           display: 'block',
+          // Prevent browser interpolation for crisp rendering on HiDPI displays
+          imageRendering: 'crisp-edges',
         }}
         {...props}
       />

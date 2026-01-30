@@ -6,6 +6,19 @@ import {
   FPDFANNOT_COLORTYPE,
 } from '@pdfviewer/pdfium-wasm';
 
+/**
+ * PDFium render flags for FPDF_RenderPageBitmap
+ * These control rendering quality and what content is included
+ */
+const FPDF_RENDER_FLAGS = {
+  /** Render annotations on the page */
+  ANNOT: 0x01,
+  /** Use LCD text rendering for crisper text on LCD displays */
+  LCD_TEXT: 0x02,
+  /** Combined flags for high-quality screen rendering */
+  DEFAULT: 0x01 | 0x02, // ANNOT + LCD_TEXT
+};
+
 export interface IPoint {
   x: number;
   y: number;
@@ -479,7 +492,16 @@ export class PdfController implements IPdfController {
           await this.renderPageProgressive(pdfium, bitmapPtr, pagePtr, width, height, signal);
         } else {
           // Synchronous render (original behavior for backwards compatibility)
-          pdfium._PDFium_RenderPageBitmap(bitmapPtr, pagePtr, 0, 0, width, height, 0, 0);
+          pdfium._PDFium_RenderPageBitmap(
+            bitmapPtr,
+            pagePtr,
+            0,
+            0,
+            width,
+            height,
+            0,
+            FPDF_RENDER_FLAGS.DEFAULT,
+          );
         }
 
         // Check if aborted before copying to canvas
@@ -496,6 +518,8 @@ export class PdfController implements IPdfController {
         if (!ctx) {
           throw new Error('Failed to get canvas 2D context');
         }
+        // Disable image smoothing for crisp pixel-perfect rendering
+        ctx.imageSmoothingEnabled = false;
 
         const imageData = ctx.createImageData(width, height);
         const dst32 = new Uint32Array(imageData.data.buffer);
@@ -569,7 +593,7 @@ export class PdfController implements IPdfController {
         width,
         height,
         0,
-        0,
+        FPDF_RENDER_FLAGS.DEFAULT,
       );
 
       // Continue rendering until done, failed, or cancelled
