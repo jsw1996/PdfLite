@@ -25,7 +25,7 @@ export function AppSidebar() {
 
   const itemContent = useCallback(
     (index: number) => (
-      <div className="px-3 pb-2 first:pt-3">
+      <div className="px-3 pb-0.5">
         <PagePreview page={index} />
       </div>
     ),
