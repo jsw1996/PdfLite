@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import throttle from 'lodash.throttle';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { ViewerPage } from './ViewerPage';
@@ -7,6 +7,7 @@ import { usePdfController } from '@/providers/PdfControllerContextProvider';
 import { PageControlBar } from '../PageControlBar/PageControlBar';
 import { usePdfState } from '@/providers/PdfStateContextProvider';
 import { useUndo } from '../../hooks/useUndo';
+import { useCurrentPageTracker } from '../../hooks/useCurrentPageTracker';
 
 export interface IViewerProps {
   /** Total number of pages in the PDF document */
@@ -23,6 +24,7 @@ export const Viewer: React.FC<IViewerProps> = ({ pageCount }) => {
   const { goToPage, controller, registerScrollToIndex } = usePdfController();
   const { scale, setScale } = usePdfState();
   const virtuosoRef = useRef<VirtuosoHandle>(null);
+  const [scrollContainer, setScrollContainer] = useState<HTMLElement | null>(null);
 
   useUndo();
 
@@ -37,14 +39,25 @@ export const Viewer: React.FC<IViewerProps> = ({ pageCount }) => {
     });
   }, [registerScrollToIndex]);
 
-  // Track current page based on what's visible
-  const handleRangeChanged = useCallback(
-    (range: { startIndex: number; endIndex: number }) => {
-      // Use the first visible page as the current page
-      goToPage(range.startIndex, { scrollIntoView: false, scrollIntoPreview: true });
+  // Track current page using Intersection Observer for accurate scroll sync
+  const handlePageChange = useCallback(
+    (page: number) => {
+      goToPage(page, { scrollIntoView: false, scrollIntoPreview: true });
     },
     [goToPage],
   );
+
+  const { registerPageElement } = useCurrentPageTracker({
+    pageCount,
+    onPageChange: handlePageChange,
+    root: scrollContainer,
+    threshold: 0.5,
+  });
+
+  // Wrapper to handle Virtuoso's scrollerRef which can be HTMLElement | Window | null
+  const handleScrollerRef = useCallback((ref: HTMLElement | Window | null) => {
+    setScrollContainer(ref instanceof HTMLElement ? ref : null);
+  }, []);
 
   // Preserve scroll position when zooming
   usePreserveScrollOnZoom(scale);
@@ -88,10 +101,13 @@ export const Viewer: React.FC<IViewerProps> = ({ pageCount }) => {
     };
   }, [setScale]);
 
-  // Render a page item
-  const itemContent = useCallback((index: number) => {
-    return <ViewerPage pageIndex={index} />;
-  }, []);
+  // Render a page item with page tracking registration
+  const itemContent = useCallback(
+    (index: number) => {
+      return <ViewerPage pageIndex={index} registerPageElement={registerPageElement} />;
+    },
+    [registerPageElement],
+  );
 
   // Calculate default item height based on first page dimensions
   const defaultItemHeight = useCallback(
@@ -111,7 +127,7 @@ export const Viewer: React.FC<IViewerProps> = ({ pageCount }) => {
         itemContent={itemContent}
         defaultItemHeight={defaultItemHeight(0)}
         overscan={10000}
-        rangeChanged={handleRangeChanged}
+        scrollerRef={handleScrollerRef}
         className="h-full"
         data-slot="viewer-scroll-container"
       />
