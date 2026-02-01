@@ -228,6 +228,19 @@ Pre-commit hooks run:
 | `pnpm-workspace.yaml`  | Workspace package definitions |
 | `commitlint.config.js` | Commit message rules          |
 
+## Web Search Guidelines
+
+When working on tasks, **proactively use web search** in the following situations:
+
+1. **Uncertain about a solution**: If you're not confident about the correct approach or implementation, search for best practices and verified solutions
+2. **Domain-specific knowledge**: When dealing with specialized topics (e.g., PDFium APIs, WASM memory management, specific library features), search for authoritative documentation
+3. **Latest documentation**: For libraries and frameworks (React, Vite, Tailwind, etc.), search for the most up-to-date documentation as APIs may have changed
+4. **Error resolution**: When encountering unfamiliar errors, search for common causes and solutions
+5. **Performance optimization**: When optimizing code, search for established patterns and benchmarks
+6. **Security considerations**: When implementing features that touch security (file handling, user input, etc.), search for current security best practices
+
+**Do not hesitate to search** - it's better to verify information than to provide potentially outdated or incorrect solutions. Web search should be your first instinct when encountering uncertainty.
+
 ## Tips for Agents
 
 1. Always run `pnpm lint:fix` before committing

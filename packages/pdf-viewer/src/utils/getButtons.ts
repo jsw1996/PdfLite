@@ -7,7 +7,7 @@ import { AddTextButton } from '../components/ToolButtons/AddTextButton';
 import { SignatureButton } from '../components/ToolButtons/SignatureButton';
 import { useSidebarTriggerButton } from '@/components/ToolButtons/SidebarTriggerButton';
 import { PrintButton } from '@/components/ToolButtons/PrintButton';
-import { DownloadButton } from '@/components/ToolButtons/DownloadButton';
+import { useDownloadButton } from '@/components/ToolButtons/DownloadButton';
 import { useThemeToggleButton } from '@/components/ToolButtons/ThemeToggleButton';
 
 /**
@@ -40,7 +40,8 @@ export const getButtons = useButtons;
  */
 export const useRightButtons = (): IToolButton[] => {
   const themeToggleButton = useThemeToggleButton();
-  return [DownloadButton(), PrintButton(), themeToggleButton];
+  const downloadButton = useDownloadButton();
+  return [downloadButton, PrintButton(), themeToggleButton];
 };
 
 /**
