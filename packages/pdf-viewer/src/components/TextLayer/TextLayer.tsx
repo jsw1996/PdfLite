@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState, useEffect, useCallback, useDeferredValue } from 'react';
+import React, { useMemo, useDeferredValue } from 'react';
 import { usePdfController } from '@/providers/PdfControllerContextProvider';
 import type { ITextRect } from '@pdfviewer/controller';
 import { measureTextWidthAtBaseSize } from '../../components/TextLayer/TextMeasurementUtils';
@@ -78,25 +78,19 @@ function convertRectsToBaseSpans(textRects: ITextRect[]): IBaseTextSpan[] {
   return spans;
 }
 
-// Viewport buffer for virtualization (render spans slightly outside visible area)
-const VIEWPORT_BUFFER = 100;
-
 /**
  * TextLayer component renders invisible but selectable text over the PDF canvas.
  * This enables text selection, copy/paste, and search functionality.
  *
  * Performance optimizations:
  * 1. Base spans computed once at scale=1 and cached (scale-independent)
- * 2. Virtualization: only renders spans within the visible viewport
- * 3. Text width measurements cached at 1px base size
+ * 2. Text width measurements cached at 1px base size
+ * 3. CSS transform used for scaling (no re-render of spans on zoom)
  */
 export const TextLayer: React.FC<ITextLayerProps> = ({ pageIndex, scale = 1.5 }) => {
   const { controller, isInitialized } = usePdfController();
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [visibleRange, setVisibleRange] = useState({ top: 0, bottom: Infinity });
 
   // Defer scale updates for spans to avoid blocking main thread during zoom
-  // Container uses immediate scale (for layout), spans use deferred scale (non-blocking)
   const deferredScale = useDeferredValue(scale);
 
   // Get text content from controller
@@ -116,80 +110,16 @@ export const TextLayer: React.FC<ITextLayerProps> = ({ pageIndex, scale = 1.5 })
     return convertRectsToBaseSpans(textContent.textRects);
   }, [textContent]);
 
-  // Update visible range when scrolling or resizing
-  const updateVisibleRange = useCallback(() => {
-    if (!containerRef.current) return;
-
-    const container = containerRef.current;
-    const parent = container.closest('[data-slot="viewer-page"]') ?? container.parentElement;
-    if (!parent) return;
-
-    // Batch reads: get both rects in the same synchronous block to minimize reflows
-    const rect = container.getBoundingClientRect();
-    const parentRect = parent.getBoundingClientRect();
-
-    // Calculate visible area in container's coordinate space
-    const visibleTop = Math.max(0, (parentRect.top - rect.top - VIEWPORT_BUFFER) / scale);
-    const visibleBottom = (parentRect.bottom - rect.top + VIEWPORT_BUFFER) / scale;
-
-    setVisibleRange((prev) => {
-      // Only update if values actually changed to avoid unnecessary re-renders
-      if (prev.top === visibleTop && prev.bottom === visibleBottom) {
-        return prev;
-      }
-      return { top: visibleTop, bottom: visibleBottom };
-    });
-  }, [scale]);
-
-  // Set up scroll and resize listeners for virtualization
-  useEffect(() => {
-    const scrollContainer = containerRef.current?.closest('[data-slot="viewer-scroll-container"]');
-    // If no scroll container found, visibleRange stays at initial value (shows all)
-    if (!scrollContainer) return;
-
-    // Throttled scroll handler
-    let ticking = false;
-    const handleScroll = () => {
-      if (!ticking) {
-        requestAnimationFrame(() => {
-          updateVisibleRange();
-          ticking = false;
-        });
-        ticking = true;
-      }
-    };
-
-    // Initial calculation via RAF to avoid sync setState
-    requestAnimationFrame(updateVisibleRange);
-
-    scrollContainer.addEventListener('scroll', handleScroll, { passive: true });
-    window.addEventListener('resize', updateVisibleRange);
-
-    return () => {
-      scrollContainer.removeEventListener('scroll', handleScroll);
-      window.removeEventListener('resize', updateVisibleRange);
-    };
-  }, [updateVisibleRange]);
-
-  // Filter to only visible spans (virtualization)
-  const visibleSpans = useMemo(() => {
-    return baseSpans.filter((span) => {
-      const spanBottom = span.top + span.height;
-      return spanBottom >= visibleRange.top && span.top <= visibleRange.bottom;
-    });
-  }, [baseSpans, visibleRange]);
-
   if (!textContent) {
     return null;
   }
 
   return (
     <div
-      ref={containerRef}
       className="text-layer absolute inset-0 overflow-hidden pointer-events-none"
       style={{
-        width: `${textContent.pageWidth * scale}px`,
-        height: `${textContent.pageHeight * scale}px`,
+        width: `${textContent.pageWidth * deferredScale}px`,
+        height: `${textContent.pageHeight * deferredScale}px`,
       }}
     >
       {/* Inner wrapper applies CSS transform for scaling - only this transform changes on zoom */}
@@ -199,7 +129,7 @@ export const TextLayer: React.FC<ITextLayerProps> = ({ pageIndex, scale = 1.5 })
           transformOrigin: '0 0',
         }}
       >
-        {visibleSpans.map((span, index) => (
+        {baseSpans.map((span, index) => (
           <span
             key={`${span.left}-${span.top}-${index}`}
             className="absolute whitespace-pre text-transparent select-text origin-top-left pointer-events-auto selection:bg-[rgba(0,0,255,0.3)] selection:text-transparent"

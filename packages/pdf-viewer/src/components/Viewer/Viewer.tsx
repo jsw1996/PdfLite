@@ -1,8 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import throttle from 'lodash.throttle';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { ViewerPage } from './ViewerPage';
-import { usePreserveScrollOnZoom } from '../../hooks/usePreserveScrollOnZoom';
 import { usePdfController } from '@/providers/PdfControllerContextProvider';
 import { PageControlBar } from '../PageControlBar/PageControlBar';
 import { usePdfState } from '@/providers/PdfStateContextProvider';
@@ -59,9 +57,6 @@ export const Viewer: React.FC<IViewerProps> = ({ pageCount }) => {
     setScrollContainer(ref instanceof HTMLElement ? ref : null);
   }, []);
 
-  // Preserve scroll position when zooming
-  usePreserveScrollOnZoom(scale);
-
   // Keep scale in a ref so wheel handler doesn't rebind every render
   const scaleRef = useRef(scale);
   useEffect(() => {
@@ -70,34 +65,25 @@ export const Viewer: React.FC<IViewerProps> = ({ pageCount }) => {
 
   const minScale = 0.25;
   const maxScale = 2.5;
-  const wheelStep = 0.05;
-  const wheelThrottleMs = 0;
+  const wheelStep = 0.25;
 
   const divRef = useRef<HTMLDivElement | null>(null);
 
   // Handle Ctrl + Mouse Wheel for zooming
   useEffect(() => {
-    const applyWheelZoom = throttle(
-      (delta: number) => {
-        const next = Math.min(maxScale, Math.max(minScale, scaleRef.current + delta));
-        if (next !== scaleRef.current) {
-          setScale(next);
-        }
-      },
-      wheelThrottleMs,
-      { leading: true, trailing: true },
-    );
-
     const onWheel = (e: WheelEvent) => {
       if (!e.ctrlKey) return;
       e.preventDefault();
-      applyWheelZoom(e.deltaY < 0 ? wheelStep : -wheelStep);
+      const delta = e.deltaY < 0 ? wheelStep : -wheelStep;
+      const next = Math.min(maxScale, Math.max(minScale, scaleRef.current + delta));
+      if (next !== scaleRef.current) {
+        setScale(next);
+      }
     };
     const el = divRef.current;
     el?.addEventListener('wheel', onWheel, { passive: false });
     return () => {
       el?.removeEventListener('wheel', onWheel);
-      applyWheelZoom.cancel();
     };
   }, [setScale]);
 
