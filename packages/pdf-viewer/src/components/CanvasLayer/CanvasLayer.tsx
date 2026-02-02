@@ -34,6 +34,12 @@ export const CanvasLayer: React.FC<ICanvasLayerProps> = ({
   // Track what scale the PDF is *currently* drawn at on the canvas
   // Initialize to 0 to indicate "not yet rendered" - this shows loader on initial load
   const [renderedScale, setRenderedScale] = useState(0);
+  // Track actual canvas dimensions for crisp CSS sizing
+  // CSS dimensions must be exactly canvas.width/pixelRatio to avoid browser scaling artifacts
+  const [canvasDimensions, setCanvasDimensions] = useState<{
+    width: number;
+    height: number;
+  } | null>(null);
   const renderTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // AbortController for cancelling in-progress renders
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -66,15 +72,22 @@ export const CanvasLayer: React.FC<ICanvasLayerProps> = ({
     abortControllerRef.current = abortController;
 
     try {
+      const pixelRatio = window.devicePixelRatio || 1;
       await controller.renderPdf(canvasRef.current, {
         pageIndex,
         scale,
-        pixelRatio: window.devicePixelRatio || 1,
+        pixelRatio,
         signal: abortController.signal,
       });
 
       // Update our tracker so we know the canvas is now sharp at this scale
       setRenderedScale(scale);
+      // Store actual canvas dimensions for precise CSS sizing
+      // CSS dimensions must match canvas.width/pixelRatio exactly to avoid browser scaling
+      setCanvasDimensions({
+        width: canvasRef.current.width / pixelRatio,
+        height: canvasRef.current.height / pixelRatio,
+      });
       onCanvasReady?.(canvasRef.current);
     } catch (error) {
       // Ignore AbortError - this is expected when render is cancelled
@@ -123,8 +136,15 @@ export const CanvasLayer: React.FC<ICanvasLayerProps> = ({
         className="pdf-canvas-layer z-0"
         // low resolution canvas while zooming for performance
         style={{
-          width: `${pageWidth * renderedScale}px`,
-          height: `${pageHeight * renderedScale}px`,
+          // Use actual canvas dimensions / pixelRatio for crisp 1:1 pixel mapping
+          // This avoids browser scaling artifacts that occur when CSS size doesn't
+          // exactly match the canvas physical size / devicePixelRatio
+          width: canvasDimensions
+            ? `${canvasDimensions.width}px`
+            : `${pageWidth * renderedScale}px`,
+          height: canvasDimensions
+            ? `${canvasDimensions.height}px`
+            : `${pageHeight * renderedScale}px`,
           transform: `scale(${visualScale})`, // css for visual scaling update
           position: 'absolute',
           transformOrigin: 'top left',
