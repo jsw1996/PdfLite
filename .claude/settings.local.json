@@ -11,7 +11,16 @@
       "Bash(git checkout:*)",
       "WebFetch(domain:github.com)",
       "Bash(pnpm add:*)",
-      "Bash(pnpm install:*)"
+      "Bash(pnpm install:*)",
+      "mcp__playwright__browser_snapshot",
+      "mcp__playwright__browser_run_code",
+      "mcp__playwright__browser_wait_for",
+      "mcp__playwright__browser_file_upload",
+      "mcp__playwright__browser_take_screenshot",
+      "mcp__playwright__browser_click",
+      "mcp__playwright__browser_navigate",
+      "mcp__playwright__browser_evaluate",
+      "WebFetch(domain:virtuoso.dev)"
     ]
   }
 }

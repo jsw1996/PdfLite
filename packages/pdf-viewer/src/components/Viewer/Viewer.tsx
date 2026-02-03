@@ -6,6 +6,7 @@ import { PageControlBar } from '../PageControlBar/PageControlBar';
 import { usePdfState } from '@/providers/PdfStateContextProvider';
 import { useUndo } from '../../hooks/useUndo';
 import { useCurrentPageTracker } from '../../hooks/useCurrentPageTracker';
+import { usePreserveScrollOnZoom } from '@/hooks/usePreserveScrollOnZoom';
 
 export interface IViewerProps {
   /** Total number of pages in the PDF document */
@@ -26,12 +27,15 @@ export const Viewer: React.FC<IViewerProps> = ({ pageCount }) => {
 
   useUndo();
 
+  // Preserve scroll position when zooming using Virtuoso's index-based anchoring
+  const { onRangeChanged } = usePreserveScrollOnZoom(virtuosoRef, scale);
+
   // Register scrollToIndex handler with context for goToPage support
   useEffect(() => {
     registerScrollToIndex((index: number) => {
       virtuosoRef.current?.scrollToIndex({
         index,
-        align: 'start',
+        align: 'center',
         behavior: 'auto',
       });
     });
@@ -112,10 +116,11 @@ export const Viewer: React.FC<IViewerProps> = ({ pageCount }) => {
         totalCount={pageCount}
         itemContent={itemContent}
         defaultItemHeight={defaultItemHeight(0)}
-        overscan={10000}
         scrollerRef={handleScrollerRef}
+        rangeChanged={onRangeChanged}
         className="h-full"
         data-slot="viewer-scroll-container"
+        increaseViewportBy={{ top: 800, bottom: 800 }}
       />
       {/* Floating page control bar - fixed to viewport bottom, centered on container */}
       <div className="fixed bottom-6 z-50 pointer-events-none flex justify-center w-[stretch]">
