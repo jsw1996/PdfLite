@@ -709,6 +709,31 @@ export interface IPDFiumModule {
     topPtr: number,
   ): number;
   /**
+   * Create a new image object
+   */
+  _FPDFPageObj_NewImageObj_W(document: number): number;
+  /**
+   * Set a bitmap into an image object
+   */
+  _FPDFImageObj_SetBitmap_W(
+    pagesPtr: number,
+    count: number,
+    imageObject: number,
+    bitmap: number,
+  ): number;
+  /**
+   * Set the transform matrix for an image object
+   */
+  _FPDFImageObj_SetMatrix_W(
+    imageObject: number,
+    a: number,
+    b: number,
+    c: number,
+    d: number,
+    e: number,
+    f: number,
+  ): number;
+  /**
    * Destroy a page object (only call if not added to page/annotation)
    */
   _FPDFPageObj_Destroy_W(pageObject: number): void;

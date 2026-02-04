@@ -896,6 +896,25 @@ FPDF_BOOL FPDFPageObj_GetBounds_W(FPDF_PAGEOBJECT page_object,
     return FPDFPageObj_GetBounds(page_object, left, bottom, right, top);
 }
 
+// Create a new image object
+EMSCRIPTEN_KEEPALIVE
+FPDF_PAGEOBJECT FPDFPageObj_NewImageObj_W(FPDF_DOCUMENT document) {
+    return FPDFPageObj_NewImageObj(document);
+}
+
+// Set a bitmap into an image object
+EMSCRIPTEN_KEEPALIVE
+FPDF_BOOL FPDFImageObj_SetBitmap_W(FPDF_PAGE* pages, int count, FPDF_PAGEOBJECT image_object, FPDF_BITMAP bitmap) {
+    return FPDFImageObj_SetBitmap(pages, count, image_object, bitmap);
+}
+
+// Set the transform matrix for an image object
+EMSCRIPTEN_KEEPALIVE
+FPDF_BOOL FPDFImageObj_SetMatrix_W(FPDF_PAGEOBJECT image_object,
+                                    double a, double b, double c, double d, double e, double f) {
+    return FPDFImageObj_SetMatrix(image_object, a, b, c, d, e, f);
+}
+
 // Destroy a page object (only call if not added to page/annotation)
 EMSCRIPTEN_KEEPALIVE
 void FPDFPageObj_Destroy_W(FPDF_PAGEOBJECT page_object) {
