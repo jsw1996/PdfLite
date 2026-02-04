@@ -14,7 +14,7 @@
  */
 
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
-import { LoaderIcon } from 'lucide-react';
+import { Spinner } from '@pdfviewer/ui/components/spinner';
 import { usePdfController } from '../../providers/PdfControllerContextProvider';
 import { useAnnotation } from '../../providers/AnnotationContextProvider';
 import { RENDER_CONFIG } from '@/utils/config';
@@ -179,15 +179,8 @@ export const CanvasLayer: React.FC<ICanvasLayerProps> = ({
       />
 
       {showLoader && (
-        <div
-          className="absolute inset-0 flex items-center justify-center pointer-events-none"
-          style={{ zIndex: 10 }}
-        >
-          <LoaderIcon
-            role="status"
-            aria-label="Loading"
-            className="size-8 animate-spin text-gray-800 dark:text-gray-200"
-          />
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <Spinner className="size-8 text-black" />
         </div>
       )}
     </div>

@@ -1,6 +1,8 @@
 {
   "permissions": {
     "allow": [
+      "WebSearch",
+      "WebFetch",
       "WebFetch(domain:www.shadcn.io)",
       "Bash(python:*)",
       "Bash(python3:*)",
@@ -20,7 +22,9 @@
       "mcp__playwright__browser_click",
       "mcp__playwright__browser_navigate",
       "mcp__playwright__browser_evaluate",
-      "WebFetch(domain:virtuoso.dev)"
+      "WebFetch(domain:virtuoso.dev)",
+      "WebFetch(domain:ui.shadcn.com)",
+      "Bash(pnpm dlx:*)"
     ]
   }
 }
