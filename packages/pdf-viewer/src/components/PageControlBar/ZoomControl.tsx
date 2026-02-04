@@ -1,17 +1,19 @@
 import { ZoomOut, ZoomIn } from 'lucide-react';
 import { TooltipButton } from '@pdfviewer/ui/components/tooltipButton';
 import { usePdfState } from '@/providers/PdfStateContextProvider';
+import { VIEWER_CONFIG } from '@/utils/config';
 
 export const ZoomControl: React.FC = () => {
   const { scale, setScale } = usePdfState();
-  const zoomStep = 0.25;
-  const maxScale = 2.5;
+  const zoomStep = VIEWER_CONFIG.WHEEL_ZOOM_STEP;
+  const minScale = VIEWER_CONFIG.MIN_SCALE;
+  const maxScale = VIEWER_CONFIG.MAX_SCALE;
 
   const handleZoomIn = () => {
     setScale(Math.min(maxScale, scale + zoomStep));
   };
   const handleZoomOut = () => {
-    setScale(Math.max(zoomStep, scale - zoomStep));
+    setScale(Math.max(minScale, scale - zoomStep));
   };
   return (
     <div className="flex items-center gap-1">

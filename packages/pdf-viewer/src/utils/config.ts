@@ -17,6 +17,8 @@ export const VIEWER_CONFIG = {
   WHEEL_ZOOM_STEP: 0.25,
   /** Throttle time for wheel zoom (ms) */
   WHEEL_THROTTLE_MS: 60,
+  /** Delay before committing zoom layout after wheel ends (ms) */
+  WHEEL_COMMIT_MS: 140,
 } as const;
 
 /**

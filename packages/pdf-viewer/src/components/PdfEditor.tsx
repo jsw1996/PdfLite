@@ -44,9 +44,9 @@ const PdfEditorContent: React.FC<{
   return (
     <>
       <AppSidebar />
-      <SidebarInset className="bg-[#e2e8f061]">
+      <SidebarInset className="bg-[#e2e8f061] h-svh min-h-0 overflow-hidden">
         <Header fileName={file.name} centerButtons={buttons} rightButtons={rightButtons} />
-        {renderContent()}
+        <div className="flex-1 min-h-0">{renderContent()}</div>
       </SidebarInset>
     </>
   );

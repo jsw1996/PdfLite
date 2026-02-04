@@ -118,7 +118,7 @@ export const ViewerPage: React.FC<IViewerPageProps> = ({ pageIndex, registerPage
       }}
       data-slot={`viewer-page-container-${pageIndex}`}
       data-page-index={pageIndex}
-      className="relative z-0 w-fit mx-auto mb-4"
+      className="relative z-0 w-fit mx-auto"
       onMouseUpCapture={handleHighlightOnInteraction}
       onKeyUpCapture={handleHighlightOnInteraction}
     >
