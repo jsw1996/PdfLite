@@ -24,7 +24,8 @@
     "paths": {
       "@/*": ["./src/*"],
       "@pdfviewer/controller": ["../controller/src/index.ts"],
-      "@pdfviewer/pdfium-wasm": ["../pdfium-wasm/src/index.ts"]
+      "@pdfviewer/pdfium-wasm": ["../pdfium-wasm/src/index.ts"],
+      "@pdfviewer/ui/*": ["../ui/src/*"]
     }
   },
   "include": ["src"]
