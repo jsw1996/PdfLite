@@ -19,8 +19,8 @@ export function OutlinePanel({ outline, onGoToPage }: IOutlinePanelProps) {
       <div key={key}>
         <button
           type="button"
-          className={`w-full text-left text-sm py-1.5 rounded-md hover:bg-slate-100 ${
-            hasDest ? 'text-slate-900' : 'text-slate-400 cursor-not-allowed'
+          className={`w-full text-left text-sm py-1.5 rounded-md hover:bg-primary/20 ${
+            hasDest ? 'text-primary-foreground' : 'text-primary-foreground cursor-not-allowed'
           }`}
           style={{ paddingLeft: 12 + depth * 12, paddingRight: 12 }}
           onClick={() => {

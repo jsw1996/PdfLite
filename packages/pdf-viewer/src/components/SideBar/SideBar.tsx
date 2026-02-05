@@ -67,8 +67,8 @@ export function AppSidebar({ file, isFileLoaded }: IAppSidebarProps) {
               type="button"
               className={`text-xs px-2.5 py-1 rounded-md ${
                 activeTab === 'pages'
-                  ? 'bg-slate-900 text-white'
-                  : 'text-slate-600 hover:text-slate-900'
+                  ? 'bg-primary text-primary-foreground'
+                  : 'text-muted-foreground hover:text-foreground'
               }`}
               onClick={() => setActiveTab('pages')}
             >
@@ -78,8 +78,8 @@ export function AppSidebar({ file, isFileLoaded }: IAppSidebarProps) {
               type="button"
               className={`text-xs px-2.5 py-1 rounded-md ${
                 activeTab === 'outline'
-                  ? 'bg-slate-900 text-white'
-                  : 'text-slate-600 hover:text-slate-900'
+                  ? 'bg-primary text-primary-foreground'
+                  : 'text-muted-foreground hover:text-foreground'
               }`}
               onClick={() => setActiveTab('outline')}
             >
@@ -89,8 +89,8 @@ export function AppSidebar({ file, isFileLoaded }: IAppSidebarProps) {
               type="button"
               className={`text-xs px-2.5 py-1 rounded-md ${
                 activeTab === 'bookmarks'
-                  ? 'bg-slate-900 text-white'
-                  : 'text-slate-600 hover:text-slate-900'
+                  ? 'bg-primary text-primary-foreground'
+                  : 'text-muted-foreground hover:text-foreground'
               }`}
               onClick={() => setActiveTab('bookmarks')}
             >

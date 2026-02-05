@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { IUserBookmark } from '@pdfviewer/controller';
+import { Button } from '@pdfviewer/ui/components/button';
 
 interface IBookmarksPanelProps {
   storageKey: string;
@@ -67,19 +68,19 @@ export function BookmarksPanel({ storageKey, currentPage, onGoToPage }: IBookmar
 
   const emptyState = useMemo(() => {
     if (bookmarks.length) return null;
-    return <div className="px-3 py-4 text-sm text-slate-500">No bookmarks yet.</div>;
+    return <div className="px-3 py-4 text-sm text-muted-foreground">No bookmarks yet.</div>;
   }, [bookmarks.length]);
 
   return (
     <div className="h-full flex flex-col">
       <div className="px-3 py-3">
-        <button
+        <Button
           type="button"
-          className="w-full text-xs px-3 py-2 rounded-md bg-slate-900 text-white hover:bg-slate-800"
+          className="w-full text-xs px-3 py-2 rounded-md bg-primary text-primary-foreground hover:bg-primary/90"
           onClick={handleAdd}
         >
           Add Bookmark
-        </button>
+        </Button>
       </div>
       <div className="flex-1 min-h-0 overflow-auto custom-scrollbar pb-3">
         {emptyState}
@@ -87,23 +88,25 @@ export function BookmarksPanel({ storageKey, currentPage, onGoToPage }: IBookmar
           <div key={bookmark.id} className="px-3 py-2">
             <button
               type="button"
-              className="w-full text-left text-sm text-slate-900 hover:text-slate-700"
+              className="w-full text-left text-sm text-foreground hover:text-foreground/80"
               onClick={() => onGoToPage(bookmark.pageIndex)}
             >
               {bookmark.title}
-              <span className="ml-2 text-xs text-slate-400">Page {bookmark.pageIndex + 1}</span>
+              <span className="ml-2 text-xs text-muted-foreground">
+                Page {bookmark.pageIndex + 1}
+              </span>
             </button>
             <div className="mt-1 flex gap-2">
               <button
                 type="button"
-                className="text-xs text-slate-500 hover:text-slate-700"
+                className="text-xs text-muted-foreground hover:text-foreground"
                 onClick={() => handleRename(bookmark)}
               >
                 Rename
               </button>
               <button
                 type="button"
-                className="text-xs text-red-500 hover:text-red-600"
+                className="text-xs text-destructive hover:text-destructive/80"
                 onClick={() => handleDelete(bookmark)}
               >
                 Delete
