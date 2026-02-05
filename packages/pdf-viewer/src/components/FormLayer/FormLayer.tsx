@@ -101,9 +101,7 @@ export const FormLayer: React.FC<IFormLayerProps> = ({ pdfCanvas, containerEl, p
         if (width < 2 || height < 2) return null;
 
         const baseFontSize =
-          field.fontSize && field.fontSize > 0
-            ? field.fontSize * scale
-            : Math.max(8, height * 0.7);
+          field.fontSize && field.fontSize > 0 ? field.fontSize * scale : Math.max(8, height * 0.7);
 
         const commonStyle: React.CSSProperties = {
           position: 'absolute',
@@ -184,9 +182,8 @@ export const FormLayer: React.FC<IFormLayerProps> = ({ pdfCanvas, containerEl, p
 
         if (field.type === 'combo' && field.isEditable) {
           const value =
-            (getValue(field) as string | undefined) ||
-            field.value ||
-            field.options?.find((o) => o.selected)?.label ||
+            (((getValue(field) as string | undefined) ?? field.value) ||
+              field.options?.find((o) => o.selected)?.label) ??
             '';
           const listId = `form-combo-${field.id}`;
 
@@ -214,9 +211,8 @@ export const FormLayer: React.FC<IFormLayerProps> = ({ pdfCanvas, containerEl, p
 
         if (field.type === 'combo' || field.type === 'list') {
           const value =
-            (getValue(field) as string | undefined) ||
-            field.value ||
-            field.options?.find((o) => o.selected)?.label ||
+            (((getValue(field) as string | undefined) ?? field.value) ||
+              field.options?.find((o) => o.selected)?.label) ??
             '';
 
           return (
@@ -278,10 +274,7 @@ export const FormLayer: React.FC<IFormLayerProps> = ({ pdfCanvas, containerEl, p
           );
         }
 
-        const textValue =
-          (getValue(field) as string | undefined) ??
-          field.value ??
-          '';
+        const textValue = (getValue(field) as string | undefined) ?? field.value ?? '';
 
         if (field.isMultiline) {
           return (

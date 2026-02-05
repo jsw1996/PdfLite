@@ -20,7 +20,7 @@ function App() {
   ) : (
     <ThemeContextProvider>
       <PdfControllerContextProvider>
-        <SidebarProvider style={{ '--sidebar-width': '12rem' } as CSSProperties}>
+        <SidebarProvider style={{ '--sidebar-width': '14rem' } as CSSProperties}>
           <PdfEditor file={file!} />
         </SidebarProvider>
       </PdfControllerContextProvider>
