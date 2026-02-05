@@ -67,7 +67,9 @@ export interface ISignatureAnnotation extends IBaseAnnotation {
   type: 'signature';
   position: IPoint;
   imageDataUrl: string;
-  imageBytes: Uint8Array;
+  imageRgbaBytes: Uint8Array;
+  imageWidthPx: number;
+  imageHeightPx: number;
   width: number;
   height: number;
 }

@@ -257,32 +257,21 @@ function renderSignatureAnnotation(
 }
 
 function commitSignatureAnnotation(
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  _controller: PdfController,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  _annotation: ISignatureAnnotation,
+  controller: PdfController,
+  annotation: ISignatureAnnotation,
 ): void {
-  // TODO: Implement addSignatureAnnotation in PdfController when PDFium supports STAMP annotations
-  // For now, signature annotations are stored as overlay and will be visible in the viewer
-  // but won't be committed to the PDF file until addSignatureAnnotation is implemented
-  //
-  // When implemented, it should look like:
-  // controller.addSignatureAnnotation(annotation.pageIndex, {
-  //   scale: 1,
-  //   canvasRect: {
-  //     left: annotation.position.x,
-  //     top: annotation.position.y,
-  //     width: annotation.width,
-  //     height: annotation.height,
-  //   },
-  //   imageBytes: annotation.imageBytes,
-  // });
-
-  // For now, we'll just log a warning
-  // Signatures will still be visible as overlay annotations
-  console.warn(
-    'Signature annotation commit to PDF not yet implemented - signature will remain as overlay',
-  );
+  controller.addImageObject(annotation.pageIndex, {
+    scale: 1,
+    canvasRect: {
+      left: annotation.position.x,
+      top: annotation.position.y,
+      width: annotation.width,
+      height: annotation.height,
+    },
+    imageRgbaBytes: annotation.imageRgbaBytes,
+    imageWidthPx: annotation.imageWidthPx,
+    imageHeightPx: annotation.imageHeightPx,
+  });
 }
 
 function normalizeSignatureAnnotation(

@@ -6,11 +6,19 @@ export interface IHandwritingCanvasProps {
   onSignatureReady: (args: {
     pngDataUrl: string;
     pngBytes: Uint8Array;
+    rgbaBytes: Uint8Array;
     widthPx: number;
     heightPx: number;
   }) => void;
 }
 
+/**
+ * Handwriting signature canvas component.
+ *
+ * @param onSignatureReady the callback for when the signature is ready
+ * @constructor
+ * @returns component for drawing handwriting signature on a canvas
+ */
 export const HandwritingCanvas: React.FC<IHandwritingCanvasProps> = ({ onSignatureReady }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
@@ -51,6 +59,9 @@ export const HandwritingCanvas: React.FC<IHandwritingCanvasProps> = ({ onSignatu
     [],
   );
 
+  /**
+   * Handle start of drawing on canvas.
+   */
   const handleStart = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
       e.preventDefault();
@@ -71,6 +82,9 @@ export const HandwritingCanvas: React.FC<IHandwritingCanvasProps> = ({ onSignatu
     [getPoint],
   );
 
+  /**
+   * Handle movement during drawing on canvas.
+   */
   const handleMove = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
       if (!isDrawing) return;
@@ -91,6 +105,9 @@ export const HandwritingCanvas: React.FC<IHandwritingCanvasProps> = ({ onSignatu
     [isDrawing, getPoint],
   );
 
+  /**
+   * Handle end of drawing on canvas.
+   */
   const handleEnd = useCallback(() => {
     setIsDrawing(false);
     // Auto-update signature when drawing ends
@@ -102,19 +119,30 @@ export const HandwritingCanvas: React.FC<IHandwritingCanvasProps> = ({ onSignatu
 
         // Convert canvas to PNG data URL (base64 encoded)
         const pngDataUrl = canvas.toDataURL('image/png');
-
+        console.log('===pngDataUrl===', pngDataUrl);
         // Convert base64 string to Uint8Array with error handling
         const base64Data = pngDataUrl.split(',')[1];
+        console.log('===base64Data===', base64Data);
         const pngBytes = safeBase64Decode(base64Data);
+        console.log('===pngBytes=', pngBytes);
 
         if (!pngBytes) {
           console.error('Failed to decode signature image data');
           return;
         }
 
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          console.error('Failed to get canvas context for image data');
+          return;
+        }
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const rgbaBytes = new Uint8Array(imageData.data);
+
         onSignatureReady({
           pngDataUrl,
           pngBytes,
+          rgbaBytes,
           widthPx: canvas.width,
           heightPx: canvas.height,
         });
@@ -135,6 +163,7 @@ export const HandwritingCanvas: React.FC<IHandwritingCanvasProps> = ({ onSignatu
     onSignatureReady({
       pngDataUrl: '',
       pngBytes: new Uint8Array(0),
+      rgbaBytes: new Uint8Array(0),
       widthPx: 0,
       heightPx: 0,
     });

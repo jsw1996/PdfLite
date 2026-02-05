@@ -184,6 +184,16 @@ export interface IPdfController {
   ): void;
   exportPdfBytes(options?: { flags?: number; version?: number }): Uint8Array;
   downloadPdf(filename?: string, options?: { flags?: number; version?: number }): void;
+  addImageObject(
+    pageIndex: number,
+    opts: {
+      scale: number;
+      canvasRect: { left: number; top: number; width: number; height: number };
+      imageRgbaBytes: Uint8Array;
+      imageWidthPx: number;
+      imageHeightPx: number;
+    },
+  ): void;
   getPageCount(): number;
   getPageTextContent(pageIndex: number): IPageTextContent | null;
   destroy(): void;
@@ -213,6 +223,23 @@ export class PdfController implements IPdfController {
   private static utf16Decoder = new TextDecoder('utf-16le');
   private formHandle: number | null = null;
   private formInfoPtr: number | null = null;
+  private static toImagePdfium(pdfium: IPDFiumModule): IPDFiumModule & {
+    _FPDFImageObj_SetBitmap_W: (
+      pagesPtr: number,
+      count: number,
+      imageObject: number,
+      bitmap: number,
+    ) => number;
+  } {
+    return pdfium as IPDFiumModule & {
+      _FPDFImageObj_SetBitmap_W: (
+        pagesPtr: number,
+        count: number,
+        imageObject: number,
+        bitmap: number,
+      ) => number;
+    };
+  }
 
   /** Allocate a null-terminated UTF-8 string in WASM memory. Caller must free. */
   private allocUtf8(s: string): number {
@@ -1364,7 +1391,8 @@ export class PdfController implements IPdfController {
               isPassword: flags != null ? (flags & FORM_FIELD_FLAG_PASSWORD) !== 0 : undefined,
               isCombo: flags != null ? (flags & FORM_FIELD_FLAG_COMBO) !== 0 : undefined,
               isEditable: flags != null ? (flags & FORM_FIELD_FLAG_EDIT) !== 0 : undefined,
-              isMultiSelect: flags != null ? (flags & FORM_FIELD_FLAG_MULTISELECT) !== 0 : undefined,
+              isMultiSelect:
+                flags != null ? (flags & FORM_FIELD_FLAG_MULTISELECT) !== 0 : undefined,
               controlCount: controlCount ?? undefined,
               controlIndex: controlIndex ?? undefined,
             });
@@ -1410,9 +1438,7 @@ export class PdfController implements IPdfController {
       if (!annot) return;
 
       const resolveOnState = (fallback: string, allowFieldValue = true) => {
-        const candidates = allowFieldValue
-          ? [field.exportValue, field.value]
-          : [field.exportValue];
+        const candidates = allowFieldValue ? [field.exportValue, field.value] : [field.exportValue];
         for (const candidate of candidates) {
           if (!candidate) continue;
           const trimmed = candidate.trim();
@@ -1519,10 +1545,10 @@ export class PdfController implements IPdfController {
   }
 
   private resolveRadioOnState(field: IFormField): string {
-    if (field.exportValue && field.exportValue.trim()) {
+    if (field.exportValue?.trim()) {
       return field.exportValue;
     }
-    if (field.value && field.value.trim()) {
+    if (field.value?.trim()) {
       return field.value;
     }
     return 'On';
@@ -1685,6 +1711,14 @@ export class PdfController implements IPdfController {
     if (canvasPoints.length < 2) return;
 
     this.withPage(pageIndex, (pdfium, pagePtr) => {
+      if (
+        typeof (pdfium as IPDFiumModule & { _FPDFPageObj_NewImageObj_W?: unknown })
+          ._FPDFPageObj_NewImageObj_W !== 'function'
+      ) {
+        throw new Error(
+          'PDFium WASM build is missing image object APIs. Rebuild @pdfviewer/pdfium-wasm to enable signature commit.',
+        );
+      }
       const pageW = pdfium._PDFium_GetPageWidth(pagePtr);
       const pageH = pdfium._PDFium_GetPageHeight(pagePtr);
 
@@ -1986,6 +2020,122 @@ export class PdfController implements IPdfController {
         for (const ptr of ptrsToFree) {
           pdfium._free(ptr);
         }
+      }
+    });
+  }
+
+  /**
+   * Add an image object directly into the page content stream (flattened).
+   *
+   * The image is inserted as a page object, so it is not editable as an annotation.
+   * The input bytes must be RGBA pixel data (row-major, 4 bytes per pixel).
+   */
+  public addImageObject(
+    pageIndex: number,
+    opts: {
+      scale: number;
+      canvasRect: { left: number; top: number; width: number; height: number };
+      imageRgbaBytes: Uint8Array;
+      imageWidthPx: number;
+      imageHeightPx: number;
+    },
+  ): void {
+    const { scale, canvasRect, imageRgbaBytes, imageWidthPx, imageHeightPx } = opts;
+    if (
+      canvasRect.width <= 0 ||
+      canvasRect.height <= 0 ||
+      imageWidthPx <= 0 ||
+      imageHeightPx <= 0 ||
+      imageRgbaBytes.length === 0 ||
+      imageRgbaBytes.length < imageWidthPx * imageHeightPx * 4
+    ) {
+      return;
+    }
+
+    const { docPtr } = this.requireDoc();
+
+    this.withPage(pageIndex, (pdfium, pagePtr) => {
+      const pageW = pdfium._PDFium_GetPageWidth(pagePtr);
+      const pageH = pdfium._PDFium_GetPageHeight(pagePtr);
+
+      const topLeftPage = this.canvasToPagePoint(
+        pagePtr,
+        pageW,
+        pageH,
+        scale,
+        canvasRect.left,
+        canvasRect.top,
+      );
+      const bottomRightPage = this.canvasToPagePoint(
+        pagePtr,
+        pageW,
+        pageH,
+        scale,
+        canvasRect.left + canvasRect.width,
+        canvasRect.top + canvasRect.height,
+      );
+
+      const pdfLeft = Math.min(topLeftPage.x, bottomRightPage.x);
+      const pdfRight = Math.max(topLeftPage.x, bottomRightPage.x);
+      const pdfBottom = Math.min(topLeftPage.y, bottomRightPage.y);
+      const pdfTop = Math.max(topLeftPage.y, bottomRightPage.y);
+      const pdfWidth = pdfRight - pdfLeft;
+      const pdfHeight = pdfTop - pdfBottom;
+
+      let bitmap = 0;
+      let imageObj = 0;
+      let pagesPtr = 0;
+      try {
+        bitmap = pdfium._PDFium_BitmapCreate(imageWidthPx, imageHeightPx, 1);
+        if (!bitmap) throw new Error('Failed to create bitmap for image object');
+
+        const bufferPtr = pdfium._PDFium_BitmapGetBuffer(bitmap);
+        const stride = pdfium._PDFium_BitmapGetStride(bitmap);
+        const heap = pdfium.HEAPU8;
+
+        for (let y = 0; y < imageHeightPx; y++) {
+          const rowOffset = y * stride;
+          const srcRowOffset = y * imageWidthPx * 4;
+          for (let x = 0; x < imageWidthPx; x++) {
+            const src = srcRowOffset + x * 4;
+            const dst = rowOffset + x * 4;
+            heap[bufferPtr + dst + 0] = imageRgbaBytes[src + 2]; // B
+            heap[bufferPtr + dst + 1] = imageRgbaBytes[src + 1]; // G
+            heap[bufferPtr + dst + 2] = imageRgbaBytes[src + 0]; // R
+            heap[bufferPtr + dst + 3] = imageRgbaBytes[src + 3]; // A
+          }
+        }
+
+        imageObj = pdfium._FPDFPageObj_NewImageObj_W(docPtr);
+        if (!imageObj) throw new Error('Failed to create image object');
+
+        pagesPtr = pdfium._malloc(4);
+        pdfium.HEAP32[pagesPtr / 4] = pagePtr;
+        const pdfiumImage = PdfController.toImagePdfium(pdfium);
+        const okBitmap = pdfiumImage._FPDFImageObj_SetBitmap_W(pagesPtr, 1, imageObj, bitmap);
+        if (!okBitmap) throw new Error('Failed to set bitmap on image object');
+
+        const okMatrix = pdfium._FPDFImageObj_SetMatrix_W(
+          imageObj,
+          pdfWidth,
+          0,
+          0,
+          pdfHeight,
+          pdfLeft,
+          pdfBottom,
+        );
+        if (!okMatrix) throw new Error('Failed to set image object matrix');
+
+        pdfium._FPDFPage_InsertObject_W(pagePtr, imageObj);
+        imageObj = 0;
+
+        if (!pdfium._FPDFPage_GenerateContent_W(pagePtr)) {
+          throw new Error('Failed to generate page content for image object');
+        }
+      } finally {
+        if (imageObj) pdfium._FPDFPageObj_Destroy_W(imageObj);
+        if (bitmap) pdfium._PDFium_BitmapDestroy(bitmap);
+        if (pagesPtr) pdfium._free(pagesPtr);
       }
     });
   }

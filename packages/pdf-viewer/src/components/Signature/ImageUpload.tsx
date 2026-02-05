@@ -5,6 +5,7 @@ export interface IImageUploadProps {
   onSignatureReady: (args: {
     pngDataUrl: string;
     pngBytes: Uint8Array;
+    rgbaBytes: Uint8Array;
     widthPx: number;
     heightPx: number;
   }) => void;
@@ -15,6 +16,7 @@ export const ImageUpload: React.FC<IImageUploadProps> = ({ onSignatureReady }) =
   const [imageData, setImageData] = useState<{
     dataUrl: string;
     bytes: Uint8Array;
+    rgbaBytes: Uint8Array;
     width: number;
     height: number;
   } | null>(null);
@@ -60,6 +62,9 @@ export const ImageUpload: React.FC<IImageUploadProps> = ({ onSignatureReady }) =
         ctx.drawImage(img, 0, 0);
         const pngDataUrl = canvas.toDataURL('image/png');
 
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const rgbaBytes = new Uint8Array(imageData.data);
+
         // Safe base64 decoding
         const base64Data = pngDataUrl.split(',')[1];
         const pngBytes = safeBase64Decode(base64Data);
@@ -72,6 +77,7 @@ export const ImageUpload: React.FC<IImageUploadProps> = ({ onSignatureReady }) =
         setImageData({
           dataUrl: pngDataUrl,
           bytes: pngBytes,
+          rgbaBytes,
           width: img.naturalWidth,
           height: img.naturalHeight,
         });
@@ -87,6 +93,7 @@ export const ImageUpload: React.FC<IImageUploadProps> = ({ onSignatureReady }) =
       onSignatureReady({
         pngDataUrl: imageData.dataUrl,
         pngBytes: imageData.bytes,
+        rgbaBytes: imageData.rgbaBytes,
         widthPx: imageData.width,
         heightPx: imageData.height,
       });
