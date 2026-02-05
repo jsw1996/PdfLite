@@ -35,8 +35,14 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
-      - name: Build pdf-viewer and dependencies
-        run: pnpm turbo run build --filter=pdf-viewer...
+      - name: Build pdfium-wasm (TypeScript only, wasm is pre-committed)
+        run: pnpm --filter @pdfviewer/pdfium-wasm run build:ts
+
+      - name: Build controller
+        run: pnpm --filter @pdfviewer/controller build
+
+      - name: Build pdf-viewer
+        run: pnpm --filter pdf-viewer build
         env:
           GITHUB_PAGES: true
 
