@@ -20,7 +20,7 @@ export function OutlinePanel({ outline, onGoToPage }: IOutlinePanelProps) {
         <button
           type="button"
           className={`w-full text-left text-sm py-1.5 rounded-md hover:bg-primary/20 ${
-            hasDest ? 'text-primary-foreground' : 'text-primary-foreground cursor-not-allowed'
+            hasDest ? 'text-primary-background' : 'text-primary-background cursor-not-allowed'
           }`}
           style={{ paddingLeft: 12 + depth * 12, paddingRight: 12 }}
           onClick={() => {
