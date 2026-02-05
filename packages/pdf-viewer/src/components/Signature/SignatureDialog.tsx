@@ -17,6 +17,7 @@ export interface ISignatureDialogProps {
   onSignatureReady: (args: {
     pngDataUrl: string;
     pngBytes: Uint8Array;
+    rgbaBytes: Uint8Array;
     widthPx: number;
     heightPx: number;
   }) => void;
@@ -33,6 +34,7 @@ export const SignatureDialog: React.FC<ISignatureDialogProps> = ({
   const [signatureData, setSignatureData] = useState<{
     pngDataUrl: string;
     pngBytes: Uint8Array;
+    rgbaBytes: Uint8Array;
     widthPx: number;
     heightPx: number;
   } | null>(null);
@@ -40,6 +42,7 @@ export const SignatureDialog: React.FC<ISignatureDialogProps> = ({
   const handleSignatureReady = (args: {
     pngDataUrl: string;
     pngBytes: Uint8Array;
+    rgbaBytes: Uint8Array;
     widthPx: number;
     heightPx: number;
   }) => {

@@ -5,6 +5,7 @@ import { generateAnnotationId, type ISignatureAnnotation, type IAnnotation } fro
 export interface ISignatureData {
   pngDataUrl: string;
   pngBytes: Uint8Array;
+  rgbaBytes: Uint8Array;
   widthPx: number;
   heightPx: number;
 }
@@ -65,7 +66,9 @@ export const useAddSignature = (pageElement: HTMLDivElement | null, pageIndex: n
       pageIndex,
       position: clickPosition,
       imageDataUrl: pendingSignature.pngDataUrl,
-      imageBytes: pendingSignature.pngBytes,
+      imageRgbaBytes: pendingSignature.rgbaBytes,
+      imageWidthPx: pendingSignature.widthPx,
+      imageHeightPx: pendingSignature.heightPx,
       width: defaultWidth,
       height: defaultHeight,
       createdAt: Date.now(),
