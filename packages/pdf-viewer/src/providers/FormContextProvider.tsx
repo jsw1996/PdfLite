@@ -8,7 +8,7 @@ interface IFormContextValue {
   registerFields: (fields: IFormField[]) => void;
   getValue: (field: IFormField) => FormValue | undefined;
   setValue: (field: IFormField, value: FormValue) => void;
-  getFormValuesSnapshot: () => Array<{ field: IFormField; value: FormValue }>;
+  getFormValuesSnapshot: () => { field: IFormField; value: FormValue }[];
   commitFormValues: () => void;
 }
 
@@ -34,7 +34,7 @@ function getDefaultValue(field: IFormField): FormValue {
     return field.isChecked ? field.id : '';
   }
   if (field.type === 'combo' || field.type === 'list') {
-    return field.value || field.options?.find((o) => o.selected)?.label || '';
+    return (field.value || field.options?.find((o) => o.selected)?.label) ?? '';
   }
   return field.value || '';
 }
@@ -105,7 +105,7 @@ export function FormContextProvider({ children }: { children: React.ReactNode })
   }, []);
 
   const getFormValuesSnapshot = useCallback(() => {
-    const snapshot: Array<{ field: IFormField; value: FormValue }> = [];
+    const snapshot: { field: IFormField; value: FormValue }[] = [];
     fieldMetaRef.current.forEach((field) => {
       const key = fieldKeyByIdRef.current.get(field.id) ?? getFieldStorageKey(field);
       const value = values.get(key);

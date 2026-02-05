@@ -9,13 +9,13 @@ interface IFormValueEntry {
 }
 
 function resolveRadioExportValue(field: IFormField): string | null {
-  if (field.exportValue && field.exportValue.trim() && field.exportValue.trim().toLowerCase() !== 'off') {
+  if (field.exportValue?.trim() && field.exportValue.trim().toLowerCase() !== 'off') {
     return field.exportValue;
   }
   if (field.controlIndex != null && field.controlIndex >= 0) {
     return String(field.controlIndex + 1);
   }
-  if (field.value && field.value.trim() && field.value.trim().toLowerCase() !== 'off') {
+  if (field.value?.trim() && field.value.trim().toLowerCase() !== 'off') {
     return field.value;
   }
   return null;
