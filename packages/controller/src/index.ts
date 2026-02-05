@@ -15,3 +15,10 @@ export {
   type IFormFieldOption,
   type FormFieldType,
 } from './PdfController';
+
+export type {
+  IPdfDest,
+  IPdfOutlineNode,
+  IUserBookmark,
+  IOutlineControllerDraft,
+} from './outlineTypes';

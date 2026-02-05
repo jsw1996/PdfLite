@@ -8,6 +8,7 @@ import {
   FPDFANNOT_COLORTYPE,
   FPDF_ERR,
 } from '@pdfviewer/pdfium-wasm';
+import type { IPdfOutlineNode } from './outlineTypes';
 
 /**
  * PDFium render flags for FPDF_RenderPageBitmap
@@ -195,6 +196,7 @@ export interface IPdfController {
     },
   ): void;
   getPageCount(): number;
+  getOutline(): IPdfOutlineNode[];
   getPageTextContent(pageIndex: number): IPageTextContent | null;
   destroy(): void;
   setFontMap(map: Record<string, string>): void;
@@ -615,6 +617,59 @@ export class PdfController implements IPdfController {
       return 0;
     }
     return this.pdfiumModule._PDFium_GetPageCount(this.docPtr);
+  }
+
+  public getOutline(): IPdfOutlineNode[] {
+    if (!this.pdfiumModule || !this.docPtr) {
+      return [];
+    }
+
+    const pdfium = this.pdfiumModule;
+    const docPtr = this.docPtr;
+
+    const readTitle = (bookmarkPtr: number): string =>
+      this.readFormFieldString((buffer, bufferLen) =>
+        pdfium._PDFium_GetBookmarkTitle(bookmarkPtr, buffer, bufferLen),
+      );
+
+    const buildList = (firstBookmarkPtr: number): IPdfOutlineNode[] => {
+      const nodes: IPdfOutlineNode[] = [];
+      let current = firstBookmarkPtr;
+      while (current) {
+        const title = readTitle(current);
+        const destPtr = pdfium._PDFium_GetBookmarkDest(docPtr, current);
+        let dest: IPdfOutlineNode['dest'];
+        let unsupported: IPdfOutlineNode['unsupported'];
+        if (destPtr) {
+          const pageIndex = pdfium._PDFium_GetDestPageIndex(docPtr, destPtr);
+          if (pageIndex >= 0) {
+            dest = { pageIndex };
+          } else {
+            unsupported = 'dest-unresolved';
+          }
+        } else {
+          unsupported = 'dest-missing';
+        }
+
+        const firstChild = pdfium._PDFium_GetFirstChildBookmark(docPtr, current);
+        const children = firstChild ? buildList(firstChild) : undefined;
+
+        const node: IPdfOutlineNode = { title };
+        if (dest) node.dest = dest;
+        if (unsupported && !dest) node.unsupported = unsupported;
+        if (children?.length) node.children = children;
+        nodes.push(node);
+
+        current = pdfium._PDFium_GetNextBookmark(docPtr, current);
+      }
+      return nodes;
+    };
+
+    const first = pdfium._PDFium_GetFirstBookmark(docPtr);
+    if (!first) {
+      return [];
+    }
+    return buildList(first);
   }
 
   public getPageDimension(pageIndex: number): IPageDimension {
