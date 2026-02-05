@@ -4,6 +4,7 @@ export const CONTROLLER_VERSION: ControllerVersion = '0.1.0';
 
 export {
   PdfController,
+  PdfPasswordError,
   type IPdfController,
   type IPageDimension,
   type IRenderOptions,

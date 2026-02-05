@@ -4,6 +4,7 @@ import {
   createPdfiumModule,
   FPDF_ANNOTATION_SUBTYPE,
   FPDFANNOT_COLORTYPE,
+  FPDF_ERR,
 } from '@pdfviewer/pdfium-wasm';
 
 /**
@@ -86,7 +87,7 @@ export interface ISearchResult {
 
 export interface IPdfController {
   ensureInitialized(): Promise<void>;
-  loadFile(file: File, opts?: { signal?: AbortSignal }): Promise<void>;
+  loadFile(file: File, opts?: { signal?: AbortSignal; password?: string }): Promise<void>;
   /** Render a PDF page to canvas. Supports AbortSignal for cancellation when using progressive rendering. */
   renderPdf(canvas: HTMLCanvasElement, options?: IRenderOptions): Promise<void>;
   getPageDimension(pageIndex: number): IPageDimension;
@@ -124,6 +125,17 @@ export interface IPdfController {
   destroy(): void;
   setFontMap(map: Record<string, string>): void;
   searchText(text: string, opts?: { scale?: number }): ISearchResult[];
+}
+
+export class PdfPasswordError extends Error {
+  public readonly code: number;
+  public readonly isPasswordError = true;
+
+  constructor(message: string, code: number = FPDF_ERR.PASSWORD) {
+    super(message);
+    this.name = 'PdfPasswordError';
+    this.code = code;
+  }
 }
 
 export class PdfController implements IPdfController {
@@ -224,6 +236,23 @@ export class PdfController implements IPdfController {
     while (nul < end && heap[nul] !== 0) nul++;
     if (nul <= ptr) return '';
     return PdfController.utf8Decoder.decode(heap.subarray(ptr, nul));
+  }
+
+  private static getLoadErrorMessage(code: number): string {
+    switch (code as FPDF_ERR) {
+      case FPDF_ERR.FILE:
+        return 'File not found or could not be opened';
+      case FPDF_ERR.FORMAT:
+        return 'File is not a valid PDF or is corrupted';
+      case FPDF_ERR.SECURITY:
+        return 'Unsupported security scheme';
+      case FPDF_ERR.PAGE:
+        return 'Page not found or content error';
+      case FPDF_ERR.UNKNOWN:
+        return 'Unknown error';
+      default:
+        return `Unknown error (code ${code})`;
+    }
   }
 
   public setFontMap(map: Record<string, string>): void {
@@ -356,7 +385,10 @@ export class PdfController implements IPdfController {
     this.closeCurrentDocument();
   }
 
-  public async loadFile(file: File, opts?: { signal?: AbortSignal }): Promise<void> {
+  public async loadFile(
+    file: File,
+    opts?: { signal?: AbortSignal; password?: string },
+  ): Promise<void> {
     await this.ensureInitialized();
     const pdfium = this.pdfiumModule;
     if (!pdfium) {
@@ -388,8 +420,8 @@ export class PdfController implements IPdfController {
     const dataPtr = pdfium._malloc(data.length);
     pdfium.HEAPU8.set(data, dataPtr);
 
-    // Allocate memory for password string (empty password for now)
-    const password = ''; // TODO: Add password input support if needed
+    const password = opts?.password ?? '';
+    const hasPassword = password.length > 0;
     const encoder = new TextEncoder();
     const passwordBytes = encoder.encode(password);
     const passwordBytesSize = passwordBytes.length + 1; // +1 for null terminator
@@ -403,8 +435,14 @@ export class PdfController implements IPdfController {
 
     if (!docPtr) {
       pdfium._free(dataPtr);
-      const errorCode = pdfium._PDFium_GetLastError();
-      throw new Error(`Failed to load PDF (error code: ${errorCode})`);
+      const errorCode = pdfium._PDFium_GetLastError() as FPDF_ERR;
+      if (errorCode === FPDF_ERR.PASSWORD) {
+        const message = hasPassword
+          ? 'Incorrect password. Please try again.'
+          : 'Password required to open this PDF.';
+        throw new PdfPasswordError(message, errorCode);
+      }
+      throw new Error(`Failed to load PDF: ${PdfController.getLoadErrorMessage(errorCode)}`);
     }
 
     // If aborted or superseded after we loaded docPtr, cleanup and exit.
