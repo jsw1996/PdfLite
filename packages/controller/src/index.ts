@@ -11,4 +11,7 @@ export {
   type ITextRect,
   type IPageTextContent,
   type ISearchResult,
+  type IFormField,
+  type IFormFieldOption,
+  type FormFieldType,
 } from './PdfController';

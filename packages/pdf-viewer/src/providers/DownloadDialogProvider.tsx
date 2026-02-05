@@ -3,7 +3,9 @@ import type { ReactNode } from 'react';
 import { PasswordProtectionDialog } from '@/components/DownloadDialog/PasswordProtectionDialog';
 import { usePdfController } from '@/providers/PdfControllerContextProvider';
 import { useAnnotation } from '@/providers/AnnotationContextProvider';
+import { useFormContext } from '@/providers/FormContextProvider';
 import { encryptPdf } from '@/utils/pdfEncrypt';
+import { applyFormValues } from '@/utils/applyFormValues';
 
 interface IDownloadDialogContextValue {
   openDownloadDialog: () => void;
@@ -32,6 +34,7 @@ export function DownloadDialogProvider({
   const [isProcessing, setIsProcessing] = useState(false);
   const { controller } = usePdfController();
   const { commitAnnotations } = useAnnotation();
+  const { commitFormValues, getFormValuesSnapshot } = useFormContext();
 
   const openDownloadDialog = useCallback(() => {
     setIsDialogOpen(true);
@@ -50,11 +53,18 @@ export function DownloadDialogProvider({
       try {
         setIsProcessing(true);
 
-        // Commit any pending annotations first
+        // Commit any pending form values and annotations first
+        commitFormValues();
         commitAnnotations();
 
         // Export the PDF bytes
         let pdfBytes = controller.exportPdfBytes();
+
+        // Ensure form values (especially radio groups) are persisted for external viewers.
+        const formValues = getFormValuesSnapshot();
+        if (formValues.length > 0) {
+          pdfBytes = await applyFormValues(pdfBytes, formValues);
+        }
 
         // If password protection is enabled, encrypt the PDF
         if (options.enablePassword && options.password) {
@@ -92,7 +102,7 @@ export function DownloadDialogProvider({
         setIsProcessing(false);
       }
     },
-    [controller, fileName, commitAnnotations],
+    [controller, fileName, commitAnnotations, commitFormValues, getFormValuesSnapshot],
   );
 
   const value = useMemo<IDownloadDialogContextValue>(

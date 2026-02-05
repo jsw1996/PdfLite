@@ -12,6 +12,7 @@ import {
 import { TextLayer } from '../TextLayer/TextLayer';
 import { usePdfState } from '@/providers/PdfStateContextProvider';
 import { LinkLayer } from '../LinkLayer/LinkLayer';
+import { FormLayer } from '../FormLayer/FormLayer';
 import { useSelectionHighlight } from '../../hooks/useSelectionHighlight';
 import { useAddText } from '@/hooks/useAddText';
 import { useAddSignature } from '@/hooks/useAddSignature';
@@ -135,6 +136,7 @@ export const ViewerPage: React.FC<IViewerPageProps> = ({ pageIndex, registerPage
         onOpenExternal={(uri) => window.open(uri, '_blank', 'noopener,noreferrer')}
         onGoToPage={(p) => goToPage(p, { scrollIntoView: true, scrollIntoPreview: true })}
       />
+      <FormLayer pageIndex={pageIndex} pdfCanvas={pdfCanvas} containerEl={containerEl} />
       <AnnotationLayer
         pageIndex={pageIndex}
         pdfCanvas={pdfCanvas}

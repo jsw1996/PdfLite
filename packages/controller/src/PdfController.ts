@@ -3,6 +3,8 @@ import {
   type IPDFiumModule,
   createPdfiumModule,
   FPDF_ANNOTATION_SUBTYPE,
+  FPDF_ANNOT_APPEARANCEMODE,
+  FPDF_ANNOT_FLAG,
   FPDFANNOT_COLORTYPE,
   FPDF_ERR,
 } from '@pdfviewer/pdfium-wasm';
@@ -19,6 +21,27 @@ const FPDF_RENDER_FLAGS = {
   /** Combined flags for high-quality screen rendering */
   DEFAULT: 0x01 | 0x02, // ANNOT + LCD_TEXT
 };
+
+const FORM_FIELD_TYPE_MAP: Record<number, FormFieldType> = {
+  1: 'pushbutton',
+  2: 'checkbox',
+  3: 'radio',
+  4: 'combo',
+  5: 'list',
+  6: 'text',
+  7: 'signature',
+};
+
+const FORM_FIELD_FLAG_READONLY = 1 << 0;
+const FORM_FIELD_FLAG_MULTILINE = 1 << 12;
+const FORM_FIELD_FLAG_PASSWORD = 1 << 13;
+const FORM_FIELD_FLAG_COMBO = 1 << 17;
+const FORM_FIELD_FLAG_EDIT = 1 << 18;
+const FORM_FIELD_FLAG_MULTISELECT = 1 << 21;
+
+// Allocate a bit more than the expected struct size to avoid size drift across PDFium versions.
+const FORM_FILL_INFO_SIZE = 256;
+const FORM_FILL_INFO_VERSION = 1;
 
 export interface IPoint {
   x: number;
@@ -85,6 +108,44 @@ export interface ISearchResult {
   text: string;
 }
 
+export type FormFieldType =
+  | 'unknown'
+  | 'pushbutton'
+  | 'checkbox'
+  | 'radio'
+  | 'combo'
+  | 'list'
+  | 'text'
+  | 'signature';
+
+export interface IFormFieldOption {
+  label: string;
+  selected: boolean;
+}
+
+export interface IFormField {
+  id: string;
+  annotIndex: number;
+  pageIndex: number;
+  type: FormFieldType;
+  name: string;
+  rect: { left: number; top: number; width: number; height: number };
+  value: string;
+  options?: IFormFieldOption[];
+  isChecked?: boolean;
+  exportValue?: string;
+  flags?: number;
+  fontSize?: number;
+  isReadOnly?: boolean;
+  isMultiline?: boolean;
+  isPassword?: boolean;
+  isCombo?: boolean;
+  isEditable?: boolean;
+  isMultiSelect?: boolean;
+  controlCount?: number;
+  controlIndex?: number;
+}
+
 export interface IPdfController {
   ensureInitialized(): Promise<void>;
   loadFile(file: File, opts?: { signal?: AbortSignal; password?: string }): Promise<void>;
@@ -92,6 +153,9 @@ export interface IPdfController {
   renderPdf(canvas: HTMLCanvasElement, options?: IRenderOptions): Promise<void>;
   getPageDimension(pageIndex: number): IPageDimension;
   listNativeAnnotations(pageIndex: number, opts: { scale: number }): INativeAnnotation[];
+  listFormFields(pageIndex: number, opts: { scale: number }): IFormField[];
+  hideAnnotation(pageIndex: number, annotIndex: number): void;
+  setFormFieldValue(field: IFormField, value: string | boolean): void;
   addInkHighlight(pageIndex: number, opts: { scale: number; canvasPoints: IPoint[] }): void;
   addHighlightAnnotation(
     pageIndex: number,
@@ -146,6 +210,9 @@ export class PdfController implements IPdfController {
   private loadSeq = 0;
   private fontMap = new Map<string, string>();
   private static utf8Decoder = new TextDecoder('utf-8');
+  private static utf16Decoder = new TextDecoder('utf-16le');
+  private formHandle: number | null = null;
+  private formInfoPtr: number | null = null;
 
   /** Allocate a null-terminated UTF-8 string in WASM memory. Caller must free. */
   private allocUtf8(s: string): number {
@@ -236,6 +303,32 @@ export class PdfController implements IPdfController {
     while (nul < end && heap[nul] !== 0) nul++;
     if (nul <= ptr) return '';
     return PdfController.utf8Decoder.decode(heap.subarray(ptr, nul));
+  }
+
+  private readUtf16Z(ptr: number, maxBytes: number): string {
+    const { pdfium } = this.requireDoc();
+    if (!ptr || maxBytes <= 1) return '';
+    const heap = pdfium.HEAPU8;
+    const end = Math.min(heap.length, ptr + maxBytes);
+    let nul = ptr;
+    while (nul + 1 < end && (heap[nul] !== 0 || heap[nul + 1] !== 0)) {
+      nul += 2;
+    }
+    if (nul <= ptr) return '';
+    return PdfController.utf16Decoder.decode(heap.subarray(ptr, nul));
+  }
+
+  private readFormFieldString(getter: (buffer: number, bufferLen: number) => number): string {
+    const { pdfium } = this.requireDoc();
+    const needed = getter(0, 0);
+    if (needed <= 2) return '';
+    const bufPtr = pdfium._malloc(needed);
+    try {
+      getter(bufPtr, needed);
+      return this.readUtf16Z(bufPtr, needed);
+    } finally {
+      pdfium._free(bufPtr);
+    }
   }
 
   private static getLoadErrorMessage(code: number): string {
@@ -367,8 +460,40 @@ export class PdfController implements IPdfController {
     return this.initPromise;
   }
 
+  private ensureFormFillHandle(): number | null {
+    const { pdfium, docPtr } = this.requireDoc();
+    if (this.formHandle) return this.formHandle;
+
+    const formInfoPtr = pdfium._malloc(FORM_FILL_INFO_SIZE);
+    pdfium.HEAPU8.fill(0, formInfoPtr, formInfoPtr + FORM_FILL_INFO_SIZE);
+    pdfium.setValue(formInfoPtr, FORM_FILL_INFO_VERSION, 'i32');
+
+    const handle = pdfium._FPDFDOC_InitFormFillEnvironment_W(docPtr, formInfoPtr);
+    if (!handle) {
+      pdfium._free(formInfoPtr);
+      return null;
+    }
+
+    this.formInfoPtr = formInfoPtr;
+    this.formHandle = handle;
+    return handle;
+  }
+
+  private closeFormFillEnvironment(): void {
+    if (!this.pdfiumModule) return;
+    if (this.formHandle) {
+      this.pdfiumModule._FPDFDOC_ExitFormFillEnvironment_W(this.formHandle);
+      this.formHandle = null;
+    }
+    if (this.formInfoPtr) {
+      this.pdfiumModule._free(this.formInfoPtr);
+      this.formInfoPtr = null;
+    }
+  }
+
   private closeCurrentDocument(): void {
     if (!this.pdfiumModule) return;
+    this.closeFormFillEnvironment();
     if (this.docPtr) {
       this.pdfiumModule._PDFium_CloseDocument(this.docPtr);
       this.docPtr = null;
@@ -908,6 +1033,13 @@ export class PdfController implements IPdfController {
           if (!annot) continue;
           try {
             const subtype = pdfium._FPDFAnnot_GetSubtype_W(annot) as FPDF_ANNOTATION_SUBTYPE;
+            // Skip form widgets here; they are handled by the FormLayer.
+            if (
+              subtype === FPDF_ANNOTATION_SUBTYPE.WIDGET ||
+              subtype === FPDF_ANNOTATION_SUBTYPE.XFAWIDGET
+            ) {
+              continue;
+            }
 
             // color
             pdfium.setValue(rPtr, 0, 'i32');
@@ -1094,6 +1226,353 @@ export class PdfController implements IPdfController {
 
       return out;
     });
+  }
+
+  public listFormFields(pageIndex: number, opts: { scale: number }): IFormField[] {
+    const { scale } = opts;
+    const formHandle = this.ensureFormFillHandle();
+
+    return this.withPage(pageIndex, (pdfium, pagePtr) => {
+      const pageW = pdfium._PDFium_GetPageWidth(pagePtr);
+      const pageH = pdfium._PDFium_GetPageHeight(pagePtr);
+      const deviceWidth = Math.round(pageW * scale);
+      const deviceHeight = Math.round(pageH * scale);
+
+      const count = pdfium._FPDFPage_GetAnnotCount_W(pagePtr);
+      const out: IFormField[] = [];
+
+      const rectPtr = pdfium._malloc(4 * 4); // FS_RECTF: left,bottom,right,top float
+      const fontSizePtr = pdfium._malloc(4);
+
+      try {
+        for (let i = 0; i < count; i++) {
+          const annot = pdfium._FPDFPage_GetAnnot_W(pagePtr, i);
+          if (!annot) continue;
+          try {
+            const subtype = pdfium._FPDFAnnot_GetSubtype_W(annot) as FPDF_ANNOTATION_SUBTYPE;
+            if (
+              subtype !== FPDF_ANNOTATION_SUBTYPE.WIDGET &&
+              subtype !== FPDF_ANNOTATION_SUBTYPE.XFAWIDGET
+            ) {
+              continue;
+            }
+
+            const gotRect = pdfium._FPDFAnnot_GetRect_W(annot, rectPtr);
+            if (!gotRect) continue;
+
+            const f = pdfium.HEAPF32.subarray(rectPtr / 4, rectPtr / 4 + 4);
+            const left = f[0];
+            const bottom = f[1];
+            const right = f[2];
+            const top = f[3];
+
+            const rect = this.pageRectToDeviceRect(
+              pagePtr,
+              left,
+              top,
+              right,
+              bottom,
+              deviceWidth,
+              deviceHeight,
+            );
+
+            let type: FormFieldType = 'unknown';
+            let name = '';
+            let value = '';
+            let flags: number | undefined;
+            let fontSize: number | undefined;
+            let isChecked: boolean | undefined;
+            let options: IFormFieldOption[] | undefined;
+            let exportValue: string | undefined;
+            let controlCount: number | undefined;
+            let controlIndex: number | undefined;
+
+            if (formHandle) {
+              const rawType = pdfium._FPDFAnnot_GetFormFieldType_W(formHandle, annot);
+              type = FORM_FIELD_TYPE_MAP[rawType] ?? 'unknown';
+
+              name = this.readFormFieldString((buf, len) =>
+                pdfium._FPDFAnnot_GetFormFieldName_W(formHandle, annot, buf, len),
+              );
+              value = this.readFormFieldString((buf, len) =>
+                pdfium._FPDFAnnot_GetFormFieldValue_W(formHandle, annot, buf, len),
+              );
+              flags = pdfium._FPDFAnnot_GetFormFieldFlags_W(formHandle, annot);
+
+              pdfium.setValue(fontSizePtr, 0, 'float');
+              if (pdfium._FPDFAnnot_GetFontSize_W(formHandle, annot, fontSizePtr)) {
+                const size = pdfium.getValue(fontSizePtr, 'float');
+                if (Number.isFinite(size) && size > 0) {
+                  fontSize = size;
+                }
+              }
+
+              if (type === 'checkbox' || type === 'radio') {
+                isChecked = !!pdfium._FPDFAnnot_IsChecked_W(formHandle, annot);
+                exportValue = this.readFormFieldString((buf, len) =>
+                  pdfium._FPDFAnnot_GetFormFieldExportValue_W(formHandle, annot, buf, len),
+                );
+              }
+
+              if (type === 'combo' || type === 'list') {
+                const optionCount = pdfium._FPDFAnnot_GetOptionCount_W(formHandle, annot);
+                if (optionCount > 0) {
+                  options = [];
+                  for (let o = 0; o < optionCount; o++) {
+                    const label = this.readFormFieldString((buf, len) =>
+                      pdfium._FPDFAnnot_GetOptionLabel_W(formHandle, annot, o, buf, len),
+                    );
+                    const selected = !!pdfium._FPDFAnnot_IsOptionSelected_W(formHandle, annot, o);
+                    options.push({ label, selected });
+                  }
+                }
+              }
+
+              controlCount = pdfium._FPDFAnnot_GetFormControlCount_W(formHandle, annot);
+              controlIndex = pdfium._FPDFAnnot_GetFormControlIndex_W(formHandle, annot);
+            } else {
+              const keyTPtr = this.allocUtf8('T');
+              const keyVPtr = this.allocUtf8('V');
+              try {
+                name = this.readFormFieldString((buf, len) =>
+                  pdfium._FPDFAnnot_GetStringValue_W(annot, keyTPtr, buf, len),
+                );
+                value = this.readFormFieldString((buf, len) =>
+                  pdfium._FPDFAnnot_GetStringValue_W(annot, keyVPtr, buf, len),
+                );
+              } finally {
+                pdfium._free(keyTPtr);
+                pdfium._free(keyVPtr);
+              }
+            }
+
+            out.push({
+              id: `form-${pageIndex}-${i}`,
+              annotIndex: i,
+              pageIndex,
+              type,
+              name,
+              rect,
+              value,
+              options,
+              isChecked,
+              exportValue,
+              flags,
+              fontSize,
+              isReadOnly: flags != null ? (flags & FORM_FIELD_FLAG_READONLY) !== 0 : undefined,
+              isMultiline: flags != null ? (flags & FORM_FIELD_FLAG_MULTILINE) !== 0 : undefined,
+              isPassword: flags != null ? (flags & FORM_FIELD_FLAG_PASSWORD) !== 0 : undefined,
+              isCombo: flags != null ? (flags & FORM_FIELD_FLAG_COMBO) !== 0 : undefined,
+              isEditable: flags != null ? (flags & FORM_FIELD_FLAG_EDIT) !== 0 : undefined,
+              isMultiSelect: flags != null ? (flags & FORM_FIELD_FLAG_MULTISELECT) !== 0 : undefined,
+              controlCount: controlCount ?? undefined,
+              controlIndex: controlIndex ?? undefined,
+            });
+          } finally {
+            pdfium._FPDFPage_CloseAnnot_W(annot);
+          }
+        }
+      } finally {
+        pdfium._free(rectPtr);
+        pdfium._free(fontSizePtr);
+      }
+
+      return out;
+    });
+  }
+
+  public hideAnnotation(pageIndex: number, annotIndex: number): void {
+    this.withPage(pageIndex, (pdfium, pagePtr) => {
+      const annot = pdfium._FPDFPage_GetAnnot_W(pagePtr, annotIndex);
+      if (!annot) return;
+      try {
+        const flags = FPDF_ANNOT_FLAG.HIDDEN | FPDF_ANNOT_FLAG.NOVIEW;
+        pdfium._FPDFAnnot_SetFlags_W(annot, flags);
+      } finally {
+        pdfium._FPDFPage_CloseAnnot_W(annot);
+      }
+    });
+  }
+
+  public setFormFieldValue(field: IFormField, value: string | boolean): void {
+    if (field.type === 'radio') {
+      this.updateRadioGroupValue(field, value);
+      return;
+    }
+    if (field.type === 'checkbox') {
+      if (this.tryClickFormFieldWithFormFill(field)) {
+        return;
+      }
+    }
+
+    this.withPage(field.pageIndex, (pdfium, pagePtr) => {
+      const annot = pdfium._FPDFPage_GetAnnot_W(pagePtr, field.annotIndex);
+      if (!annot) return;
+
+      const resolveOnState = (fallback: string, allowFieldValue = true) => {
+        const candidates = allowFieldValue
+          ? [field.exportValue, field.value]
+          : [field.exportValue];
+        for (const candidate of candidates) {
+          if (!candidate) continue;
+          const trimmed = candidate.trim();
+          if (!trimmed) continue;
+          return candidate;
+        }
+        return fallback;
+      };
+
+      const keyVPtr = this.allocUtf8('V');
+      const keyASPtr = this.allocUtf8('AS');
+
+      try {
+        if (field.type === 'checkbox') {
+          const onState = resolveOnState('Yes');
+          const checked = value === true || value === onState;
+          const state = checked ? onState : 'Off';
+          const statePtr = this.allocUtf16(state);
+          try {
+            pdfium._FPDFAnnot_SetStringValue_W(annot, keyVPtr, statePtr);
+            pdfium._FPDFAnnot_SetStringValue_W(annot, keyASPtr, statePtr);
+          } finally {
+            pdfium._free(statePtr);
+          }
+          return;
+        }
+
+        const textValue = typeof value === 'string' ? value : '';
+        const textPtr = this.allocUtf16(textValue);
+        try {
+          pdfium._FPDFAnnot_SetStringValue_W(annot, keyVPtr, textPtr);
+        } finally {
+          pdfium._free(textPtr);
+        }
+
+        // Clear appearance for text/choice fields so viewers regenerate the appearance stream.
+        if (field.type === 'text' || field.type === 'combo' || field.type === 'list') {
+          pdfium._FPDFAnnot_SetAP_W(annot, FPDF_ANNOT_APPEARANCEMODE.NORMAL, 0);
+        }
+      } finally {
+        pdfium._free(keyVPtr);
+        pdfium._free(keyASPtr);
+        pdfium._FPDFPage_CloseAnnot_W(annot);
+      }
+    });
+  }
+
+  private updateRadioGroupValue(field: IFormField, value: string | boolean): void {
+    const selectedId = typeof value === 'string' ? value : '';
+    if (!selectedId || field.id !== selectedId) {
+      return;
+    }
+
+    if (this.tryClickFormFieldWithFormFill(field)) {
+      return;
+    }
+
+    const groupKey = field.name || field.id;
+    const selectedOnState = this.resolveRadioOnState(field);
+
+    const pageCount = this.getPageCount();
+    const groupFields: IFormField[] = [];
+
+    for (let pageIndex = 0; pageIndex < pageCount; pageIndex++) {
+      const fields = this.listFormFields(pageIndex, { scale: 1 });
+      for (const candidate of fields) {
+        if (candidate.type !== 'radio') continue;
+        const candidateKey = candidate.name || candidate.id;
+        if (candidateKey === groupKey) {
+          groupFields.push(candidate);
+        }
+      }
+    }
+
+    if (groupFields.length === 0) return;
+
+    const { pdfium } = this.requireDoc();
+    const keyVPtr = this.allocUtf8('V');
+    const keyASPtr = this.allocUtf8('AS');
+    const selectedStatePtr = this.allocUtf16(selectedOnState);
+    const offStatePtr = this.allocUtf16('Off');
+
+    try {
+      for (const candidate of groupFields) {
+        this.withPage(candidate.pageIndex, (pagePdfium, pagePtr) => {
+          const annot = pagePdfium._FPDFPage_GetAnnot_W(pagePtr, candidate.annotIndex);
+          if (!annot) return;
+          try {
+            const statePtr = candidate.id === selectedId ? selectedStatePtr : offStatePtr;
+            pagePdfium._FPDFAnnot_SetStringValue_W(annot, keyASPtr, statePtr);
+            // Keep /V consistent across the group (some viewers read it from the first widget).
+            pagePdfium._FPDFAnnot_SetStringValue_W(annot, keyVPtr, selectedStatePtr);
+          } finally {
+            pagePdfium._FPDFPage_CloseAnnot_W(annot);
+          }
+        });
+      }
+    } finally {
+      pdfium._free(keyVPtr);
+      pdfium._free(keyASPtr);
+      pdfium._free(selectedStatePtr);
+      pdfium._free(offStatePtr);
+    }
+  }
+
+  private resolveRadioOnState(field: IFormField): string {
+    if (field.exportValue && field.exportValue.trim()) {
+      return field.exportValue;
+    }
+    if (field.value && field.value.trim()) {
+      return field.value;
+    }
+    return 'On';
+  }
+
+  private tryClickFormFieldWithFormFill(field: IFormField): boolean {
+    const formHandle = this.ensureFormFillHandle();
+    if (!formHandle) return false;
+
+    const { pdfium } = this.requireDoc();
+    if (
+      typeof pdfium._FORM_OnAfterLoadPage_W !== 'function' ||
+      typeof pdfium._FORM_OnBeforeClosePage_W !== 'function' ||
+      typeof pdfium._FORM_OnLButtonDown_W !== 'function' ||
+      typeof pdfium._FORM_OnLButtonUp_W !== 'function' ||
+      typeof pdfium._FORM_ForceToKillFocus_W !== 'function'
+    ) {
+      return false;
+    }
+
+    try {
+      this.withPage(field.pageIndex, (pagePdfium, pagePtr) => {
+        pagePdfium._FORM_OnAfterLoadPage_W?.(pagePtr, formHandle);
+        const annot = pagePdfium._FPDFPage_GetAnnot_W(pagePtr, field.annotIndex);
+        if (!annot) {
+          pagePdfium._FORM_OnBeforeClosePage_W?.(pagePtr, formHandle);
+          return;
+        }
+
+        const rectPtr = pagePdfium._malloc(4 * 4);
+        try {
+          if (!pagePdfium._FPDFAnnot_GetRect_W(annot, rectPtr)) {
+            return;
+          }
+          const f = pagePdfium.HEAPF32.subarray(rectPtr / 4, rectPtr / 4 + 4);
+          const x = (f[0] + f[2]) / 2;
+          const y = (f[1] + f[3]) / 2;
+          pagePdfium._FORM_OnLButtonDown_W?.(formHandle, pagePtr, 0, x, y);
+          pagePdfium._FORM_OnLButtonUp_W?.(formHandle, pagePtr, 0, x, y);
+          pagePdfium._FORM_ForceToKillFocus_W?.(formHandle);
+        } finally {
+          pagePdfium._free(rectPtr);
+          pagePdfium._FPDFPage_CloseAnnot_W(annot);
+          pagePdfium._FORM_OnBeforeClosePage_W?.(pagePtr, formHandle);
+        }
+      });
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   public searchText(text: string, opts?: { scale?: number }): ISearchResult[] {

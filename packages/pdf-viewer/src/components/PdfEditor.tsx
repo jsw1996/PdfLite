@@ -10,6 +10,7 @@ import { Header } from './Header/Header';
 import { PdfStateContextProvider } from '@/providers/PdfStateContextProvider';
 import { OpenPasswordDialog } from '@/components/PasswordDialog/OpenPasswordDialog';
 import { PdfPasswordError } from '@pdfviewer/controller';
+import { FormContextProvider } from '@/providers/FormContextProvider';
 
 export interface IPdfEditorProps {
   file: File;
@@ -146,24 +147,26 @@ export const PdfEditor: React.FC<IPdfEditorProps> = ({ file }) => {
 
   return (
     <PdfStateContextProvider>
-      <AnnotationContextProvider>
-        <DownloadDialogProvider fileName={file.name}>
-          <PdfEditorContent
-            file={file}
-            isFileLoaded={isFileLoaded}
-            pageCount={pageCount}
-            loadError={loadError}
-          />
-          <OpenPasswordDialog
-            open={isPasswordDialogOpen}
-            onOpenChange={handlePasswordDialogOpenChange}
-            onSubmit={handlePasswordSubmit}
-            error={passwordError}
-            isProcessing={isLoading}
-            onClearError={handlePasswordErrorClear}
-          />
-        </DownloadDialogProvider>
-      </AnnotationContextProvider>
+      <FormContextProvider>
+        <AnnotationContextProvider>
+          <DownloadDialogProvider fileName={file.name}>
+            <PdfEditorContent
+              file={file}
+              isFileLoaded={isFileLoaded}
+              pageCount={pageCount}
+              loadError={loadError}
+            />
+            <OpenPasswordDialog
+              open={isPasswordDialogOpen}
+              onOpenChange={handlePasswordDialogOpenChange}
+              onSubmit={handlePasswordSubmit}
+              error={passwordError}
+              isProcessing={isLoading}
+              onClearError={handlePasswordErrorClear}
+            />
+          </DownloadDialogProvider>
+        </AnnotationContextProvider>
+      </FormContextProvider>
     </PdfStateContextProvider>
   );
 };

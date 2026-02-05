@@ -560,6 +560,28 @@ export interface IPDFiumModule {
   _FPDFDOC_InitFormFillEnvironment_W(document: number, formInfoPtr: number): number;
   /** Exit form fill environment */
   _FPDFDOC_ExitFormFillEnvironment_W(hHandle: number): void;
+  /** Notify form fill after page load */
+  _FORM_OnAfterLoadPage_W?(page: number, hHandle: number): void;
+  /** Notify form fill before closing page */
+  _FORM_OnBeforeClosePage_W?(page: number, hHandle: number): void;
+  /** Left button down at page coordinate (user space) */
+  _FORM_OnLButtonDown_W?(
+    hHandle: number,
+    page: number,
+    modifier: number,
+    pageX: number,
+    pageY: number,
+  ): number;
+  /** Left button up at page coordinate (user space) */
+  _FORM_OnLButtonUp_W?(
+    hHandle: number,
+    page: number,
+    modifier: number,
+    pageX: number,
+    pageY: number,
+  ): number;
+  /** Commit the focused field value */
+  _FORM_ForceToKillFocus_W?(hHandle: number): number;
   /** Get form field name */
   _FPDFAnnot_GetFormFieldName_W(
     hHandle: number,

@@ -16,6 +16,7 @@
 #include "public/fpdf_edit.h"
 #include "public/fpdf_save.h"
 #include "public/fpdf_annot.h"
+#include "public/fpdf_formfill.h"
 #include "public/fpdf_progressive.h"
 
 // Platform interface stub for WASM - CFX_GEModule requires a platform implementation
@@ -715,6 +716,34 @@ FPDF_FORMHANDLE FPDFDOC_InitFormFillEnvironment_W(FPDF_DOCUMENT document,
 EMSCRIPTEN_KEEPALIVE
 void FPDFDOC_ExitFormFillEnvironment_W(FPDF_FORMHANDLE hHandle) {
     FPDFDOC_ExitFormFillEnvironment(hHandle);
+}
+
+// Form fill lifecycle / interaction
+EMSCRIPTEN_KEEPALIVE
+void FORM_OnAfterLoadPage_W(FPDF_PAGE page, FPDF_FORMHANDLE hHandle) {
+    FORM_OnAfterLoadPage(page, hHandle);
+}
+
+EMSCRIPTEN_KEEPALIVE
+void FORM_OnBeforeClosePage_W(FPDF_PAGE page, FPDF_FORMHANDLE hHandle) {
+    FORM_OnBeforeClosePage(page, hHandle);
+}
+
+EMSCRIPTEN_KEEPALIVE
+FPDF_BOOL FORM_OnLButtonDown_W(FPDF_FORMHANDLE hHandle, FPDF_PAGE page,
+                               int modifier, double page_x, double page_y) {
+    return FORM_OnLButtonDown(hHandle, page, modifier, page_x, page_y);
+}
+
+EMSCRIPTEN_KEEPALIVE
+FPDF_BOOL FORM_OnLButtonUp_W(FPDF_FORMHANDLE hHandle, FPDF_PAGE page,
+                             int modifier, double page_x, double page_y) {
+    return FORM_OnLButtonUp(hHandle, page, modifier, page_x, page_y);
+}
+
+EMSCRIPTEN_KEEPALIVE
+FPDF_BOOL FORM_ForceToKillFocus_W(FPDF_FORMHANDLE hHandle) {
+    return FORM_ForceToKillFocus(hHandle);
 }
 
 EMSCRIPTEN_KEEPALIVE
