@@ -12,6 +12,7 @@ const pdfiumWasmPath = path.resolve(__dirname, 'node_modules/@pdfviewer/pdfium-w
 
 // https://vite.dev/config/
 export default defineConfig({
+  base: process.env.GITHUB_PAGES ? '/PdfLite/' : '/',
   plugins: [
     react(),
     tailwindcss(),
