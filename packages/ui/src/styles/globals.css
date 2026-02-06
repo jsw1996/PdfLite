@@ -73,15 +73,15 @@
   --popover: oklch(0.16 0.015 270);
   --popover-foreground: oklch(0.95 0.01 270);
 
-  /* Primary - Brighter indigo in dark mode */
-  --primary: oklch(0.65 0.2 270);
+  /* Primary */
+  --primary: oklch(0.88 0.22 158.39);
   --primary-foreground: oklch(0.13 0.015 270);
 
   --secondary: oklch(0.2 0.015 270);
   --secondary-foreground: oklch(0.9 0.01 270);
 
   --muted: oklch(0.22 0.015 270);
-  --muted-foreground: oklch(0.6 0.02 270);
+  --muted-foreground: oklch(1 0 0 / 0.91);
 
   /* Accent - Emerald stays vibrant */
   --accent: oklch(0.75 0.17 160);
