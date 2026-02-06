@@ -55,7 +55,7 @@ export const PagePreview = React.memo(({ page }: IPagePreviewProps) => {
       tabIndex={0}
       aria-label={`Go to page ${displayPageNumber}`}
       className={`
-        cursor-pointer group flex flex-col items-center gap-2 rounded-xl p-2.5 
+        w-[70%] m-auto cursor-pointer group flex flex-col items-center gap-2 rounded-xl p-2.5
         transition-all duration-200
         ${isActive ? 'bg-primary/10 ring-2 ring-primary/30' : 'hover:bg-secondary/80'}
       `}
@@ -64,7 +64,7 @@ export const PagePreview = React.memo(({ page }: IPagePreviewProps) => {
         ref={containerRef}
         data-slot="page-preview-canvas-container"
         className={`
-          relative w-full bg-white dark:bg-slate-800 rounded-lg 
+          relative w-full mx-auto bg-white dark:bg-slate-800 rounded-md
           overflow-hidden
           shadow-md transition-all duration-200
           ${isActive ? 'shadow-primary/20 ring-2 ring-primary' : 'shadow-slate-200/50 dark:shadow-slate-900/50 group-hover:shadow-lg'}

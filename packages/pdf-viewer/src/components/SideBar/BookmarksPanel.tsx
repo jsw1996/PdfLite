@@ -3,6 +3,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { IUserBookmark } from '@pdfviewer/controller';
 import { Button } from '@pdfviewer/ui/components/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@pdfviewer/ui/components/dropdown-menu';
+import { Ellipsis } from 'lucide-react';
 
 interface IBookmarksPanelProps {
   storageKey: string;
@@ -84,33 +91,43 @@ export function BookmarksPanel({ storageKey, currentPage, onGoToPage }: IBookmar
       </div>
       <div className="flex-1 min-h-0 overflow-auto custom-scrollbar pb-3">
         {emptyState}
-        {bookmarks.map((bookmark) => (
-          <div key={bookmark.id} className="px-3 py-2">
-            <button
-              type="button"
-              className="w-full text-left text-sm text-foreground hover:text-foreground/80"
-              onClick={() => onGoToPage(bookmark.pageIndex)}
-            >
-              {bookmark.title}
-              <span className="ml-2 text-xs text-muted-foreground">
-                Page {bookmark.pageIndex + 1}
-              </span>
-            </button>
-            <div className="mt-1 flex gap-2">
+        {bookmarks.map((bookmark, index) => (
+          <div
+            key={bookmark.id}
+            className={`px-3 py-2 ${index < bookmarks.length - 1 ? 'border-b border-border' : ''}`}
+          >
+            <div className="flex items-start gap-2">
               <button
                 type="button"
-                className="text-xs text-muted-foreground hover:text-foreground"
-                onClick={() => handleRename(bookmark)}
+                className="flex-1 text-left text-sm text-foreground hover:text-foreground/80"
+                onClick={() => onGoToPage(bookmark.pageIndex)}
               >
-                Rename
+                {bookmark.title}
+                <span className="ml-2 text-xs text-muted-foreground">
+                  Page {bookmark.pageIndex + 1}
+                </span>
               </button>
-              <button
-                type="button"
-                className="text-xs text-destructive hover:text-destructive/80"
-                onClick={() => handleDelete(bookmark)}
-              >
-                Delete
-              </button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    className="shrink-0 cursor-pointer"
+                    aria-label="Bookmark actions"
+                  >
+                    <Ellipsis className="size-3.5" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onSelect={() => handleRename(bookmark)}>
+                    Rename
+                  </DropdownMenuItem>
+                  <DropdownMenuItem variant="destructive" onSelect={() => handleDelete(bookmark)}>
+                    Delete
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </div>
         ))}

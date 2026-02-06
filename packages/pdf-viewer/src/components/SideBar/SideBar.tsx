@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { Sidebar, SidebarContent } from '@pdfviewer/ui/components/sidebar';
+import { ButtonGroup } from '@pdfviewer/ui/components/button-group';
+import { Button } from '@pdfviewer/ui/components/button';
 import { usePdfController } from '@/providers/PdfControllerContextProvider';
 import { PagePreview } from './PagePreview';
 import { OutlinePanel } from './OutlinePanel';
@@ -51,7 +53,7 @@ export function AppSidebar({ file, isFileLoaded }: IAppSidebarProps) {
 
   const itemContent = useCallback(
     (index: number) => (
-      <div className="px-3 pb-0.5">
+      <div className="px-3 pb-0.5 pt-0.5">
         <PagePreview page={index} />
       </div>
     ),
@@ -62,40 +64,37 @@ export function AppSidebar({ file, isFileLoaded }: IAppSidebarProps) {
     <Sidebar className="border-r-0">
       <SidebarContent className="bg-sidebar/80 dark:bg-sidebar/70 backdrop-blur-xl">
         <div className="flex flex-col h-full">
-          <div className="flex items-center gap-1 px-3 pt-3">
-            <button
-              type="button"
-              className={`text-xs px-2.5 py-1 rounded-md ${
-                activeTab === 'pages'
-                  ? 'bg-primary text-primary-foreground'
-                  : 'text-muted-foreground hover:text-foreground'
-              }`}
-              onClick={() => setActiveTab('pages')}
-            >
-              Pages
-            </button>
-            <button
-              type="button"
-              className={`text-xs px-2.5 py-1 rounded-md ${
-                activeTab === 'outline'
-                  ? 'bg-primary text-primary-foreground'
-                  : 'text-muted-foreground hover:text-foreground'
-              }`}
-              onClick={() => setActiveTab('outline')}
-            >
-              Outline
-            </button>
-            <button
-              type="button"
-              className={`text-xs px-2.5 py-1 rounded-md ${
-                activeTab === 'bookmarks'
-                  ? 'bg-primary text-primary-foreground'
-                  : 'text-muted-foreground hover:text-foreground'
-              }`}
-              onClick={() => setActiveTab('bookmarks')}
-            >
-              Bookmarks
-            </button>
+          <div className="px-3 pt-3">
+            <ButtonGroup className="mb-4 w-full">
+              <Button
+                type="button"
+                size="sm"
+                variant={activeTab === 'pages' ? 'default' : 'outline'}
+                className={`flex-1 ${activeTab === 'pages' ? '' : 'hover:bg-muted hover:text-foreground'}`}
+                onClick={() => setActiveTab('pages')}
+              >
+                Pages
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={activeTab === 'outline' ? 'default' : 'outline'}
+                className={`flex-1 ${activeTab === 'outline' ? '' : 'hover:bg-muted hover:text-foreground'}`}
+                onClick={() => setActiveTab('outline')}
+              >
+                Outline
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={activeTab === 'bookmarks' ? 'default' : 'outline'}
+                className={`flex-1 ${activeTab === 'bookmarks' ? '' : 'hover:bg-muted hover:text-foreground'}`}
+                onClick={() => setActiveTab('bookmarks')}
+              >
+                Bookmarks
+              </Button>
+            </ButtonGroup>
+            <div className="my-4 h-px w-full bg-border" />
           </div>
           <div className="flex-1 min-h-0">
             {activeTab === 'pages' && (
