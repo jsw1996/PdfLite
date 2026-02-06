@@ -14,7 +14,7 @@ export const VIEWER_CONFIG = {
   /** Default zoom scale */
   DEFAULT_SCALE: 1.0,
   /** Zoom step when using mouse wheel */
-  WHEEL_ZOOM_STEP: 0.25,
+  WHEEL_ZOOM_STEP: 0.1,
   /** Throttle time for wheel zoom (ms) */
   WHEEL_THROTTLE_MS: 60,
   /** Delay before committing zoom layout after wheel ends (ms) */

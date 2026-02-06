@@ -194,8 +194,7 @@ export const Viewer: React.FC<IViewerProps> = ({ pageCount }) => {
       // Clamp Y so first page sticks to top:
       // - Zoom in (ratio > 1): translateY is negative, clamp to 0
       // - Zoom out (ratio < 1): if already at top, don't translate
-      const translateY =
-        ratio >= 1 ? Math.max(0, rawTranslateY) : el.scrollTop === 0 ? 0 : rawTranslateY;
+      const translateY = ratio >= 1 ? rawTranslateY : el.scrollTop === 0 ? 0 : rawTranslateY;
       setPreviewTransform(`translate(${translateX}px, ${translateY}px) scale(${ratio})`);
     };
 
