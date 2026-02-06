@@ -171,7 +171,10 @@ export const SearchBar = () => {
         />
         {value && (
           <span className="absolute inset-y-0 right-0 flex items-center pr-2 text-muted-foreground">
-            <Separator orientation="vertical" className="mx-2 !h-5 bg-border/50" />
+            <Separator
+              orientation="vertical"
+              className="mx-2 !h-5 bg-border/50 dark:bg-foreground/25"
+            />
             <span className="px-1 text-xs font-medium tabular-nums">
               {matches.length > 0 ? `${currentIndex + 1}/${matches.length}` : '0/0'}
             </span>

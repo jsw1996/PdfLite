@@ -11,7 +11,7 @@ interface IHeaderProps {
 
 export const Header: React.FC<IHeaderProps> = ({ fileName, centerButtons, rightButtons }) => {
   return (
-    <div className="sticky top-0 z-50 bg-background/80 backdrop-blur-xl border-b border-border/50 px-4 py-2">
+    <div className="sticky top-0 z-50 bg-background/80 dark:bg-background backdrop-blur-xl border-b border-border/50 dark:border-border px-4 py-2">
       <div className="flex items-center justify-between gap-4">
         {/* Left: File info */}
         <div className="flex items-center gap-3 flex-1 min-w-0">
