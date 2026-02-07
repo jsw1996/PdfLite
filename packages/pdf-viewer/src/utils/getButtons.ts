@@ -5,7 +5,6 @@ import { HighlightButton } from '../components/ToolButtons/HighlightButton';
 import { DrawButton } from '../components/ToolButtons/DrawButton';
 import { AddTextButton } from '../components/ToolButtons/AddTextButton';
 import { SignatureButton } from '../components/ToolButtons/SignatureButton';
-import { useSidebarTriggerButton } from '@/components/ToolButtons/SidebarTriggerButton';
 import { PrintButton } from '@/components/ToolButtons/PrintButton';
 import { useDownloadButton } from '@/components/ToolButtons/DownloadButton';
 import { useThemeToggleButton } from '@/components/ToolButtons/ThemeToggleButton';
@@ -15,10 +14,8 @@ import { useThemeToggleButton } from '@/components/ToolButtons/ThemeToggleButton
  * Named with 'use' prefix as it uses hooks internally (useSidebarTriggerButton).
  */
 export const useButtons = (): IToolButton[] => {
-  const sidebarTriggerButton = useSidebarTriggerButton();
   return [
     // Group 0
-    sidebarTriggerButton,
     PageViewButton(),
     SelectButton(),
     // Group 1
