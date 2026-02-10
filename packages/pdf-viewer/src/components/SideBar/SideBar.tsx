@@ -136,7 +136,7 @@ export function AppSidebar({ file, isFileLoaded }: IAppSidebarProps) {
             </Button>
           </div>
           {!isCollapsed && (
-            <div className="flex-1 min-h-0">
+            <div className="flex-1 min-h-0 w-0">
               {activeTab === 'pages' && (
                 <Virtuoso
                   ref={virtuosoRef}
