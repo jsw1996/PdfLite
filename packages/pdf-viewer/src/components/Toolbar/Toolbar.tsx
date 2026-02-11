@@ -1,45 +1,44 @@
+import type { AnnotationType } from '../../annotations';
 import type { IToolButton } from '../ToolButtons/ToolButton.type';
 import { ToolGroup } from './ToolGroup';
 import { Separator } from '@pdfviewer/ui/components/separator';
 import { useCallback, useMemo } from 'react';
 import { useAnnotation } from '../../providers/AnnotationContextProvider';
-import { DrawButtonId } from '../ToolButtons/DrawButton';
-import { HighlightButtonId } from '../ToolButtons/HighlightButton';
+import { EditTextButtonId } from '../ToolButtons/EditTextButton';
 import { cn } from '@pdfviewer/ui/lib/utils';
 
+const ANNOTATION_TOOL_IDS: Record<string, AnnotationType> = {
+  draw: 'draw',
+  highlight: 'highlight',
+  text: 'text',
+  signature: 'signature',
+};
+
 export interface IToobarProps {
-  // Define any props needed for the Toolbar component
   buttons: IToolButton[];
   boardered?: boolean;
 }
 
-export const ToolBar: React.FC<IToobarProps> = (props: IToobarProps) => {
-  const { buttons, boardered } = props;
-
-  const { selectedTool, setSelectedTool } = useAnnotation();
+export function ToolBar({ buttons, boardered }: IToobarProps) {
+  const { selectedTool, setSelectedTool, isEditMode, setIsEditMode } = useAnnotation();
 
   const handleActivate = useCallback(
     (toolId: string | null) => {
-      if (toolId === DrawButtonId) {
-        setSelectedTool(selectedTool === 'draw' ? null : 'draw');
+      if (toolId === EditTextButtonId) {
+        setIsEditMode(!isEditMode);
         return;
       }
-      if (toolId === HighlightButtonId) {
-        setSelectedTool(selectedTool === 'highlight' ? null : 'highlight');
+
+      const annotationType = toolId ? ANNOTATION_TOOL_IDS[toolId] : undefined;
+      if (annotationType) {
+        setSelectedTool(selectedTool === annotationType ? null : annotationType);
         return;
       }
-      if (toolId === 'text') {
-        setSelectedTool(selectedTool === 'text' ? null : 'text');
-        return;
-      }
-      if (toolId === 'signature') {
-        setSelectedTool(selectedTool === 'signature' ? null : 'signature');
-        return;
-      }
-      // Other tools don't enter annotation mode
+
       setSelectedTool(null);
+      if (isEditMode) setIsEditMode(false);
     },
-    [selectedTool, setSelectedTool],
+    [isEditMode, selectedTool, setIsEditMode, setSelectedTool],
   );
 
   const classNames = cn(
@@ -49,14 +48,12 @@ export const ToolBar: React.FC<IToobarProps> = (props: IToobarProps) => {
       : 'bg-transparent',
   );
 
-  // Memoize buttonsByGroup to avoid recomputing on every render
   const buttonsByGroup = useMemo(() => {
-    return buttons.reduce((groups: IToolButton[][], button) => {
-      const groupIndex = button.groupIndex;
-      if (!groups[groupIndex]) {
-        groups[groupIndex] = [];
+    return buttons.reduce<IToolButton[][]>((groups, button) => {
+      if (!groups[button.groupIndex]) {
+        groups[button.groupIndex] = [];
       }
-      groups[groupIndex].push(button);
+      groups[button.groupIndex].push(button);
       return groups;
     }, []);
   }, [buttons]);
@@ -67,7 +64,7 @@ export const ToolBar: React.FC<IToobarProps> = (props: IToobarProps) => {
         <div key={index} className="flex flex-row items-center">
           <ToolGroup
             buttons={groupButtons}
-            activeToolId={selectedTool}
+            activeToolId={isEditMode ? EditTextButtonId : selectedTool}
             onActivate={handleActivate}
           />
           {index < buttonsByGroup.length - 1 && (
@@ -80,4 +77,4 @@ export const ToolBar: React.FC<IToobarProps> = (props: IToobarProps) => {
       ))}
     </div>
   );
-};
+}

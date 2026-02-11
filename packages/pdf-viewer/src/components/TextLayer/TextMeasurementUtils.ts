@@ -7,7 +7,8 @@ let context: CanvasRenderingContext2D | null = null;
 const widthCache = new Map<string, number>();
 
 function normalizeFontFamily(fontFamily?: string): string {
-  const family = (fontFamily ?? '').trim();
+  // Strip null bytes that PDFium sometimes includes in font names
+  const family = (fontFamily ?? '').replace(/\0/g, '').trim();
   if (!family) return 'sans-serif';
   // If user already provides fallbacks, keep it.
   if (family.includes(',')) return family;
@@ -60,19 +61,4 @@ export function measureTextWidthAtBaseSize(text: string, fontFamily?: string): n
   widthCache.set(cacheKey, width);
 
   return width;
-}
-
-/**
- * Measures the width of a given text string with the provided font.
- * Uses scale-independent base measurement and linear scaling for better cache efficiency.
- *
- * @deprecated Use measureTextWidthAtBaseSize and scale the result manually for better performance
- */
-export function measureTextWidth(text: string, fontSize: string, fontFamily?: string): number {
-  // Extract numeric font size for scaling
-  const fontSizeNum = parseFloat(fontSize) || 1;
-
-  // Get base width at 1px and scale it
-  const baseWidth = measureTextWidthAtBaseSize(text, fontFamily);
-  return baseWidth * fontSizeNum;
 }

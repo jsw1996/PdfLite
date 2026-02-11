@@ -9,11 +9,22 @@ import {
 import { usePdfState } from './PdfStateContextProvider';
 import { usePdfController } from './PdfControllerContextProvider';
 
+export interface IEditSessionData {
+  /** Editor innerHTML saved across virtualized unmount/remount cycles. Key: `${pageIndex}:${paragraphIndex}` */
+  savedEditorHtml: Map<string, string>;
+  /** Original per-line CSS color strings saved before FPDFPage_GenerateContent corrupts them. Key: `${pageIndex}:${paragraphIndex}` */
+  savedLineColors: Map<string, string[]>;
+}
+
 export interface IAnnotationContextValue {
   /** Currently selected annotation tool */
   selectedTool: AnnotationType | null;
   /** Set the current annotation tool */
   setSelectedTool: (tool: AnnotationType | null) => void;
+  /** Whether inline text-editing mode is active */
+  isEditMode: boolean;
+  /** Toggle inline text-editing mode */
+  setIsEditMode: (mode: boolean) => void;
   /** Add an annotation (will be normalized for scale-independent storage) */
   addAnnotation: (annotation: IAnnotation) => void;
   /** All annotations in the stack */
@@ -30,6 +41,10 @@ export interface IAnnotationContextValue {
   updateAnnotation: (id: string, updates: Partial<IAnnotation>) => void;
   /** Version counter that increments when page content changes (e.g., text flattened) */
   renderVersion: number;
+  /** Force a canvas re-render after direct page-content edits */
+  bumpRenderVersion: () => void;
+  /** Mutable session data for text-editing mode, scoped to the current document */
+  editSessionData: IEditSessionData;
 }
 
 const AnnotationContext = createContext<IAnnotationContextValue | null>(null);
@@ -41,13 +56,42 @@ export function useAnnotation(): IAnnotationContextValue {
 }
 
 export function AnnotationContextProvider({ children }: { children: React.ReactNode }) {
-  const [selectedTool, setSelectedTool] = useState<AnnotationType | null>(null);
+  const [selectedTool, _setSelectedTool] = useState<AnnotationType | null>(null);
+  const [isEditMode, _setIsEditMode] = useState(false);
   const [annotationStack, setAnnotationStack] = useState<IAnnotation[]>([]);
   const [renderVersion, setRenderVersion] = useState(0);
   const scale = usePdfState().scale;
   const { controller } = usePdfController();
 
-  // Pre-compute a Map of annotations by pageIndex for efficient lookups
+  // Mutable session data for text-editing mode. Created once via lazy
+  // initializer so mutations don't trigger React re-renders (we never call
+  // the setter). Using useState instead of useRef avoids "ref access during
+  // render" errors from the React Compiler.
+  const [editSessionData] = useState<IEditSessionData>(() => ({
+    savedEditorHtml: new Map(),
+    savedLineColors: new Map(),
+  }));
+
+  const setSelectedTool = useCallback((tool: AnnotationType | null) => {
+    _setSelectedTool(tool);
+    if (tool) _setIsEditMode(false);
+  }, []);
+
+  const setIsEditMode = useCallback(
+    (mode: boolean) => {
+      _setIsEditMode(mode);
+      if (mode) {
+        _setSelectedTool(null);
+      } else {
+        // Only clear transient editor HTML — preserve savedLineColors across
+        // sessions because FPDFPage_GenerateContent corrupts the content stream's
+        // color data, making FPDFText_GetFillColor unreliable for edited objects.
+        editSessionData.savedEditorHtml.clear();
+      }
+    },
+    [editSessionData],
+  );
+
   const annotationsByPage = useMemo(() => {
     const map = new Map<number, IAnnotation[]>();
     for (const annotation of annotationStack) {
@@ -99,7 +143,6 @@ export function AnnotationContextProvider({ children }: { children: React.ReactN
     [scale],
   );
 
-  // Memoized function that uses the pre-computed map for O(1) lookup
   const getAnnotationsForPage = useCallback(
     (pageIndex: number) => {
       const pageAnnotations = annotationsByPage.get(pageIndex) ?? [];
@@ -122,7 +165,7 @@ export function AnnotationContextProvider({ children }: { children: React.ReactN
     [],
   );
 
-  const commitAnnotationsCallback = useCallback(() => {
+  const commitAnnotations = useCallback(() => {
     // Check if any flattened annotations exist (text/signature)
     const hasFlattenedAnnotations = annotationStack.some(
       (a) => a.source === 'overlay' && (a.type === 'text' || a.type === 'signature'),
@@ -151,29 +194,42 @@ export function AnnotationContextProvider({ children }: { children: React.ReactN
     }
   }, [annotationStack, controller]);
 
+  const bumpRenderVersion = useCallback(() => {
+    setRenderVersion((v) => v + 1);
+  }, []);
+
   const value = useMemo<IAnnotationContextValue>(
     () => ({
       selectedTool,
       setSelectedTool,
+      isEditMode,
+      setIsEditMode,
       addAnnotation,
       getAnnotationsForPage,
       setNativeAnnotationsForPage,
       annotationStack,
       popAnnotation,
-      commitAnnotations: commitAnnotationsCallback,
+      commitAnnotations,
       updateAnnotation,
       renderVersion,
+      bumpRenderVersion,
+      editSessionData,
     }),
     [
       addAnnotation,
       getAnnotationsForPage,
       selectedTool,
+      setSelectedTool,
+      isEditMode,
+      setIsEditMode,
       setNativeAnnotationsForPage,
       annotationStack,
       popAnnotation,
       renderVersion,
-      commitAnnotationsCallback,
+      bumpRenderVersion,
+      commitAnnotations,
       updateAnnotation,
+      editSessionData,
     ],
   );
 

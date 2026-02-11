@@ -894,6 +894,47 @@ FPDF_BOOL FPDFText_SetText_W(FPDF_PAGEOBJECT text_object, FPDF_WIDESTRING text) 
     return FPDFText_SetText(text_object, text);
 }
 
+// Count page objects on a page
+EMSCRIPTEN_KEEPALIVE
+int FPDFPage_CountObjects_W(FPDF_PAGE page) {
+    return FPDFPage_CountObjects(page);
+}
+
+// Get page object at a given index
+EMSCRIPTEN_KEEPALIVE
+FPDF_PAGEOBJECT FPDFPage_GetObject_W(FPDF_PAGE page, int index) {
+    return FPDFPage_GetObject(page, index);
+}
+
+// Remove a page object from a page
+EMSCRIPTEN_KEEPALIVE
+FPDF_BOOL FPDFPage_RemoveObject_W(FPDF_PAGE page, FPDF_PAGEOBJECT page_object) {
+    return FPDFPage_RemoveObject(page, page_object);
+}
+
+// Get page object type (text/path/image/form/etc.)
+EMSCRIPTEN_KEEPALIVE
+int FPDFPageObj_GetType_W(FPDF_PAGEOBJECT page_object) {
+    return FPDFPageObj_GetType(page_object);
+}
+
+// Get UTF-16 text from a text object
+EMSCRIPTEN_KEEPALIVE
+unsigned long FPDFTextObj_GetText_W(FPDF_PAGEOBJECT text_object,
+                                    FPDF_TEXTPAGE text_page,
+                                    FPDF_WCHAR* buffer,
+                                    unsigned long length) {
+    return FPDFTextObj_GetText(text_object, text_page, buffer, length);
+}
+
+// Get the fill color of a page object (RGBA, 0-255)
+EMSCRIPTEN_KEEPALIVE
+FPDF_BOOL FPDFPageObj_GetFillColor_W(FPDF_PAGEOBJECT page_object,
+                                      unsigned int* R, unsigned int* G,
+                                      unsigned int* B, unsigned int* A) {
+    return FPDFPageObj_GetFillColor(page_object, R, G, B, A);
+}
+
 // Set the fill color for a page object (RGBA, 0-255)
 EMSCRIPTEN_KEEPALIVE
 FPDF_BOOL FPDFPageObj_SetFillColor_W(FPDF_PAGEOBJECT page_object,
@@ -968,6 +1009,30 @@ FPDF_BOOL FPDFTextObj_SetTextRenderMode_W(FPDF_PAGEOBJECT text_object, int rende
 EMSCRIPTEN_KEEPALIVE
 int FPDFTextObj_GetTextRenderMode_W(FPDF_PAGEOBJECT text_object) {
     return static_cast<int>(FPDFTextObj_GetTextRenderMode(text_object));
+}
+
+// ============================================================================
+// Text Object Font Inspection API
+// ============================================================================
+
+// Get font handle from a text object (returns 0 on failure)
+EMSCRIPTEN_KEEPALIVE
+FPDF_FONT FPDFTextObj_GetFont_W(FPDF_PAGEOBJECT text_object) {
+    return FPDFTextObj_GetFont(text_object);
+}
+
+// Get font size from a text object. Returns 1 on success, 0 on failure.
+EMSCRIPTEN_KEEPALIVE
+FPDF_BOOL FPDFTextObj_GetFontSize_W(FPDF_PAGEOBJECT text_object, float* size) {
+    return FPDFTextObj_GetFontSize(text_object, size);
+}
+
+// Get base font name. Returns number of bytes needed (including NUL).
+// Pass buffer=NULL, length=0 to query the required size first.
+// Note: FPDFFont_GetFontName was removed; FPDFFont_GetBaseFontName is the replacement.
+EMSCRIPTEN_KEEPALIVE
+unsigned long FPDFFont_GetFontName_W(FPDF_FONT font, char* buffer, unsigned long length) {
+    return FPDFFont_GetBaseFontName(font, buffer, length);
 }
 
 // ============================================================================

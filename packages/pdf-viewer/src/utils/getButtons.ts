@@ -5,15 +5,13 @@ import { HighlightButton } from '../components/ToolButtons/HighlightButton';
 import { DrawButton } from '../components/ToolButtons/DrawButton';
 import { AddTextButton } from '../components/ToolButtons/AddTextButton';
 import { SignatureButton } from '../components/ToolButtons/SignatureButton';
+import { EditTextButton } from '../components/ToolButtons/EditTextButton';
 import { useSidebarTriggerButton } from '@/components/ToolButtons/SidebarTriggerButton';
 import { PrintButton } from '@/components/ToolButtons/PrintButton';
 import { useDownloadButton } from '@/components/ToolButtons/DownloadButton';
 import { useThemeToggleButton } from '@/components/ToolButtons/ThemeToggleButton';
 
-/**
- * Custom hook that returns the center toolbar buttons.
- * Named with 'use' prefix as it uses hooks internally (useSidebarTriggerButton).
- */
+/** Returns the center toolbar buttons. */
 export const useButtons = (): IToolButton[] => {
   const sidebarTriggerButton = useSidebarTriggerButton();
   return [
@@ -26,25 +24,13 @@ export const useButtons = (): IToolButton[] => {
     DrawButton(),
     AddTextButton(),
     SignatureButton(),
+    EditTextButton(),
   ];
 };
 
-/**
- * @deprecated Use useButtons instead. This exists for backward compatibility.
- */
-export const getButtons = useButtons;
-
-/**
- * Custom hook that returns the right toolbar buttons.
- * Named with 'use' prefix as it uses hooks internally (useThemeToggleButton).
- */
+/** Returns the right toolbar buttons. */
 export const useRightButtons = (): IToolButton[] => {
   const themeToggleButton = useThemeToggleButton();
   const downloadButton = useDownloadButton();
   return [downloadButton, PrintButton(), themeToggleButton];
 };
-
-/**
- * @deprecated Use useRightButtons instead. This exists for backward compatibility.
- */
-export const getRightButtons = useRightButtons;

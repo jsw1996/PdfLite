@@ -22,12 +22,14 @@ import { RENDER_CONFIG } from '@/utils/config';
 export interface ICanvasLayerProps extends React.ComponentProps<'canvas'> {
   pageIndex?: number;
   scale?: number;
+  hidden?: boolean;
   onCanvasReady?: (canvas: HTMLCanvasElement) => void;
 }
 
 export const CanvasLayer: React.FC<ICanvasLayerProps> = ({
   pageIndex = 0,
   scale = 1.0,
+  hidden = false,
   onCanvasReady,
   ...props
 }) => {
@@ -174,6 +176,7 @@ export const CanvasLayer: React.FC<ICanvasLayerProps> = ({
           display: 'block',
           imageRendering: 'crisp-edges',
           willChange: 'transform',
+          visibility: hidden ? 'hidden' : undefined,
         }}
         {...props}
       />

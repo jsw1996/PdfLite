@@ -686,6 +686,44 @@ export interface IPDFiumModule {
    */
   _FPDFText_SetText_W(textObject: number, textPtr: number): number;
   /**
+   * Count page objects on a page.
+   */
+  _FPDFPage_CountObjects_W(page: number): number;
+  /**
+   * Get a page object at index from a page.
+   */
+  _FPDFPage_GetObject_W(page: number, index: number): number;
+  /**
+   * Remove a page object from a page.
+   */
+  _FPDFPage_RemoveObject_W(page: number, pageObject: number): number;
+  /**
+   * Get page object type:
+   * 0=unknown, 1=text, 2=path, 3=image, 4=shading, 5=form.
+   */
+  _FPDFPageObj_GetType_W(pageObject: number): number;
+  /**
+   * Read UTF-16LE text from a text object.
+   * @returns Number of UTF-16 code units written (including terminating NUL) on success.
+   */
+  _FPDFTextObj_GetText_W(
+    textObject: number,
+    textPage: number,
+    buffer: number,
+    length: number,
+  ): number;
+  /**
+   * Get the fill color of a page object (RGBA, 0-255).
+   * Returns 1 on success, 0 on failure. Writes to the provided pointers.
+   */
+  _FPDFPageObj_GetFillColor_W(
+    pageObject: number,
+    rPtr: number,
+    gPtr: number,
+    bPtr: number,
+    aPtr: number,
+  ): number;
+  /**
    * Set the fill color for a page object (RGBA, 0-255)
    */
   _FPDFPageObj_SetFillColor_W(
@@ -773,6 +811,16 @@ export interface IPDFiumModule {
    * Get text rendering mode
    */
   _FPDFTextObj_GetTextRenderMode_W(textObject: number): number;
+
+  // ============================================================================
+  // Text Object Font Inspection API
+  // ============================================================================
+  /** Get font handle from a text object. Returns 0 on failure. */
+  _FPDFTextObj_GetFont_W(textObject: number): number;
+  /** Get font size. Writes size to the float pointer. Returns 1 on success. */
+  _FPDFTextObj_GetFontSize_W(textObject: number, sizePtr: number): number;
+  /** Get font name. Pass buffer=0, length=0 to query required size. Returns byte count including NUL. */
+  _FPDFFont_GetFontName_W(font: number, buffer: number, length: number): number;
 
   // ============================================================================
   // Page Object Manipulation API - Insert objects directly into page content

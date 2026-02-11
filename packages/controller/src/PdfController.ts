@@ -23,6 +23,15 @@ const FPDF_RENDER_FLAGS = {
   DEFAULT: 0x01 | 0x02, // ANNOT + LCD_TEXT
 };
 
+const FPDF_PAGE_OBJECT_TYPE = {
+  UNKNOWN: 0,
+  TEXT: 1,
+  PATH: 2,
+  IMAGE: 3,
+  SHADING: 4,
+  FORM: 5,
+} as const;
+
 const FORM_FIELD_TYPE_MAP: Record<number, FormFieldType> = {
   1: 'pushbutton',
   2: 'checkbox',
@@ -91,6 +100,12 @@ export interface ITextRect {
   font: {
     family: string;
     size: number;
+    color: {
+      r: number;
+      g: number;
+      b: number;
+      a: number;
+    };
   };
 }
 
@@ -100,6 +115,29 @@ export interface IPageTextContent {
   pageWidth: number;
   pageHeight: number;
   textRects: ITextRect[];
+}
+
+/** Represents a flattened text object directly stored in page content. */
+export interface IEditableTextObject {
+  /** Index in FPDFPage object list. Use this index for update operations. */
+  objectIndex: number;
+  /** Current UTF-16 text content (best-effort). */
+  content: string;
+  /** Rect in canvas/device coordinates at the requested scale. */
+  rect: { left: number; top: number; width: number; height: number };
+}
+
+export interface IReflowLineUpdate {
+  /** Text content for this line */
+  text: string;
+  /** Fill color as RGBA 0-255 values */
+  color: { r: number; g: number; b: number; a: number };
+}
+
+/** Result returned by text-editing operations */
+export interface ITextEditResult {
+  /** True when the original font couldn't be preserved and a fallback (Helvetica) was used */
+  usedFallbackFont: boolean;
 }
 
 export interface ISearchResult {
@@ -198,6 +236,27 @@ export interface IPdfController {
   getPageCount(): number;
   getOutline(): IPdfOutlineNode[];
   getPageTextContent(pageIndex: number): IPageTextContent | null;
+  listEditableTextObjects(pageIndex: number, opts: { scale: number }): IEditableTextObject[];
+  updateEditableTextObjects(
+    pageIndex: number,
+    opts: { updates: { objectIndex: number; text: string }[] },
+  ): ITextEditResult;
+  updateEditableTextObject(
+    pageIndex: number,
+    opts: { objectIndex: number; text: string },
+  ): ITextEditResult;
+  reflowEditableTextObjects(
+    pageIndex: number,
+    opts: {
+      referenceObjectIndex: number;
+      lines: IReflowLineUpdate[];
+      existingObjectIndices: number[];
+      scale: number;
+      paragraphRect: { left: number; top: number; width: number; height: number };
+      lineHeightDevicePx: number;
+    },
+  ): ITextEditResult;
+  releaseEditPages(): void;
   destroy(): void;
   setFontMap(map: Record<string, string>): void;
   searchText(text: string, opts?: { scale?: number }): ISearchResult[];
@@ -225,6 +284,29 @@ export class PdfController implements IPdfController {
   private static utf16Decoder = new TextDecoder('utf-16le');
   private formHandle: number | null = null;
   private formInfoPtr: number | null = null;
+
+  /**
+   * Page pointers kept alive so in-memory text edits (via FPDFText_SetText)
+   * survive between updateEditableTextObjects() and the next renderPdf() call.
+   * FPDFText_SetText modifies the page object in memory, but
+   * FPDFPage_GenerateContent does not always persist changes for pre-existing
+   * objects. Caching the page pointer ensures renderPdf renders from the
+   * modified in-memory page.
+   */
+  private editPageCache = new Map<number, number>();
+  /**
+   * Pages that have been through FPDFPage_GenerateContent. The text-page parser
+   * (FPDFText_GetRect etc.) returns corrupted rects after GenerateContent, so
+   * these pages must always use the page-object extraction path. This set
+   * persists after releaseEditPages() clears the page-pointer cache — it is
+   * only cleared when a new document is loaded.
+   */
+  private generatedPages = new Set<number>();
+  /**
+   * Some PDFs trap on FPDFText_SetText when mutating existing page text objects.
+   * For those pages we switch to replacement mode (remove old object, insert new text object).
+   */
+  private editPageReplaceOnly = new Set<number>();
   private static toImagePdfium(pdfium: IPDFiumModule): IPDFiumModule & {
     _FPDFImageObj_SetBitmap_W: (
       pagesPtr: number,
@@ -358,6 +440,81 @@ export class PdfController implements IPdfController {
     } finally {
       pdfium._free(bufPtr);
     }
+  }
+
+  /** Read UTF-16 text from a text page object. Returns empty string on failure. */
+  private readTextObjectString(
+    pdfium: IPDFiumModule & {
+      _FPDFTextObj_GetText_W: (
+        textObject: number,
+        textPage: number,
+        buffer: number,
+        length: number,
+      ) => number;
+    },
+    textObjectPtr: number,
+    textPagePtr: number,
+  ): string {
+    const utf16Len = pdfium._FPDFTextObj_GetText_W(textObjectPtr, textPagePtr, 0, 0);
+    if (utf16Len <= 1) return '';
+    const bufferBytes = utf16Len * 2;
+    const textBuffer = pdfium._malloc(bufferBytes);
+    try {
+      const written = pdfium._FPDFTextObj_GetText_W(
+        textObjectPtr,
+        textPagePtr,
+        textBuffer,
+        utf16Len,
+      );
+      const maxBytes = Math.max(2, (written > 0 ? written : utf16Len) * 2);
+      return this.readUtf16Z(textBuffer, maxBytes).replace(/\0+$/, '');
+    } finally {
+      pdfium._free(textBuffer);
+    }
+  }
+
+  private readTextObjectFontInfo(
+    pdfium: IPDFiumModule,
+    textObjectPtr: number,
+  ): { name: string; size: number } {
+    let name = '(unknown)';
+    let size = 0;
+    const p = pdfium as unknown as Record<string, unknown>;
+    try {
+      if (typeof p._FPDFTextObj_GetFont_W !== 'function') return { name, size };
+      const fontHandle = (p._FPDFTextObj_GetFont_W as (obj: number) => number)(textObjectPtr);
+      if (fontHandle && typeof p._FPDFFont_GetFontName_W === 'function') {
+        const getFontName = p._FPDFFont_GetFontName_W as (
+          f: number,
+          b: number,
+          l: number,
+        ) => number;
+        const needed = getFontName(fontHandle, 0, 0);
+        if (needed > 0) {
+          const buf = pdfium._malloc(needed);
+          try {
+            getFontName(fontHandle, buf, needed);
+            name = PdfController.utf8Decoder.decode(pdfium.HEAPU8.subarray(buf, buf + needed - 1));
+          } finally {
+            pdfium._free(buf);
+          }
+        }
+      }
+      if (typeof p._FPDFTextObj_GetFontSize_W === 'function') {
+        const getFontSize = p._FPDFTextObj_GetFontSize_W as (o: number, p: number) => number;
+        const sizePtr = pdfium._malloc(4);
+        try {
+          if (getFontSize(textObjectPtr, sizePtr)) {
+            size = pdfium.getValue(sizePtr, 'float');
+          }
+        } finally {
+          pdfium._free(sizePtr);
+        }
+      }
+    } catch {
+      // Font APIs may not be available in current WASM build
+    }
+    return { name, size: Math.round(size * 100) / 100 };
   }
 
   private static getLoadErrorMessage(code: number): string {
@@ -522,6 +679,9 @@ export class PdfController implements IPdfController {
 
   private closeCurrentDocument(): void {
     if (!this.pdfiumModule) return;
+    this.releaseEditPages();
+    this.editPageReplaceOnly.clear();
+    this.generatedPages.clear();
     this.closeFormFillEnvironment();
     if (this.docPtr) {
       this.pdfiumModule._PDFium_CloseDocument(this.docPtr);
@@ -531,6 +691,18 @@ export class PdfController implements IPdfController {
       this.pdfiumModule._free(this.dataPtr);
       this.dataPtr = null;
     }
+  }
+
+  /**
+   * Close all cached edit-mode page pointers.
+   * Call this when exiting edit mode after the final canvas render completes.
+   */
+  public releaseEditPages(): void {
+    if (!this.pdfiumModule) return;
+    for (const [, ptr] of this.editPageCache) {
+      this.pdfiumModule._PDFium_ClosePage(ptr);
+    }
+    this.editPageCache.clear();
   }
 
   public destroy(): void {
@@ -697,12 +869,13 @@ export class PdfController implements IPdfController {
       throw new DOMException('Render aborted', 'AbortError');
     }
 
-    // Load the page
-    const pagePtr = pdfium._PDFium_LoadPage(this.docPtr, pageIndex);
+    // Use cached edit-mode page pointer if available (has in-memory text edits),
+    // otherwise load a fresh page.
+    const cachedEditPage = this.editPageCache.get(pageIndex);
+    const pagePtr = cachedEditPage ?? pdfium._PDFium_LoadPage(this.docPtr, pageIndex);
     if (!pagePtr) {
       throw new Error(`Failed to load page ${pageIndex} - docPtr: ${this.docPtr}`);
     }
-
     try {
       // Get page dimensions
       const pageWidth = pdfium._PDFium_GetPageWidth(pagePtr);
@@ -799,7 +972,11 @@ export class PdfController implements IPdfController {
         pdfium._PDFium_BitmapDestroy(bitmapPtr);
       }
     } finally {
-      pdfium._PDFium_ClosePage(pagePtr);
+      // Only close the page if it's not a cached edit-mode pointer.
+      // Cached pages are released explicitly via releaseEditPages().
+      if (!cachedEditPage) {
+        pdfium._PDFium_ClosePage(pagePtr);
+      }
     }
   }
 
@@ -885,9 +1062,20 @@ export class PdfController implements IPdfController {
       return null;
     }
 
+    // After FPDFPage_GenerateContent, the text-page parser (FPDFText_GetRect etc.)
+    // returns corrupted rects. Use page-object APIs for any page that has been
+    // through GenerateContent — the generatedPages set persists even after
+    // releaseEditPages() clears the page-pointer cache.
+    if (this.editPageCache.has(pageIndex) || this.generatedPages.has(pageIndex)) {
+      return this.getPageTextContentFromObjects(pageIndex);
+    }
+
     const pdfium = this.pdfiumModule;
 
-    const pagePtr = pdfium._PDFium_LoadPage(this.docPtr, pageIndex);
+    // Use cached edit-mode page pointer if available so text content
+    // reflects in-memory edits (FPDFText_SetText changes).
+    const cachedEditPage = this.editPageCache.get(pageIndex);
+    const pagePtr = cachedEditPage ?? pdfium._PDFium_LoadPage(this.docPtr, pageIndex);
     if (!pagePtr) {
       return null;
     }
@@ -912,6 +1100,10 @@ export class PdfController implements IPdfController {
         const topPtr = pdfium._malloc(8);
         const rightPtr = pdfium._malloc(8);
         const bottomPtr = pdfium._malloc(8);
+        const fillRPtr = pdfium._malloc(4);
+        const fillGPtr = pdfium._malloc(4);
+        const fillBPtr = pdfium._malloc(4);
+        const fillAPtr = pdfium._malloc(4);
 
         // Use page dimensions as device size (1:1 mapping, no scaling here)
         const deviceWidth = Math.round(pageWidth);
@@ -983,9 +1175,27 @@ export class PdfController implements IPdfController {
 
             let fontFamily = '';
             let fontSize = Math.abs(top - bottom);
+            let fontColor = { r: 0, g: 0, b: 0, a: 255 };
 
             if (charIndex >= 0) {
               fontSize = pdfium._PDFium_GetFontSize(textPagePtr, charIndex);
+
+              const hasFillColor = pdfium._PDFium_GetFillColor(
+                textPagePtr,
+                charIndex,
+                fillRPtr,
+                fillGPtr,
+                fillBPtr,
+                fillAPtr,
+              );
+              if (hasFillColor) {
+                fontColor = {
+                  r: pdfium.getValue(fillRPtr, 'i32'),
+                  g: pdfium.getValue(fillGPtr, 'i32'),
+                  b: pdfium.getValue(fillBPtr, 'i32'),
+                  a: pdfium.getValue(fillAPtr, 'i32'),
+                };
+              }
 
               // Get font name length first
               const fontNameLength = pdfium._PDFium_GetFontInfo(textPagePtr, charIndex, 0, 0, 0);
@@ -1022,6 +1232,7 @@ export class PdfController implements IPdfController {
               font: {
                 family: fontFamily,
                 size: fontSize,
+                color: fontColor,
               },
             });
           }
@@ -1030,6 +1241,10 @@ export class PdfController implements IPdfController {
           pdfium._free(topPtr);
           pdfium._free(rightPtr);
           pdfium._free(bottomPtr);
+          pdfium._free(fillRPtr);
+          pdfium._free(fillGPtr);
+          pdfium._free(fillBPtr);
+          pdfium._free(fillAPtr);
         }
 
         // Merge adjacent rects on the same line with similar font properties
@@ -1040,7 +1255,806 @@ export class PdfController implements IPdfController {
         pdfium._PDFium_ClosePageText(textPagePtr);
       }
     } finally {
-      pdfium._PDFium_ClosePage(pagePtr);
+      if (!cachedEditPage) {
+        pdfium._PDFium_ClosePage(pagePtr);
+      }
+    }
+  }
+
+  /**
+   * Enumerate flattened text objects directly stored in page content.
+   * This only returns true page text objects (FPDF_PAGEOBJ_TEXT), not OCR overlays or raster text.
+   */
+  public listEditableTextObjects(
+    pageIndex: number,
+    opts: { scale: number },
+  ): IEditableTextObject[] {
+    const { scale } = opts;
+    if (!Number.isFinite(scale) || scale <= 0) return [];
+
+    const { pdfium, docPtr } = this.requireDoc();
+
+    // Use the cached edit-mode page pointer when available so that the object
+    // indices match those on the page where FPDFText_SetText was applied.
+    const cachedEditPage = this.editPageCache.get(pageIndex);
+    const pagePtr = cachedEditPage ?? pdfium._PDFium_LoadPage(docPtr, pageIndex);
+    if (!pagePtr) throw new Error(`Failed to load page ${pageIndex}`);
+
+    try {
+      const pageObjectApi = pdfium as IPDFiumModule & {
+        _FPDFPage_CountObjects_W?: (page: number) => number;
+        _FPDFPage_GetObject_W?: (page: number, index: number) => number;
+        _FPDFPageObj_GetType_W?: (pageObject: number) => number;
+        _FPDFTextObj_GetText_W?: (
+          textObject: number,
+          textPage: number,
+          buffer: number,
+          length: number,
+        ) => number;
+      };
+      if (
+        typeof pageObjectApi._FPDFPage_CountObjects_W !== 'function' ||
+        typeof pageObjectApi._FPDFPage_GetObject_W !== 'function' ||
+        typeof pageObjectApi._FPDFPageObj_GetType_W !== 'function' ||
+        typeof pageObjectApi._FPDFTextObj_GetText_W !== 'function'
+      ) {
+        throw new Error(
+          'PDFium WASM build is missing page-object text APIs. Rebuild @pdfviewer/pdfium-wasm to enable editing existing flattened text objects.',
+        );
+      }
+
+      const pageWidth = pdfium._PDFium_GetPageWidth(pagePtr);
+      const pageHeight = pdfium._PDFium_GetPageHeight(pagePtr);
+      const deviceWidth = Math.round(pageWidth * scale);
+      const deviceHeight = Math.round(pageHeight * scale);
+
+      const out: IEditableTextObject[] = [];
+      const objectCount = pageObjectApi._FPDFPage_CountObjects_W(pagePtr);
+      if (objectCount <= 0) return out;
+
+      const leftPtr = pdfium._malloc(4);
+      const bottomPtr = pdfium._malloc(4);
+      const rightPtr = pdfium._malloc(4);
+      const topPtr = pdfium._malloc(4);
+      const textPagePtr = pdfium._PDFium_LoadPageText(pagePtr);
+
+      try {
+        for (let i = 0; i < objectCount; i++) {
+          const pageObject = pageObjectApi._FPDFPage_GetObject_W(pagePtr, i);
+          if (!pageObject) continue;
+
+          const objectType = pageObjectApi._FPDFPageObj_GetType_W(pageObject);
+          if (objectType !== FPDF_PAGE_OBJECT_TYPE.TEXT) continue;
+
+          const okBounds = pdfium._FPDFPageObj_GetBounds_W(
+            pageObject,
+            leftPtr,
+            bottomPtr,
+            rightPtr,
+            topPtr,
+          );
+          if (!okBounds) continue;
+
+          const left = pdfium.getValue(leftPtr, 'float');
+          const bottom = pdfium.getValue(bottomPtr, 'float');
+          const right = pdfium.getValue(rightPtr, 'float');
+          const top = pdfium.getValue(topPtr, 'float');
+
+          const rect = this.pageRectToDeviceRect(
+            pagePtr,
+            left,
+            top,
+            right,
+            bottom,
+            deviceWidth,
+            deviceHeight,
+          );
+
+          const content = textPagePtr
+            ? this.readTextObjectString(
+                pageObjectApi as IPDFiumModule & {
+                  _FPDFTextObj_GetText_W: (
+                    textObject: number,
+                    textPage: number,
+                    buffer: number,
+                    length: number,
+                  ) => number;
+                },
+                pageObject,
+                textPagePtr,
+              )
+            : '';
+
+          out.push({
+            objectIndex: i,
+            content,
+            rect,
+          });
+        }
+      } finally {
+        if (textPagePtr) {
+          pdfium._PDFium_ClosePageText(textPagePtr);
+        }
+        pdfium._free(leftPtr);
+        pdfium._free(bottomPtr);
+        pdfium._free(rightPtr);
+        pdfium._free(topPtr);
+      }
+
+      return out;
+    } finally {
+      if (!cachedEditPage) {
+        pdfium._PDFium_ClosePage(pagePtr);
+      }
+    }
+  }
+
+  /**
+   * Update multiple flattened text objects on a page in one content regeneration pass.
+   *
+   * The modified page pointer is kept alive in editPageCache so that the
+   * next renderPdf() call renders from the same in-memory page (where the
+   * FPDFText_SetText changes live). Call releaseEditPages() when editing is
+   * finished and the canvas has rendered the final state.
+   */
+  public updateEditableTextObjects(
+    pageIndex: number,
+    opts: { updates: { objectIndex: number; text: string }[] },
+  ): ITextEditResult {
+    const updates = opts.updates ?? [];
+    if (updates.length === 0) return { usedFallbackFont: false };
+
+    const { pdfium, docPtr } = this.requireDoc();
+
+    // Use cached page pointer or load a new one (kept alive for rendering)
+    let pagePtr = this.editPageCache.get(pageIndex);
+    if (!pagePtr) {
+      pagePtr = pdfium._PDFium_LoadPage(docPtr, pageIndex);
+      if (!pagePtr) throw new Error(`Failed to load page ${pageIndex}`);
+      this.editPageCache.set(pageIndex, pagePtr);
+    }
+
+    const pageObjectApi = pdfium as IPDFiumModule & {
+      _FPDFPage_CountObjects_W?: (page: number) => number;
+      _FPDFPage_GetObject_W?: (page: number, index: number) => number;
+      _FPDFPageObj_GetType_W?: (pageObject: number) => number;
+    };
+    if (
+      typeof pageObjectApi._FPDFPage_CountObjects_W !== 'function' ||
+      typeof pageObjectApi._FPDFPage_GetObject_W !== 'function' ||
+      typeof pageObjectApi._FPDFPageObj_GetType_W !== 'function'
+    ) {
+      throw new Error(
+        'PDFium WASM build is missing page-object text APIs. Rebuild @pdfviewer/pdfium-wasm to enable editing existing flattened text objects.',
+      );
+    }
+
+    const objectCount = pageObjectApi._FPDFPage_CountObjects_W(pagePtr);
+    const deduped = new Map<number, string>();
+    for (const update of updates) {
+      if (!Number.isInteger(update.objectIndex) || update.objectIndex < 0) {
+        throw new Error(`Invalid object index: ${update.objectIndex}`);
+      }
+      deduped.set(update.objectIndex, update.text);
+    }
+
+    const readObjectBounds = (
+      pageObject: number,
+    ): { left: number; bottom: number; right: number; top: number } => {
+      const leftPtr = pdfium._malloc(4);
+      const bottomPtr = pdfium._malloc(4);
+      const rightPtr = pdfium._malloc(4);
+      const topPtr = pdfium._malloc(4);
+
+      try {
+        const ok = pdfium._FPDFPageObj_GetBounds_W(
+          pageObject,
+          leftPtr,
+          bottomPtr,
+          rightPtr,
+          topPtr,
+        );
+        if (!ok) {
+          throw new Error('Failed to read text object bounds');
+        }
+        return {
+          left: pdfium.getValue(leftPtr, 'float'),
+          bottom: pdfium.getValue(bottomPtr, 'float'),
+          right: pdfium.getValue(rightPtr, 'float'),
+          top: pdfium.getValue(topPtr, 'float'),
+        };
+      } finally {
+        pdfium._free(leftPtr);
+        pdfium._free(bottomPtr);
+        pdfium._free(rightPtr);
+        pdfium._free(topPtr);
+      }
+    };
+
+    const targets: { objectIndex: number; pageObject: number; text: string }[] = [];
+    for (const [objectIndex, text] of deduped.entries()) {
+      if (objectIndex >= objectCount) {
+        throw new Error(`Text object index ${objectIndex} is out of bounds (count=${objectCount})`);
+      }
+
+      const pageObject = pageObjectApi._FPDFPage_GetObject_W(pagePtr, objectIndex);
+      if (!pageObject) {
+        throw new Error(`Failed to get page object at index ${objectIndex}`);
+      }
+
+      const objectType = pageObjectApi._FPDFPageObj_GetType_W(pageObject);
+      if (objectType !== FPDF_PAGE_OBJECT_TYPE.TEXT) {
+        throw new Error(
+          `Page object ${objectIndex} is not a text object (type=${objectType}). It may have been flattened as paths or an image.`,
+        );
+      }
+
+      targets.push({ objectIndex, pageObject, text });
+    }
+
+    const fallbackTargets: {
+      objectIndex: number;
+      pageObject: number;
+      text: string;
+      bounds: { left: number; bottom: number; right: number; top: number };
+    }[] = [];
+    let useReplacementOnly = this.editPageReplaceOnly.has(pageIndex);
+
+    for (const target of targets) {
+      const { objectIndex, pageObject, text } = target;
+      if (useReplacementOnly) {
+        fallbackTargets.push({
+          objectIndex,
+          pageObject,
+          text,
+          bounds: readObjectBounds(pageObject),
+        });
+        continue;
+      }
+
+      // FPDFText_SetText_W traps (WASM abort) on empty strings.
+      // Remove the object from the page instead.
+      if (!text) {
+        pdfium._FPDFPage_RemoveObject_W(pagePtr, pageObject);
+        pdfium._FPDFPageObj_Destroy_W(pageObject);
+        continue;
+      }
+
+      const textPtr = this.allocUtf16(text);
+      try {
+        try {
+          const okSet = pdfium._FPDFText_SetText_W(pageObject, textPtr);
+          if (!okSet) {
+            useReplacementOnly = true;
+            this.editPageReplaceOnly.add(pageIndex);
+            console.info(
+              `[PdfController] FPDFText_SetText_W returned 0 for page ${pageIndex}; switching this page to replacement mode.`,
+            );
+            fallbackTargets.push({
+              objectIndex,
+              pageObject,
+              text,
+              bounds: readObjectBounds(pageObject),
+            });
+          }
+        } catch (error) {
+          void error;
+          useReplacementOnly = true;
+          this.editPageReplaceOnly.add(pageIndex);
+          console.info(
+            `[PdfController] FPDFText_SetText_W trapped on page ${pageIndex}; switching this page to replacement mode.`,
+          );
+          fallbackTargets.push({
+            objectIndex,
+            pageObject,
+            text,
+            bounds: readObjectBounds(pageObject),
+          });
+        }
+      } finally {
+        pdfium._free(textPtr);
+      }
+    }
+
+    if (fallbackTargets.length > 0) {
+      console.warn(
+        `[PdfController] FALLBACK: ${fallbackTargets.length} objects using Helvetica replacement (original font LOST)`,
+      );
+      const fontNamePtr = this.allocUtf8('Helvetica');
+      let font = 0;
+
+      try {
+        font = pdfium._FPDFText_LoadStandardFont_W(docPtr, fontNamePtr);
+        if (!font) {
+          throw new Error('Failed to load fallback font for text object replacement');
+        }
+
+        for (const target of fallbackTargets) {
+          const removed = pdfium._FPDFPage_RemoveObject_W(pagePtr, target.pageObject);
+          if (!removed) {
+            throw new Error(
+              `Failed to remove text object ${target.objectIndex} for fallback replacement`,
+            );
+          }
+          pdfium._FPDFPageObj_Destroy_W(target.pageObject);
+
+          if (!target.text) {
+            continue;
+          }
+
+          const fontSize = Math.max(4, target.bounds.top - target.bounds.bottom);
+          const replacement = pdfium._FPDFPageObj_CreateTextObj_W(docPtr, font, fontSize);
+          if (!replacement) {
+            throw new Error(`Failed to create replacement text object for ${target.objectIndex}`);
+          }
+
+          try {
+            const replacementTextPtr = this.allocUtf16(target.text);
+            try {
+              const okSet = pdfium._FPDFText_SetText_W(replacement, replacementTextPtr);
+              if (!okSet) {
+                throw new Error(
+                  `Failed to set replacement text content for object ${target.objectIndex}`,
+                );
+              }
+            } finally {
+              pdfium._free(replacementTextPtr);
+            }
+
+            pdfium._FPDFPageObj_SetFillColor_W(replacement, 0, 0, 0, 255);
+            pdfium._FPDFPageObj_Transform_W(
+              replacement,
+              1,
+              0,
+              0,
+              1,
+              target.bounds.left,
+              target.bounds.bottom,
+            );
+            pdfium._FPDFPage_InsertObject_W(pagePtr, replacement);
+          } catch (error) {
+            pdfium._FPDFPageObj_Destroy_W(replacement);
+            throw error;
+          }
+        }
+      } finally {
+        pdfium._free(fontNamePtr);
+        if (font) {
+          pdfium._FPDFFont_Close_W(font);
+        }
+      }
+    }
+
+    // Regenerate content stream (best-effort persistence for save/export).
+    // The page pointer is NOT closed — it stays in editPageCache so renderPdf()
+    // can render the in-memory modifications.
+    const okGenerate = pdfium._FPDFPage_GenerateContent_W(pagePtr);
+    if (!okGenerate) {
+      throw new Error('Failed to generate page content after text update');
+    }
+    this.generatedPages.add(pageIndex);
+
+    return { usedFallbackFont: fallbackTargets.length > 0 };
+  }
+
+  /**
+   * Update text content of an existing flattened text object on a page.
+   * The object index comes from listEditableTextObjects().
+   */
+  public updateEditableTextObject(
+    pageIndex: number,
+    opts: { objectIndex: number; text: string },
+  ): ITextEditResult {
+    return this.updateEditableTextObjects(pageIndex, {
+      updates: [{ objectIndex: opts.objectIndex, text: opts.text }],
+    });
+  }
+
+  /**
+   * Reflow a paragraph's text objects: update existing objects, create new ones for overflow
+   * lines, and remove excess objects when text shrinks. All modifications happen in a single
+   * GenerateContent pass on the cached edit-mode page pointer.
+   */
+  public reflowEditableTextObjects(
+    pageIndex: number,
+    opts: {
+      referenceObjectIndex: number;
+      lines: IReflowLineUpdate[];
+      existingObjectIndices: number[];
+      scale: number;
+      paragraphRect: { left: number; top: number; width: number; height: number };
+      lineHeightDevicePx: number;
+      /** When true, skip FPDFPage_GenerateContent so the caller can batch multiple
+       *  reflows and regenerate the content stream once at the end. */
+      skipGenerateContent?: boolean;
+    },
+  ): ITextEditResult {
+    const {
+      referenceObjectIndex,
+      lines,
+      existingObjectIndices,
+      scale,
+      paragraphRect,
+      lineHeightDevicePx,
+      skipGenerateContent,
+    } = opts;
+    if (lines.length === 0 && existingObjectIndices.length === 0)
+      return { usedFallbackFont: false };
+
+    const { pdfium, docPtr } = this.requireDoc();
+    let usedFallbackFont = false;
+
+    // Load or reuse cached edit-mode page
+    let pagePtr = this.editPageCache.get(pageIndex);
+    if (!pagePtr) {
+      pagePtr = pdfium._PDFium_LoadPage(docPtr, pageIndex);
+      if (!pagePtr) throw new Error(`Failed to load page ${pageIndex}`);
+      this.editPageCache.set(pageIndex, pagePtr);
+    }
+
+    const pageObjectApi = pdfium as IPDFiumModule & {
+      _FPDFPage_CountObjects_W?: (page: number) => number;
+      _FPDFPage_GetObject_W?: (page: number, index: number) => number;
+      _FPDFPageObj_GetType_W?: (pageObject: number) => number;
+    };
+    if (
+      typeof pageObjectApi._FPDFPage_CountObjects_W !== 'function' ||
+      typeof pageObjectApi._FPDFPage_GetObject_W !== 'function' ||
+      typeof pageObjectApi._FPDFPageObj_GetType_W !== 'function'
+    ) {
+      throw new Error('PDFium WASM build is missing page-object APIs.');
+    }
+
+    const pageW = pdfium._PDFium_GetPageWidth(pagePtr);
+    const pageH = pdfium._PDFium_GetPageHeight(pagePtr);
+
+    // Collect page object pointers BEFORE any modifications (indices shift on removal)
+    const objectCount = pageObjectApi._FPDFPage_CountObjects_W(pagePtr);
+    const existingPointers: { objectIndex: number; ptr: number }[] = [];
+    for (const objectIndex of existingObjectIndices) {
+      if (objectIndex >= objectCount) continue;
+      const ptr = pageObjectApi._FPDFPage_GetObject_W(pagePtr, objectIndex);
+      if (ptr) existingPointers.push({ objectIndex, ptr });
+    }
+
+    // Extract font handle and size from the reference object (must happen before any destruction)
+    let fontHandle = 0;
+    let pageFontSize = 12;
+    const refPtr = existingPointers.find((p) => p.objectIndex === referenceObjectIndex)?.ptr;
+    if (refPtr) {
+      const fontInfo = this.readTextObjectFontInfo(pdfium, refPtr);
+      pageFontSize = fontInfo.size > 0 ? fontInfo.size : 12;
+
+      const p = pdfium as unknown as Record<string, unknown>;
+      if (typeof p._FPDFTextObj_GetFont_W === 'function') {
+        fontHandle = (p._FPDFTextObj_GetFont_W as (obj: number) => number)(refPtr);
+      }
+    }
+
+    // For overflow lines, prefer the LAST existing object's font — overflow typically
+    // continues body text, not the header that may appear at the start of the paragraph.
+    let overflowFontHandle = fontHandle;
+    let overflowFontSize = pageFontSize;
+    if (existingPointers.length > 1) {
+      const lastPtr = existingPointers[existingPointers.length - 1].ptr;
+      const lastFontInfo = this.readTextObjectFontInfo(pdfium, lastPtr);
+      if (lastFontInfo.size > 0) {
+        overflowFontSize = lastFontInfo.size;
+      }
+      const p = pdfium as unknown as Record<string, unknown>;
+      if (typeof p._FPDFTextObj_GetFont_W === 'function') {
+        const lastFont = (p._FPDFTextObj_GetFont_W as (obj: number) => number)(lastPtr);
+        if (lastFont) overflowFontHandle = lastFont;
+      }
+    }
+
+    // Helper: compute page-coord position for line at given index
+    const linePagePosition = (lineIndex: number): { x: number; y: number } => {
+      const deviceX = paragraphRect.left;
+      // Bottom of the line in device coords (top + (lineIndex+1) * lineHeight)
+      const deviceY = paragraphRect.top + (lineIndex + 1) * lineHeightDevicePx;
+      return this.canvasToPagePoint(pagePtr, pageW, pageH, scale, deviceX, deviceY);
+    };
+
+    // Helper: load a font for creating new objects (overflow lines)
+    const loadFont = (): { font: number; mustClose: boolean } => {
+      // Use the overflow font (from last existing object) — overflow typically
+      // continues body text, not the header at the paragraph start.
+      if (overflowFontHandle) {
+        return { font: overflowFontHandle, mustClose: false };
+      }
+      // Fallback to Helvetica
+      usedFallbackFont = true;
+      const namePtr = this.allocUtf8('Helvetica');
+      try {
+        const font = pdfium._FPDFText_LoadStandardFont_W(docPtr, namePtr);
+        if (font) return { font, mustClose: true };
+      } finally {
+        pdfium._free(namePtr);
+      }
+      throw new Error('Failed to load any font for text object creation');
+    };
+
+    // ─── Phase 1: Create overflow objects (BEFORE removals, so font handle stays valid) ───
+    const newObjects: number[] = [];
+    if (lines.length > existingPointers.length) {
+      const { font, mustClose } = loadFont();
+      try {
+        for (let i = existingPointers.length; i < lines.length; i++) {
+          const lineUpdate = lines[i];
+          if (!lineUpdate.text) continue;
+
+          const newObj = pdfium._FPDFPageObj_CreateTextObj_W(docPtr, font, overflowFontSize);
+          if (!newObj) {
+            console.warn(`[PdfController] Failed to create text object for overflow line ${i}`);
+            continue;
+          }
+
+          const textPtr = this.allocUtf16(lineUpdate.text);
+          try {
+            const ok = pdfium._FPDFText_SetText_W(newObj, textPtr);
+            if (!ok) {
+              pdfium._FPDFPageObj_Destroy_W(newObj);
+              console.warn(`[PdfController] Failed to set text on overflow line ${i}`);
+              continue;
+            }
+          } finally {
+            pdfium._free(textPtr);
+          }
+
+          const { r, g, b, a } = lineUpdate.color;
+          pdfium._FPDFPageObj_SetFillColor_W(newObj, r, g, b, a);
+
+          const pos = linePagePosition(i);
+          pdfium._FPDFPageObj_Transform_W(newObj, 1, 0, 0, 1, pos.x, pos.y);
+          pdfium._FPDFPage_InsertObject_W(pagePtr, newObj);
+          newObjects.push(newObj);
+        }
+      } finally {
+        if (mustClose) pdfium._FPDFFont_Close_W(font);
+      }
+    }
+
+    // ─── Phase 2: Update existing objects that map to reflowed lines ───
+    const reuseCount = Math.min(existingPointers.length, lines.length);
+    for (let i = 0; i < reuseCount; i++) {
+      const { ptr: pageObject } = existingPointers[i];
+      const lineUpdate = lines[i];
+
+      if (!lineUpdate.text) {
+        // Empty line — remove the object
+        pdfium._FPDFPage_RemoveObject_W(pagePtr, pageObject);
+        pdfium._FPDFPageObj_Destroy_W(pageObject);
+        continue;
+      }
+
+      // Set text (with try/catch for WASM trap safety, matching updateEditableTextObjects pattern)
+      const textPtr = this.allocUtf16(lineUpdate.text);
+      try {
+        try {
+          pdfium._FPDFText_SetText_W(pageObject, textPtr);
+        } catch {
+          console.warn(`[PdfController] FPDFText_SetText_W trapped on reflow line ${i}`);
+        }
+      } finally {
+        pdfium._free(textPtr);
+      }
+
+      // Set fill color
+      const { r, g, b, a } = lineUpdate.color;
+      pdfium._FPDFPageObj_SetFillColor_W(pageObject, r, g, b, a);
+
+      // Reposition: compute delta between current and desired position
+      const leftPtr = pdfium._malloc(4);
+      const bottomPtr = pdfium._malloc(4);
+      const rightPtr = pdfium._malloc(4);
+      const topPtr = pdfium._malloc(4);
+      try {
+        const ok = pdfium._FPDFPageObj_GetBounds_W(
+          pageObject,
+          leftPtr,
+          bottomPtr,
+          rightPtr,
+          topPtr,
+        );
+        if (ok) {
+          const currentLeft = pdfium.getValue(leftPtr, 'float');
+          const currentBottom = pdfium.getValue(bottomPtr, 'float');
+          const desired = linePagePosition(i);
+          const dx = desired.x - currentLeft;
+          const dy = desired.y - currentBottom;
+          if (Math.abs(dx) > 0.1 || Math.abs(dy) > 0.1) {
+            pdfium._FPDFPageObj_Transform_W(pageObject, 1, 0, 0, 1, dx, dy);
+          }
+        }
+      } finally {
+        pdfium._free(leftPtr);
+        pdfium._free(bottomPtr);
+        pdfium._free(rightPtr);
+        pdfium._free(topPtr);
+      }
+    }
+
+    // ─── Phase 3: Remove excess original objects ───
+    for (let i = lines.length; i < existingPointers.length; i++) {
+      const { ptr: pageObject } = existingPointers[i];
+      pdfium._FPDFPage_RemoveObject_W(pagePtr, pageObject);
+      pdfium._FPDFPageObj_Destroy_W(pageObject);
+    }
+
+    // ─── Phase 4: Generate content ───
+    if (!skipGenerateContent) {
+      const okGenerate = pdfium._FPDFPage_GenerateContent_W(pagePtr);
+      if (!okGenerate) {
+        console.warn('[PdfController] Failed to generate page content after reflow');
+      }
+      this.generatedPages.add(pageIndex);
+    }
+
+    return { usedFallbackFont };
+  }
+
+  /**
+   * Regenerate the content stream for a cached edit-mode page.
+   * Call this once after batching multiple reflowEditableTextObjects calls
+   * with `skipGenerateContent: true`.
+   */
+  public generatePageContent(pageIndex: number): boolean {
+    const { pdfium } = this.requireDoc();
+    const pagePtr = this.editPageCache.get(pageIndex);
+    if (!pagePtr) return false;
+    const ok = !!pdfium._FPDFPage_GenerateContent_W(pagePtr);
+    if (ok) this.generatedPages.add(pageIndex);
+    return ok;
+  }
+
+  /**
+   * Extract text content using page-object APIs (FPDFPageObj_GetBounds, FPDFTextObj_GetFont,
+   * FPDFTextObj_GetFontSize) instead of text-page APIs (FPDFText_GetRect, FPDFText_GetFillColor).
+   *
+   * After FPDFPage_GenerateContent, the text-page parser can no longer properly segment
+   * characters, returning one giant bounding box. Page-object APIs read directly from the
+   * in-memory object list and remain accurate.
+   */
+  private getPageTextContentFromObjects(pageIndex: number): IPageTextContent | null {
+    if (!this.pdfiumModule || !this.docPtr) return null;
+    const pdfium = this.pdfiumModule;
+
+    const cachedEditPage = this.editPageCache.get(pageIndex);
+    const pagePtr = cachedEditPage ?? pdfium._PDFium_LoadPage(this.docPtr, pageIndex);
+    if (!pagePtr) return null;
+
+    try {
+      const pageWidth = pdfium._PDFium_GetPageWidth(pagePtr);
+      const pageHeight = pdfium._PDFium_GetPageHeight(pagePtr);
+      const deviceWidth = Math.round(pageWidth);
+      const deviceHeight = Math.round(pageHeight);
+
+      const pageObjectApi = pdfium as IPDFiumModule & {
+        _FPDFPage_CountObjects_W?: (page: number) => number;
+        _FPDFPage_GetObject_W?: (page: number, index: number) => number;
+        _FPDFPageObj_GetType_W?: (pageObject: number) => number;
+        _FPDFTextObj_GetText_W?: (
+          textObject: number,
+          textPage: number,
+          buffer: number,
+          length: number,
+        ) => number;
+      };
+      if (
+        typeof pageObjectApi._FPDFPage_CountObjects_W !== 'function' ||
+        typeof pageObjectApi._FPDFPage_GetObject_W !== 'function' ||
+        typeof pageObjectApi._FPDFPageObj_GetType_W !== 'function' ||
+        typeof pageObjectApi._FPDFTextObj_GetText_W !== 'function'
+      ) {
+        // Page-object APIs unavailable — fall back to text-page extraction
+        return null;
+      }
+
+      const objectCount = pageObjectApi._FPDFPage_CountObjects_W(pagePtr);
+      if (objectCount <= 0) {
+        return { pageIndex, pageWidth, pageHeight, textRects: [] };
+      }
+
+      const textPagePtr = pdfium._PDFium_LoadPageText(pagePtr);
+      const leftPtr = pdfium._malloc(4);
+      const bottomPtr = pdfium._malloc(4);
+      const rightPtr = pdfium._malloc(4);
+      const topPtr = pdfium._malloc(4);
+
+      const textRects: ITextRect[] = [];
+
+      try {
+        for (let i = 0; i < objectCount; i++) {
+          const pageObject = pageObjectApi._FPDFPage_GetObject_W(pagePtr, i);
+          if (!pageObject) continue;
+
+          const objectType = pageObjectApi._FPDFPageObj_GetType_W(pageObject);
+          if (objectType !== FPDF_PAGE_OBJECT_TYPE.TEXT) continue;
+
+          // Bounds (page coordinates)
+          const okBounds = pdfium._FPDFPageObj_GetBounds_W(
+            pageObject,
+            leftPtr,
+            bottomPtr,
+            rightPtr,
+            topPtr,
+          );
+          if (!okBounds) continue;
+
+          const left = pdfium.getValue(leftPtr, 'float');
+          const bottom = pdfium.getValue(bottomPtr, 'float');
+          const right = pdfium.getValue(rightPtr, 'float');
+          const top = pdfium.getValue(topPtr, 'float');
+
+          const deviceRect = this.pageRectToDeviceRect(
+            pagePtr,
+            left,
+            top,
+            right,
+            bottom,
+            deviceWidth,
+            deviceHeight,
+          );
+
+          // Text content
+          const content = textPagePtr
+            ? this.readTextObjectString(
+                pageObjectApi as IPDFiumModule & {
+                  _FPDFTextObj_GetText_W: (
+                    textObject: number,
+                    textPage: number,
+                    buffer: number,
+                    length: number,
+                  ) => number;
+                },
+                pageObject,
+                textPagePtr,
+              )
+            : '';
+
+          if (!content.trim()) continue;
+
+          // Font info via page-object APIs (stable after GenerateContent)
+          const fontInfo = this.readTextObjectFontInfo(pdfium, pageObject);
+          let fontFamily = fontInfo.name;
+          if (fontFamily === '(unknown)') fontFamily = '';
+          // Strip PDF font subset prefix (e.g. "ABCDEF+")
+          fontFamily = fontFamily.replace(/^[A-Z]{6}\+/, '');
+
+          const fontSize = fontInfo.size > 0 ? fontInfo.size : Math.abs(top - bottom);
+
+          // Default color — view-mode text is transparent (selection overlay);
+          // edit-mode uses savedLineColors for accurate colors.
+          const fontColor = { r: 0, g: 0, b: 0, a: 255 };
+
+          textRects.push({
+            content,
+            rect: deviceRect,
+            font: {
+              family: fontFamily,
+              size: fontSize,
+              color: fontColor,
+            },
+          });
+        }
+      } finally {
+        if (textPagePtr) {
+          pdfium._PDFium_ClosePageText(textPagePtr);
+        }
+        pdfium._free(leftPtr);
+        pdfium._free(bottomPtr);
+        pdfium._free(rightPtr);
+        pdfium._free(topPtr);
+      }
+
+      const mergedRects = this.mergeAdjacentTextRects(textRects);
+
+      return { pageIndex, pageWidth, pageHeight, textRects: mergedRects };
+    } finally {
+      if (!cachedEditPage) {
+        pdfium._PDFium_ClosePage(pagePtr);
+      }
     }
   }
 
