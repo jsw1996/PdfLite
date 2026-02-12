@@ -24,7 +24,15 @@
       "mcp__playwright__browser_evaluate",
       "WebFetch(domain:virtuoso.dev)",
       "WebFetch(domain:ui.shadcn.com)",
-      "Bash(pnpm dlx:*)"
+      "Bash(pnpm dlx:*)",
+      "Bash(pnpm lint:*)",
+      "Bash(npx eslint:*)",
+      "Bash(curl:*)",
+      "Bash(gh api:*)",
+      "Bash(dir:*)",
+      "Bash(npx prettier:*)",
+      "mcp__playwright__browser_hover",
+      "mcp__playwright__browser_press_key"
     ]
   }
 }
