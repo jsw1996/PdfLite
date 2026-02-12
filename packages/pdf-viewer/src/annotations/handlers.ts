@@ -178,6 +178,43 @@ function renderTextAnnotation(_ctx: CanvasRenderingContext2D, _annotation: IText
   // No-op: Text annotations are rendered as React components
 }
 
+/**
+ * Split text into visual lines based on available width, matching the
+ * word-break: break-all behavior used in the TextBox textarea.
+ */
+function wrapTextToLines(text: string, fontSize: number, maxWidth: number): string[] {
+  const paragraphs = text.split('\n');
+  const lines: string[] = [];
+
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return [text];
+  ctx.font = `${fontSize}px Helvetica, Arial, sans-serif`;
+
+  for (const paragraph of paragraphs) {
+    if (paragraph === '') {
+      lines.push('');
+      continue;
+    }
+
+    let currentLine = '';
+    for (const char of paragraph) {
+      const testLine = currentLine + char;
+      if (ctx.measureText(testLine).width > maxWidth && currentLine.length > 0) {
+        lines.push(currentLine);
+        currentLine = char;
+      } else {
+        currentLine = testLine;
+      }
+    }
+    if (currentLine) {
+      lines.push(currentLine);
+    }
+  }
+
+  return lines.length > 0 ? lines : [''];
+}
+
 function commitTextAnnotation(controller: PdfController, annotation: ITextAnnotation): void {
   const { position, content, fontSize, dimensions } = annotation;
 
@@ -187,6 +224,9 @@ function commitTextAnnotation(controller: PdfController, annotation: ITextAnnota
     Math.max(content.length * fontSize * 0.6, TEXT_ANNOTATION_DEFAULTS.MIN_WIDTH);
   const height = dimensions?.height ?? fontSize * 1.5;
 
+  // Wrap text into visual lines matching the textarea's word-break: break-all
+  const lines = wrapTextToLines(content, fontSize, width);
+
   controller.addTextAnnotation(annotation.pageIndex, {
     scale: 1,
     canvasRect: {
@@ -195,7 +235,7 @@ function commitTextAnnotation(controller: PdfController, annotation: ITextAnnota
       width,
       height,
     },
-    text: content,
+    lines,
     fontSize,
     fontColor: TEXT_ANNOTATION_DEFAULTS.FONT_COLOR_RGB,
   });

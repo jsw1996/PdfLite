@@ -20,20 +20,29 @@ type Mode = 'editing' | 'selected' | 'idle';
  * Measure the natural (content-based) size of a textarea so we have a
  * baseline for the Resizable wrapper before the user has ever resized.
  */
-function measureTextArea(content: string, fontSize: number): { width: number; height: number } {
+function measureTextArea(
+  content: string,
+  fontSize: number,
+  maxWidth?: number,
+): { width: number; height: number } {
   const el = document.createElement('textarea');
   el.style.position = 'absolute';
   el.style.visibility = 'hidden';
   el.style.whiteSpace = 'pre-wrap';
+  el.style.wordBreak = 'break-all';
   el.style.fontSize = `${fontSize}px`;
+  el.style.lineHeight = '1.4';
   el.style.padding = '0';
   el.style.border = 'none';
   el.style.boxSizing = 'border-box';
   el.style.setProperty('field-sizing', 'content');
   el.style.minWidth = '50px';
+  if (maxWidth != null) {
+    el.style.width = `${maxWidth}px`;
+  }
   el.value = content || ' ';
   document.body.appendChild(el);
-  const width = Math.max(el.scrollWidth, 50);
+  const width = maxWidth ?? Math.max(el.scrollWidth, 50);
   const height = Math.max(el.scrollHeight, fontSize * 1.5);
   document.body.removeChild(el);
   return { width, height };
@@ -122,16 +131,18 @@ export const TextBox: React.FC<ITextBoxProps> = ({
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
         setIsSelected(false);
         setMode('idle');
-        // Persist content on deselect
+        // Persist content + dimensions on deselect
         const val = textareaRef.current?.value ?? '';
-        if (val !== content) {
-          updateAnnotation(id, { content: val } as Partial<ITextAnnotation>);
-        }
+        updateAnnotation(id, {
+          content: val,
+          fontSize: scaledFontSize,
+          dimensions: localSize,
+        } as Partial<ITextAnnotation>);
       }
     };
     document.addEventListener('mousedown', onOutside);
     return () => document.removeEventListener('mousedown', onOutside);
-  }, [isSelected, content, id, updateAnnotation]);
+  }, [isSelected, id, scaledFontSize, localSize, updateAnnotation]);
 
   // ---------- drag callbacks ----------
 
@@ -178,24 +189,29 @@ export const TextBox: React.FC<ITextBoxProps> = ({
     [id, localPosition, baseSize.height, baseFontSize, updateAnnotation],
   );
 
+  // ---------- auto-resize on input ----------
+
+  const handleInput = useCallback(() => {
+    if (!textareaRef.current || mode !== 'editing') return;
+    const val = textareaRef.current.value;
+    // Measure with current width as constraint so only height grows on wrap
+    const natural = measureTextArea(val, scaledFontSize, localSize.width);
+    setLocalSize(natural);
+    setBaseSize(natural);
+    setBaseFontSize(scaledFontSize);
+  }, [mode, scaledFontSize, localSize.width]);
+
   // ---------- blur ----------
 
   const handleBlur = useCallback(() => {
-    // Only commit text change; mode is managed by click-outside
+    // Commit current content + dimensions (already updated by handleInput)
     const val = textareaRef.current?.value ?? '';
-    if (val !== content) {
-      // Re-measure natural size after content change and update base refs
-      const natural = measureTextArea(val, scaledFontSize);
-      setBaseSize(natural);
-      setBaseFontSize(scaledFontSize);
-      setLocalSize(natural);
-      updateAnnotation(id, {
-        content: val,
-        fontSize: scaledFontSize,
-        dimensions: natural,
-      } as Partial<ITextAnnotation>);
-    }
-  }, [content, id, scaledFontSize, updateAnnotation]);
+    updateAnnotation(id, {
+      content: val,
+      fontSize: scaledFontSize,
+      dimensions: localSize,
+    } as Partial<ITextAnnotation>);
+  }, [id, scaledFontSize, localSize, updateAnnotation]);
 
   // ---------- render ----------
 
@@ -247,8 +263,10 @@ export const TextBox: React.FC<ITextBoxProps> = ({
               fontSize: `${scaledFontSize}px`,
               color: fontColor,
               lineHeight: 1.4,
+              wordBreak: 'break-all',
             }}
             defaultValue={content}
+            onInput={handleInput}
             onBlur={handleBlur}
           />
           {(mode === 'editing' || mode === 'selected') && (

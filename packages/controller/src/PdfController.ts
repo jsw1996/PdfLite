@@ -216,7 +216,7 @@ export interface IPdfController {
     opts: {
       scale: number;
       canvasRect: { left: number; top: number; width: number; height: number };
-      text: string;
+      lines: string[];
       fontSize?: number;
       fontColor?: { r: number; g: number; b: number };
     },
@@ -2989,13 +2989,13 @@ export class PdfController implements IPdfController {
     opts: {
       scale: number;
       canvasRect: { left: number; top: number; width: number; height: number };
-      text: string;
+      lines: string[];
       fontSize?: number;
       fontColor?: { r: number; g: number; b: number };
     },
   ): void {
-    const { scale, canvasRect, text } = opts;
-    if (!text || canvasRect.width <= 0 || canvasRect.height <= 0) return;
+    const { scale, canvasRect, lines } = opts;
+    if (!lines.length || canvasRect.width <= 0 || canvasRect.height <= 0) return;
 
     const { docPtr } = this.requireDoc();
     const fontSize = opts.fontSize ?? 12;
@@ -3036,7 +3036,7 @@ export class PdfController implements IPdfController {
       // Track resources for cleanup
       const ptrsToFree: number[] = [];
       let font = 0;
-      let textObj = 0;
+      const textObjs: number[] = [];
 
       try {
         // Load standard Helvetica font
@@ -3048,33 +3048,42 @@ export class PdfController implements IPdfController {
           throw new Error('Failed to load Helvetica font');
         }
 
-        // Create a text page object
-        textObj = pdfium._FPDFPageObj_CreateTextObj_W(docPtr, font, fontSize);
-        if (!textObj) {
-          throw new Error('Failed to create text object');
+        // Line height matching the textarea's lineHeight: 1.4
+        const lineHeight = fontSize * 1.4;
+
+        for (let i = 0; i < lines.length; i++) {
+          const lineText = lines[i];
+          if (!lineText) continue; // skip empty lines but still advance Y
+
+          // Create a text page object for this line
+          const textObj = pdfium._FPDFPageObj_CreateTextObj_W(docPtr, font, fontSize);
+          if (!textObj) {
+            throw new Error('Failed to create text object');
+          }
+          textObjs.push(textObj);
+
+          // Set the text content
+          const textPtr = this.allocUtf16(lineText);
+          ptrsToFree.push(textPtr);
+          pdfium._FPDFText_SetText_W(textObj, textPtr);
+
+          // Set fill color (0-255 range)
+          pdfium._FPDFPageObj_SetFillColor_W(textObj, r255, g255, b255, 255);
+
+          // Position the text in absolute page coordinates.
+          // First line baseline: pdfTop - fontSize * 1.1 (accounts for half-leading)
+          // Subsequent lines move DOWN in PDF coords (subtract lineHeight)
+          const textX = pdfLeft;
+          const textY = pdfTop - fontSize * 1.1 - i * lineHeight;
+
+          // Transform to position (translation matrix)
+          pdfium._FPDFPageObj_Transform_W(textObj, 1, 0, 0, 1, textX, textY);
+
+          // Insert the text object into the page content stream
+          pdfium._FPDFPage_InsertObject_W(pagePtr, textObj);
         }
-
-        // Set the text content
-        const textPtr = this.allocUtf16(text);
-        ptrsToFree.push(textPtr);
-        pdfium._FPDFText_SetText_W(textObj, textPtr);
-
-        // Set fill color (0-255 range)
-        pdfium._FPDFPageObj_SetFillColor_W(textObj, r255, g255, b255, 255);
-
-        // Position the text in absolute page coordinates.
-        // The textarea renders text top-aligned with lineHeight 1.4.
-        // PDF text objects are positioned by baseline.
-        // Small offset accounts for half-leading from lineHeight.
-        const textX = pdfLeft;
-        const textY = pdfTop - fontSize * 1.1;
-
-        // Transform to position (translation matrix)
-        pdfium._FPDFPageObj_Transform_W(textObj, 1, 0, 0, 1, textX, textY);
-
-        // Insert the text object into the page content stream
-        pdfium._FPDFPage_InsertObject_W(pagePtr, textObj);
-        textObj = 0; // Ownership transferred to page
+        // All text objects transferred to page
+        textObjs.length = 0;
 
         // Generate the page content to commit the changes
         if (!pdfium._FPDFPage_GenerateContent_W(pagePtr)) {
@@ -3082,7 +3091,9 @@ export class PdfController implements IPdfController {
         }
       } finally {
         // Cleanup (only if not transferred)
-        if (textObj) pdfium._FPDFPageObj_Destroy_W(textObj);
+        for (const obj of textObjs) {
+          pdfium._FPDFPageObj_Destroy_W(obj);
+        }
         if (font) pdfium._FPDFFont_Close_W(font);
         for (const ptr of ptrsToFree) {
           pdfium._free(ptr);
