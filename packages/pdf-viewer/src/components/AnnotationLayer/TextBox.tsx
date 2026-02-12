@@ -1,7 +1,9 @@
 import { cn } from '@pdfviewer/ui/lib/utils';
 import type { IPoint, ITextAnnotation } from '../../annotations';
-import React from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAnnotation } from '../../providers/AnnotationContextProvider';
+import { Draggable } from './Draggable';
+import { Resizable } from './Resizable';
 
 export interface ITextBoxProps {
   id: string;
@@ -9,116 +11,261 @@ export interface ITextBoxProps {
   position: IPoint;
   fontSize: number;
   fontColor: string;
+  dimensions?: { width: number; height: number };
 }
 
 type Mode = 'editing' | 'selected' | 'idle';
 
-export const TextBox = ({ id, content, position, fontSize, fontColor }: ITextBoxProps) => {
+/**
+ * Measure the natural (content-based) size of a textarea so we have a
+ * baseline for the Resizable wrapper before the user has ever resized.
+ */
+function measureTextArea(content: string, fontSize: number): { width: number; height: number } {
+  const el = document.createElement('textarea');
+  el.style.position = 'absolute';
+  el.style.visibility = 'hidden';
+  el.style.whiteSpace = 'pre-wrap';
+  el.style.fontSize = `${fontSize}px`;
+  el.style.padding = '0';
+  el.style.border = 'none';
+  el.style.boxSizing = 'border-box';
+  el.style.setProperty('field-sizing', 'content');
+  el.style.minWidth = '50px';
+  el.value = content || ' ';
+  document.body.appendChild(el);
+  const width = Math.max(el.scrollWidth, 50);
+  const height = Math.max(el.scrollHeight, fontSize * 1.5);
+  document.body.removeChild(el);
+  return { width, height };
+}
+
+export const TextBox: React.FC<ITextBoxProps> = ({
+  id,
+  content,
+  position,
+  fontSize,
+  fontColor,
+  dimensions,
+}) => {
   const { updateAnnotation } = useAnnotation();
-  const textareaRef = React.useRef<HTMLTextAreaElement>(null);
-  const [mode, setMode] = React.useState<Mode>('editing');
-  const [localPosition, setLocalPosition] = React.useState<IPoint>(position);
-  const [isDragging, setIsDragging] = React.useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [mode, setMode] = useState<Mode>('editing');
+  const [isSelected, setIsSelected] = useState(true);
+  const [localPosition, setLocalPosition] = useState<IPoint>(position);
 
-  const className = cn(
-    'field-sizing-content resize-none absolute max-w-[stretch] max-h-[stretch] overflow-hidden caret-black focus:border focus:border-[#a200ff] focus:outline-none focus:border-dashed min-w-[50px] bg-transparent',
-    mode === 'editing' && 'cursor-text',
-    mode === 'selected' && !isDragging && 'cursor-grab',
-    isDragging && 'cursor-grabbing select-none',
-  );
+  // Compute size: use persisted dimensions or measure from content
+  const propSize = useMemo(() => {
+    if (dimensions) return dimensions;
+    return measureTextArea(content, fontSize);
+  }, [dimensions, content, fontSize]);
 
-  // Auto focus on mount
-  React.useEffect(() => {
-    textareaRef.current?.focus();
-  }, []);
+  const [localSize, setLocalSize] = useState(propSize);
+
+  // Track the base size/fontSize for manual-resize scaling.
+  // These reset whenever the props change (e.g. zoom), so manual
+  // resize scaling is always relative to the current zoom level.
+  const [baseSize, setBaseSize] = useState(propSize);
+  const [baseFontSize, setBaseFontSize] = useState(fontSize);
+  // Track whether the user is actively resizing (to avoid clobbering)
+  const isManualResizingRef = useRef(false);
+
+  // Sync from props (zoom changes): reset base refs so scaledFontSize stays correct
+  useEffect(() => {
+    if (!isManualResizingRef.current) {
+      setLocalSize(propSize);
+      setBaseSize(propSize);
+      setBaseFontSize(fontSize);
+    }
+  }, [propSize, fontSize]);
+
+  const scaledFontSize = useMemo(() => {
+    const scale = localSize.height / baseSize.height;
+    return Math.max(6, baseFontSize * scale);
+  }, [localSize.height, baseSize.height, baseFontSize]);
 
   // Sync position from props
-  React.useEffect(() => {
+  useEffect(() => {
     setLocalPosition(position);
   }, [position]);
 
-  const handleMouseDown = (e: React.MouseEvent) => {
-    if (mode !== 'selected') return;
+  // Auto-focus on mount
+  useEffect(() => {
+    textareaRef.current?.focus();
+  }, []);
 
-    // Get the annotation layer container (parent of TextBox)
-    const container = textareaRef.current?.parentElement;
-    if (!container) return;
+  // ---------- selection / mode ----------
 
-    const containerRect = container.getBoundingClientRect();
+  const handleClick = useCallback(
+    (e: React.MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (target.classList.contains('resize-handle')) return;
+      if (!containerRef.current?.contains(target)) return;
+      e.stopPropagation();
 
-    // Calculate offset relative to the container, accounting for the element's position within it
-    const offset = {
-      x: e.clientX - containerRect.left - localPosition.x,
-      y: e.clientY - containerRect.top - localPosition.y,
-    };
-    let currentPos = localPosition;
-    let dragged = false;
-
-    const handleMouseMove = (moveEvent: MouseEvent) => {
-      if (!dragged) {
-        dragged = true;
-        setIsDragging(true);
+      if (mode === 'idle') {
+        setMode('selected');
+        setIsSelected(true);
+      } else if (mode === 'selected') {
+        setMode('editing');
+        setIsSelected(true);
+        textareaRef.current?.focus();
       }
-      // Calculate new position relative to the container
-      const newContainerRect = container.getBoundingClientRect();
-      currentPos = {
-        x: Math.max(moveEvent.clientX - newContainerRect.left - offset.x, 0),
-        y: Math.max(moveEvent.clientY - newContainerRect.top - offset.y, 0),
-      };
-      setLocalPosition(currentPos);
-    };
+    },
+    [mode],
+  );
 
-    const handleMouseUp = () => {
-      if (dragged) {
-        const rect = textareaRef.current?.getBoundingClientRect();
-        updateAnnotation(id, {
-          position: currentPos,
-          dimensions: rect ? { width: rect.width, height: rect.height } : undefined,
-        } as Partial<ITextAnnotation>);
-        setIsDragging(false);
+  // Click outside → deselect
+  useEffect(() => {
+    if (!isSelected) return;
+    const onOutside = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setIsSelected(false);
+        setMode('idle');
+        // Persist content on deselect
+        const val = textareaRef.current?.value ?? '';
+        if (val !== content) {
+          updateAnnotation(id, { content: val } as Partial<ITextAnnotation>);
+        }
       }
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
     };
+    document.addEventListener('mousedown', onOutside);
+    return () => document.removeEventListener('mousedown', onOutside);
+  }, [isSelected, content, id, updateAnnotation]);
 
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
-  };
+  // ---------- drag callbacks ----------
 
-  const handleClick = () => {
-    if (isDragging) return;
+  const handlePositionChange = useCallback((p: IPoint) => {
+    setLocalPosition(p);
+  }, []);
 
-    if (mode === 'idle') {
-      setMode('selected');
-    } else if (mode === 'selected') {
-      setMode('editing');
-      textareaRef.current?.focus();
+  const handleDragEnd = useCallback(
+    (finalPos: IPoint) => {
+      updateAnnotation(id, {
+        position: finalPos,
+        fontSize: scaledFontSize,
+        dimensions: localSize,
+      } as Partial<ITextAnnotation>);
+    },
+    [id, scaledFontSize, localSize, updateAnnotation],
+  );
+
+  // ---------- resize callbacks ----------
+
+  const handleResizeStart = useCallback(() => {
+    isManualResizingRef.current = true;
+  }, []);
+
+  const handleSizeChange = useCallback((s: { width: number; height: number }) => {
+    setLocalSize(s);
+  }, []);
+
+  const handleResizePositionChange = useCallback((p: { x: number; y: number }) => {
+    setLocalPosition(p);
+  }, []);
+
+  const handleResizeEnd = useCallback(
+    (finalSize: { width: number; height: number }) => {
+      isManualResizingRef.current = false;
+      const scale = finalSize.height / baseSize.height;
+      const newFontSize = Math.max(6, baseFontSize * scale);
+      updateAnnotation(id, {
+        position: localPosition,
+        fontSize: newFontSize,
+        dimensions: finalSize,
+      } as Partial<ITextAnnotation>);
+    },
+    [id, localPosition, baseSize.height, baseFontSize, updateAnnotation],
+  );
+
+  // ---------- blur ----------
+
+  const handleBlur = useCallback(() => {
+    // Only commit text change; mode is managed by click-outside
+    const val = textareaRef.current?.value ?? '';
+    if (val !== content) {
+      // Re-measure natural size after content change and update base refs
+      const natural = measureTextArea(val, scaledFontSize);
+      setBaseSize(natural);
+      setBaseFontSize(scaledFontSize);
+      setLocalSize(natural);
+      updateAnnotation(id, {
+        content: val,
+        fontSize: scaledFontSize,
+        dimensions: natural,
+      } as Partial<ITextAnnotation>);
     }
-  };
+  }, [content, id, scaledFontSize, updateAnnotation]);
 
-  const handleBlur = () => {
-    setMode('idle');
-    const newContent = textareaRef.current?.value ?? '';
-    if (newContent !== content) {
-      updateAnnotation(id, { content: newContent } as Partial<ITextAnnotation>);
-    }
-  };
+  // ---------- render ----------
+
+  const wrapperStyle = useMemo(() => ({ zIndex: isSelected ? 1000 : 10 }), [isSelected]);
+
+  const textareaClassName = cn(
+    'resize-none w-full h-full overflow-hidden caret-black bg-transparent outline-none border-none p-0 m-0',
+    mode === 'editing' && 'cursor-text',
+    mode === 'selected' && 'cursor-grab',
+    mode === 'idle' && 'cursor-default pointer-events-none',
+  );
 
   return (
-    <textarea
-      ref={textareaRef}
-      readOnly={mode !== 'editing'}
-      className={className}
-      style={{
-        left: localPosition.x,
-        top: localPosition.y,
-        fontSize: `${fontSize}px`,
-        color: fontColor,
-      }}
-      defaultValue={content}
-      onMouseDown={handleMouseDown}
-      onClick={handleClick}
-      onBlur={handleBlur}
-    />
+    <Draggable
+      position={localPosition}
+      enabled={true}
+      requireSelection={true}
+      isSelected={isSelected && mode === 'selected'}
+      onPositionChange={handlePositionChange}
+      onDragEnd={handleDragEnd}
+      className="pointer-events-auto"
+      style={wrapperStyle}
+    >
+      <Resizable
+        width={localSize.width}
+        height={localSize.height}
+        position={localPosition}
+        enabled={true}
+        requireSelection={true}
+        isSelected={isSelected}
+        minWidth={30}
+        minHeight={Math.max(20, scaledFontSize)}
+        onSizeChange={handleSizeChange}
+        onPositionChange={handleResizePositionChange}
+        onResizeStart={handleResizeStart}
+        onResizeEnd={handleResizeEnd}
+        showHandles={isSelected}
+      >
+        <div
+          ref={containerRef}
+          style={{ width: '100%', height: '100%', position: 'relative' }}
+          onClick={handleClick}
+        >
+          <textarea
+            ref={textareaRef}
+            readOnly={mode !== 'editing'}
+            className={textareaClassName}
+            style={{
+              fontSize: `${scaledFontSize}px`,
+              color: fontColor,
+              lineHeight: 1.4,
+            }}
+            defaultValue={content}
+            onBlur={handleBlur}
+          />
+          {(mode === 'editing' || mode === 'selected') && (
+            <div
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                border: '2px dashed #a200ff',
+                pointerEvents: 'none',
+              }}
+            />
+          )}
+        </div>
+      </Resizable>
+    </Draggable>
   );
 };

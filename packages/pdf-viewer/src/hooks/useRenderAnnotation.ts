@@ -78,6 +78,7 @@ export function useRenderAnnotation({
         position: a.position,
         fontSize: a.fontSize,
         fontColor: a.fontColor,
+        dimensions: a.dimensions,
       }),
     );
   }, [annotations]);

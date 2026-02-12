@@ -3031,10 +3031,7 @@ export class PdfController implements IPdfController {
 
       // In PDF coordinates, ensure left < right and bottom < top
       const pdfLeft = Math.min(topLeftPage.x, bottomRightPage.x);
-      const pdfBottom = Math.min(topLeftPage.y, bottomRightPage.y);
       const pdfTop = Math.max(topLeftPage.y, bottomRightPage.y);
-
-      const annotHeight = pdfTop - pdfBottom;
 
       // Track resources for cleanup
       const ptrsToFree: number[] = [];
@@ -3065,11 +3062,12 @@ export class PdfController implements IPdfController {
         // Set fill color (0-255 range)
         pdfium._FPDFPageObj_SetFillColor_W(textObj, r255, g255, b255, 255);
 
-        // Position the text in absolute page coordinates
-        // Text baseline is at the bottom of the text, so we add some padding
-        const padding = 2;
-        const textX = pdfLeft + padding;
-        const textY = pdfBottom + (annotHeight - fontSize) / 2;
+        // Position the text in absolute page coordinates.
+        // The textarea renders text top-aligned with lineHeight 1.4.
+        // PDF text objects are positioned by baseline.
+        // Small offset accounts for half-leading from lineHeight.
+        const textX = pdfLeft;
+        const textY = pdfTop - fontSize * 1.1;
 
         // Transform to position (translation matrix)
         pdfium._FPDFPageObj_Transform_W(textObj, 1, 0, 0, 1, textX, textY);
