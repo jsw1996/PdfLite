@@ -69,6 +69,11 @@ export function useRenderAnnotation({
   signatureAnnotations: React.ReactElement[];
 } {
   // Derive text annotations from annotations using useMemo
+  const containerSize = useMemo(
+    () => (metrics ? { width: metrics.cssWidth, height: metrics.cssHeight } : undefined),
+    [metrics],
+  );
+
   const textAnnotations = useMemo(() => {
     return annotations.filter(isTextAnnotation).map((a) =>
       React.createElement(TextBox, {
@@ -79,9 +84,10 @@ export function useRenderAnnotation({
         fontSize: a.fontSize,
         fontColor: a.fontColor,
         dimensions: a.dimensions,
+        containerSize,
       }),
     );
-  }, [annotations]);
+  }, [annotations, containerSize]);
 
   // Derive signature annotations from annotations using useMemo
   const signatureAnnotations = useMemo(() => {

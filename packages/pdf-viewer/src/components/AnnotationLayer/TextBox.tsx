@@ -12,6 +12,8 @@ export interface ITextBoxProps {
   fontSize: number;
   fontColor: string;
   dimensions?: { width: number; height: number };
+  /** Page container size used to constrain dragging within bounds */
+  containerSize?: { width: number; height: number };
 }
 
 type Mode = 'editing' | 'selected' | 'idle';
@@ -55,6 +57,7 @@ export const TextBox: React.FC<ITextBoxProps> = ({
   fontSize,
   fontColor,
   dimensions,
+  containerSize,
 }) => {
   const { updateAnnotation } = useAnnotation();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -109,6 +112,7 @@ export const TextBox: React.FC<ITextBoxProps> = ({
     (e: React.MouseEvent) => {
       const target = e.target as HTMLElement;
       if (target.classList.contains('resize-handle')) return;
+      if (target.classList.contains('drag-handle')) return;
       if (!containerRef.current?.contains(target)) return;
       e.stopPropagation();
 
@@ -145,6 +149,14 @@ export const TextBox: React.FC<ITextBoxProps> = ({
   }, [isSelected, id, scaledFontSize, localSize, updateAnnotation]);
 
   // ---------- drag callbacks ----------
+
+  const handleDragStart = useCallback(() => {
+    if (mode === 'editing') {
+      textareaRef.current?.blur();
+      setMode('selected');
+      setIsSelected(true);
+    }
+  }, [mode]);
 
   const handlePositionChange = useCallback((p: IPoint) => {
     setLocalPosition(p);
@@ -215,6 +227,14 @@ export const TextBox: React.FC<ITextBoxProps> = ({
 
   // ---------- render ----------
 
+  const dragBounds = useMemo(() => {
+    if (!containerSize) return undefined;
+    return {
+      maxX: Math.max(0, containerSize.width - localSize.width),
+      maxY: Math.max(0, containerSize.height - localSize.height),
+    };
+  }, [containerSize, localSize]);
+
   const wrapperStyle = useMemo(() => ({ zIndex: isSelected ? 1000 : 10 }), [isSelected]);
 
   const textareaClassName = cn(
@@ -230,7 +250,9 @@ export const TextBox: React.FC<ITextBoxProps> = ({
       enabled={true}
       requireSelection={true}
       isSelected={isSelected && mode === 'selected'}
+      bounds={dragBounds}
       onPositionChange={handlePositionChange}
+      onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
       className="pointer-events-auto"
       style={wrapperStyle}
@@ -270,17 +292,69 @@ export const TextBox: React.FC<ITextBoxProps> = ({
             onBlur={handleBlur}
           />
           {(mode === 'editing' || mode === 'selected') && (
-            <div
-              style={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                right: 0,
-                bottom: 0,
-                border: '2px dashed #a200ff',
-                pointerEvents: 'none',
-              }}
-            />
+            <>
+              {/* Visual border */}
+              <div
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  border: '2px dashed #a200ff',
+                  pointerEvents: 'none',
+                }}
+              />
+              {/* Interactive edge hit zones for border dragging */}
+              <div
+                className="drag-handle"
+                style={{
+                  position: 'absolute',
+                  top: -3,
+                  left: -3,
+                  right: -3,
+                  height: 8,
+                  cursor: 'grab',
+                  pointerEvents: 'auto',
+                }}
+              />
+              <div
+                className="drag-handle"
+                style={{
+                  position: 'absolute',
+                  bottom: -3,
+                  left: -3,
+                  right: -3,
+                  height: 8,
+                  cursor: 'grab',
+                  pointerEvents: 'auto',
+                }}
+              />
+              <div
+                className="drag-handle"
+                style={{
+                  position: 'absolute',
+                  top: -3,
+                  left: -3,
+                  bottom: -3,
+                  width: 8,
+                  cursor: 'grab',
+                  pointerEvents: 'auto',
+                }}
+              />
+              <div
+                className="drag-handle"
+                style={{
+                  position: 'absolute',
+                  top: -3,
+                  right: -3,
+                  bottom: -3,
+                  width: 8,
+                  cursor: 'grab',
+                  pointerEvents: 'auto',
+                }}
+              />
+            </>
           )}
         </div>
       </Resizable>

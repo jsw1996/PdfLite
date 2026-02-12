@@ -18,6 +18,8 @@ export interface IDraggableProps {
   requireSelection?: boolean;
   /** Whether the component is selected */
   isSelected?: boolean;
+  /** Optional upper-bound limits for dragging (e.g. page width/height minus element size) */
+  bounds?: { maxX?: number; maxY?: number };
   /** Callback when position changes */
   onPositionChange?: (position: IPoint) => void;
   /** Callback when drag starts */
@@ -42,6 +44,7 @@ export const Draggable: React.FC<IDraggableProps> = ({
   enabled = true,
   requireSelection = false,
   isSelected = false,
+  bounds,
   onPositionChange,
   onDragStart,
   onDragEnd,
@@ -79,8 +82,12 @@ export const Draggable: React.FC<IDraggableProps> = ({
         return;
       }
 
-      // Don't handle if selection is required but not selected
-      if (requireSelection && !isSelected) {
+      // Allow drag from elements marked as drag handles regardless of selection
+      const isDragHandle =
+        target.classList.contains('drag-handle') || target.closest?.('.drag-handle') != null;
+
+      // Don't handle if selection is required but not selected (unless it's a drag handle)
+      if (requireSelection && !isSelected && !isDragHandle) {
         return;
       }
 
@@ -125,14 +132,16 @@ export const Draggable: React.FC<IDraggableProps> = ({
         startMouseRef.current.containerLeft !== undefined &&
         startMouseRef.current.containerTop !== undefined
       ) {
-        const newX = Math.max(
+        let newX = Math.max(
           0,
           e.clientX - startMouseRef.current.containerLeft - startMouseRef.current.x,
         );
-        const newY = Math.max(
+        let newY = Math.max(
           0,
           e.clientY - startMouseRef.current.containerTop - startMouseRef.current.y,
         );
+        if (bounds?.maxX != null) newX = Math.min(newX, bounds.maxX);
+        if (bounds?.maxY != null) newY = Math.min(newY, bounds.maxY);
         pendingPosition = { x: newX, y: newY };
       }
 
@@ -188,7 +197,7 @@ export const Draggable: React.FC<IDraggableProps> = ({
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isDragging, localPosition, onPositionChange, onDragEnd]);
+  }, [isDragging, localPosition, onPositionChange, onDragEnd, bounds]);
 
   const containerStyle = useMemo(() => {
     return {
