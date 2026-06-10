@@ -5,6 +5,20 @@ interface ILandingPageProps {
   onFileSelect: (file: File) => void;
 }
 
+const MAX_PDF_BYTES = 512 * 1024 * 1024;
+
+function validatePdfFile(file: File): string | null {
+  const isPdfType = file.type === 'application/pdf' || file.type === '';
+  const hasPdfExt = file.name.toLowerCase().endsWith('.pdf');
+  if (!isPdfType || !hasPdfExt) return 'Please upload a valid PDF file.';
+  if (file.size > MAX_PDF_BYTES) {
+    const mb = Math.round(MAX_PDF_BYTES / (1024 * 1024));
+    return `File is too large (max ${mb} MB).`;
+  }
+  if (file.size === 0) return 'File is empty.';
+  return null;
+}
+
 export const LandingPage: React.FC<ILandingPageProps> = ({ onFileSelect }) => {
   const inputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -18,23 +32,27 @@ export const LandingPage: React.FC<ILandingPageProps> = ({ onFileSelect }) => {
     setIsDragging(false);
   };
 
+  const acceptFile = (file: File) => {
+    const error = validatePdfFile(file);
+    if (error) {
+      alert(error);
+      return;
+    }
+    onFileSelect(file);
+  };
+
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
-    if (e.dataTransfer.files?.[0]) {
-      const file = e.dataTransfer.files[0];
-      if (file.type === 'application/pdf') {
-        onFileSelect(file);
-      } else {
-        alert('Please upload a valid PDF file.');
-      }
-    }
+    const file = e.dataTransfer.files?.[0];
+    if (file) acceptFile(file);
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files?.[0]) {
-      onFileSelect(e.target.files[0]);
-    }
+    const file = e.target.files?.[0];
+    if (file) acceptFile(file);
+    // Reset so picking the same file again still fires change.
+    e.target.value = '';
   };
 
   return (

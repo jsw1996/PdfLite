@@ -1,4 +1,12 @@
-import React, { createContext, useContext, useMemo, useState, useCallback } from 'react';
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useCallback,
+} from 'react';
 import {
   type IAnnotation,
   type AnnotationType,
@@ -10,8 +18,8 @@ import { usePdfState } from './PdfStateContextProvider';
 import { usePdfController } from './PdfControllerContextProvider';
 
 export interface IEditSessionData {
-  /** Editor innerHTML saved across virtualized unmount/remount cycles. Key: `${pageIndex}:${paragraphIndex}` */
-  savedEditorHtml: Map<string, string>;
+  /** Editor plain text saved across virtualized unmount/remount cycles. Key: `${pageIndex}:${paragraphIndex}` */
+  savedEditorText: Map<string, string>;
   /** Original per-line CSS color strings saved before FPDFPage_GenerateContent corrupts them. Key: `${pageIndex}:${paragraphIndex}` */
   savedLineColors: Map<string, string[]>;
 }
@@ -68,7 +76,7 @@ export function AnnotationContextProvider({ children }: { children: React.ReactN
   // the setter). Using useState instead of useRef avoids "ref access during
   // render" errors from the React Compiler.
   const [editSessionData] = useState<IEditSessionData>(() => ({
-    savedEditorHtml: new Map(),
+    savedEditorText: new Map(),
     savedLineColors: new Map(),
   }));
 
@@ -83,14 +91,34 @@ export function AnnotationContextProvider({ children }: { children: React.ReactN
       if (mode) {
         _setSelectedTool(null);
       } else {
-        // Only clear transient editor HTML — preserve savedLineColors across
+        // Only clear transient editor text — preserve savedLineColors across
         // sessions because FPDFPage_GenerateContent corrupts the content stream's
         // color data, making FPDFText_GetFillColor unreliable for edited objects.
-        editSessionData.savedEditorHtml.clear();
+        editSessionData.savedEditorText.clear();
       }
     },
     [editSessionData],
   );
+
+  // Document-level edit-mode teardown.
+  // Child TextLayer effects fire before parent effects, so by the time this
+  // runs every per-page commit has already landed. Owning the doc-wide
+  // teardown here prevents the race that occurred when each virtualized
+  // TextLayer called releaseEditPages/bumpRenderVersion in parallel.
+  // setRenderVersion is queued via microtask to avoid the cascading-render
+  // pattern the lint rule rejects (and to let the current commit phase finish
+  // releasing edit-page pointers before invalidating canvases).
+  const wasEditModeRef = useRef(false);
+  useEffect(() => {
+    if (isEditMode) {
+      wasEditModeRef.current = true;
+      return;
+    }
+    if (!wasEditModeRef.current) return;
+    wasEditModeRef.current = false;
+    controller.releaseEditPages();
+    queueMicrotask(() => setRenderVersion((v) => v + 1));
+  }, [isEditMode, controller]);
 
   const annotationsByPage = useMemo(() => {
     const map = new Map<number, IAnnotation[]>();

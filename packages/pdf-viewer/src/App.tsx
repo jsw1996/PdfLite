@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { LandingPage } from './components/LandingPage';
 import { PdfEditor } from './components/PdfEditor';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { SidebarProvider } from '@pdfviewer/ui/components/sidebar';
 import type { CSSProperties } from 'react';
 import { PdfControllerContextProvider } from './providers/PdfControllerContextProvider';
@@ -18,13 +19,15 @@ function App() {
   return !isFileOpened ? (
     <LandingPage onFileSelect={onFileSelected} />
   ) : (
-    <ThemeContextProvider>
-      <PdfControllerContextProvider>
-        <SidebarProvider style={{ '--sidebar-width': '20rem' } as CSSProperties}>
-          <PdfEditor file={file!} />
-        </SidebarProvider>
-      </PdfControllerContextProvider>
-    </ThemeContextProvider>
+    <ErrorBoundary>
+      <ThemeContextProvider>
+        <PdfControllerContextProvider>
+          <SidebarProvider style={{ '--sidebar-width': '20rem' } as CSSProperties}>
+            <PdfEditor file={file!} />
+          </SidebarProvider>
+        </PdfControllerContextProvider>
+      </ThemeContextProvider>
+    </ErrorBoundary>
   );
 }
 

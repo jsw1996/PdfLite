@@ -5,6 +5,7 @@ import type { IEditableTextObject } from '@pdfviewer/controller';
 import {
   buildEditableParagraphsFromTextRects,
   buildEditorHtml,
+  buildEditorHtmlFromText,
   convertRectsToBaseSpans,
   extractTextFromEditor,
   mapParagraphLinesToObjectGroups,
@@ -26,8 +27,8 @@ export interface ITextLayerProps {
  */
 export const TextLayer: React.FC<ITextLayerProps> = ({ pageIndex, scale = 1.5 }) => {
   const { controller, isInitialized } = usePdfController();
-  const { isEditMode, renderVersion, bumpRenderVersion, editSessionData } = useAnnotation();
-  const { savedEditorHtml, savedLineColors } = editSessionData;
+  const { isEditMode, renderVersion, editSessionData } = useAnnotation();
+  const { savedEditorText, savedLineColors } = editSessionData;
   const layerRef = useRef<HTMLDivElement | null>(null);
 
   // Pre-computed commit data for all paragraphs (populated on entering edit mode)
@@ -225,38 +226,12 @@ export const TextLayer: React.FC<ITextLayerProps> = ({ pageIndex, scale = 1.5 })
     ],
   );
 
-  // Commit all pending edits when exiting edit mode.
-  // We read from editorTextsRef (not the DOM) because React unmounts editors before effects run.
-  const wasEditModeRef = useRef(false);
-  useEffect(() => {
-    if (isEditMode) {
-      wasEditModeRef.current = true;
-      return;
-    }
-    if (!wasEditModeRef.current) return;
-    wasEditModeRef.current = false;
-
-    // Commit all pending edits with skipGenerateContent so we batch all
-    // text mutations first, then regenerate the content stream once.
-    for (const [idx, text] of editorTextsRef.current) {
-      commitParagraphText(idx, text, true);
-    }
-    // Single GenerateContent call for the entire page
-    controller.generatePageContent(pageIndex);
-    // Bump render version once after all commits so the canvas re-renders
-    bumpRenderVersion();
-    // Release cached edit-mode page pointers. After GenerateContent the
-    // changes are persisted to the content stream, so a fresh page load
-    // (triggered by bumpRenderVersion) will render the updated content.
-    controller.releaseEditPages();
-    // Clean up component-level refs (context-level maps are cleared by setIsEditMode)
-    editorTextsRef.current.clear();
-    paragraphObjectGroupsRef.current.clear();
-    originalTextsRef.current.clear();
-  }, [bumpRenderVersion, commitParagraphText, controller, isEditMode, pageIndex]);
-
-  // Commit pending edits when the component unmounts during edit mode
-  // (e.g., page scrolled out of the virtualized viewport).
+  // Per-page commit on exit OR on unmount-during-edit (e.g., page scrolled out
+  // of the virtualized viewport). The cleanup runs when isEditMode flips to
+  // false, when pageIndex/controller change, or when the component unmounts —
+  // any of these means "this page's edits need to land now". Doc-wide finalize
+  // (releaseEditPages, bumpRenderVersion) lives on the provider so it runs
+  // exactly once after every page's cleanup has flushed.
   const commitParagraphTextRef = useRef(commitParagraphText);
   useEffect(() => {
     commitParagraphTextRef.current = commitParagraphText;
@@ -264,29 +239,36 @@ export const TextLayer: React.FC<ITextLayerProps> = ({ pageIndex, scale = 1.5 })
   useEffect(() => {
     if (!isEditMode) return;
     const textsRef = editorTextsRef.current;
+    const objectGroupsRef = paragraphObjectGroupsRef.current;
+    const origsRef = originalTextsRef.current;
     const ctrl = controller;
     const page = pageIndex;
     return () => {
-      // Batch all commits with skipGenerateContent, then regenerate once.
-      // Without this, each paragraph triggers a separate GenerateContent
-      // call, compounding content-stream corruption.
+      // Batch all commits with skipGenerateContent, then regenerate once
+      // per page. Without this, each paragraph triggers a separate
+      // GenerateContent call, compounding content-stream corruption.
       for (const [idx, text] of textsRef) {
         commitParagraphTextRef.current(idx, text, true);
       }
       ctrl.generatePageContent(page);
+      textsRef.clear();
+      objectGroupsRef.clear();
+      origsRef.clear();
     };
   }, [isEditMode, controller, pageIndex]);
 
-  // Stage editor text and HTML without committing to PDFium.
-  // All commits are deferred to the exit-mode effect so that GenerateContent
-  // is called only once per page, avoiding content-stream corruption.
+  // Stage editor text without committing to PDFium. All commits are deferred
+  // to the unmount-cleanup effect so GenerateContent runs at most once per
+  // page per session. Only plain text is persisted across remount — we never
+  // round-trip the editor's innerHTML so user-pasted markup cannot be
+  // re-injected via contentEditable rehydration.
   const stageEditorContent = useCallback(
     (editor: HTMLElement, idx: number) => {
       const text = normalizeEditableText(extractTextFromEditor(editor));
       editorTextsRef.current.set(idx, text);
-      savedEditorHtml.set(`${pageIndex}:${idx}`, editor.innerHTML);
+      savedEditorText.set(`${pageIndex}:${idx}`, text);
     },
-    [pageIndex, savedEditorHtml],
+    [pageIndex, savedEditorText],
   );
 
   const handleEditorPaste = useCallback(
@@ -350,7 +332,11 @@ export const TextLayer: React.FC<ITextLayerProps> = ({ pageIndex, scale = 1.5 })
                 }
               : paragraph;
             const style = resolveParagraphEditorStyle(colorSafeParagraph);
-            const html = buildEditorHtml(colorSafeParagraph, style.lineHeightPx);
+            const savedText = savedEditorText.get(`${pageIndex}:${idx}`);
+            const html =
+              savedText !== undefined
+                ? buildEditorHtmlFromText(colorSafeParagraph, style.lineHeightPx, savedText)
+                : buildEditorHtml(colorSafeParagraph, style.lineHeightPx);
             const firstLineFontSize = paragraph.lines[0]?.fontSizePx ?? 0;
             const halfLeading = (style.lineHeightPx - firstLineFontSize) / 2;
 
@@ -359,9 +345,7 @@ export const TextLayer: React.FC<ITextLayerProps> = ({ pageIndex, scale = 1.5 })
                 key={idx}
                 ref={(el) => {
                   if (el && !el.dataset.editorInit) {
-                    const savedKey = `${pageIndex}:${idx}`;
-                    const saved = savedEditorHtml.get(savedKey);
-                    el.innerHTML = saved ?? html;
+                    el.innerHTML = html;
                     el.dataset.editorInit = '1';
                   }
                 }}

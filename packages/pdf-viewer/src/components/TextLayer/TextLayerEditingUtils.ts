@@ -838,28 +838,53 @@ function escapeHtml(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+function buildLineDivHtml(
+  line: IParagraphLine,
+  paragraphWidth: number,
+  lineHeightPx: number,
+  text: string,
+): string {
+  const width = (paragraphWidth / line.scaleX) * 1.03;
+  const styleParts = [
+    `font-family:${line.fontFamily}`,
+    `font-size:${line.fontSizePx}px`,
+    `line-height:${lineHeightPx}px`,
+    `color:${line.color}`,
+    `transform:scaleX(${line.scaleX})`,
+    `transform-origin:0 0`,
+    `width:${width}px`,
+    `white-space:pre-wrap`,
+    `word-break:break-word`,
+  ].join(';');
+  const safeStyle = styleParts.replace(/"/g, '&quot;');
+  return `<div style="${safeStyle}">${escapeHtml(text)}</div>`;
+}
+
 /**
  * Builds the initial innerHTML for the contentEditable editor.
  * Each paragraph line becomes a styled `<div>` with per-line font, size, color, and scaleX.
  */
 export function buildEditorHtml(paragraph: IEditableParagraph, lineHeightPx: number): string {
   return paragraph.lines
-    .map((line) => {
-      const width = (paragraph.rect.width / line.scaleX) * 1.03;
-      const styleParts = [
-        `font-family:${line.fontFamily}`,
-        `font-size:${line.fontSizePx}px`,
-        `line-height:${lineHeightPx}px`,
-        `color:${line.color}`,
-        `transform:scaleX(${line.scaleX})`,
-        `transform-origin:0 0`,
-        `width:${width}px`,
-        `white-space:pre-wrap`,
-        `word-break:break-word`,
-      ].join(';');
-      // Escape double quotes in style values (e.g. font-family names)
-      const safeStyle = styleParts.replace(/"/g, '&quot;');
-      return `<div style="${safeStyle}">${escapeHtml(line.text)}</div>`;
+    .map((line) => buildLineDivHtml(line, paragraph.rect.width, lineHeightPx, line.text))
+    .join('');
+}
+
+/**
+ * Rebuilds editor innerHTML from saved plain text using the paragraph's per-line styles.
+ * Used to restore editor state across virtualized unmount without trusting the prior HTML.
+ */
+export function buildEditorHtmlFromText(
+  paragraph: IEditableParagraph,
+  lineHeightPx: number,
+  savedText: string,
+): string {
+  if (paragraph.lines.length === 0) return '';
+  const lines = savedText.split('\n');
+  return lines
+    .map((lineText, i) => {
+      const styleLine = paragraph.lines[Math.min(i, paragraph.lines.length - 1)];
+      return buildLineDivHtml(styleLine, paragraph.rect.width, lineHeightPx, lineText);
     })
     .join('');
 }
