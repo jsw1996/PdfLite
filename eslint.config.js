@@ -17,7 +17,13 @@ const __dirname = dirname(__filename);
 
 export default defineConfig([
   {
-    ignores: ['**/dist', '**/coverage', '**/.pnpm-store', '**/pdfium-wasm'],
+    ignores: [
+      '**/dist',
+      '**/coverage',
+      '**/.pnpm-store',
+      'packages/pdfium-wasm/wasm/**',
+      'packages/pdfium-wasm/build/**',
+    ],
   },
   {
     extends: [
@@ -67,6 +73,16 @@ export default defineConfig([
           prefix: ['I'],
         },
       ],
+    },
+  },
+  {
+    files: ['packages/pdf-viewer/src/**/*.{ts,tsx}', 'packages/controller/src/**/*.{ts,tsx}'],
+    rules: {
+      '@typescript-eslint/no-unsafe-assignment': 'error',
+      '@typescript-eslint/no-unsafe-member-access': 'error',
+      '@typescript-eslint/no-unsafe-call': 'error',
+      '@typescript-eslint/no-unsafe-return': 'error',
+      '@typescript-eslint/no-unsafe-argument': 'error',
     },
   },
   prettier,

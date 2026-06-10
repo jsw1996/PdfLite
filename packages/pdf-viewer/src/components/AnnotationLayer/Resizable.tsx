@@ -69,6 +69,35 @@ export const Resizable: React.FC<IResizableProps> = ({
   const startSizeRef = useRef<{ width: number; height: number } | null>(null);
   const startMouseRef = useRef<{ x: number; y: number } | null>(null);
 
+  // Latest-callback / latest-value refs so the resize effect can depend only
+  // on `isResizing` + `resizeHandle`. Otherwise every setLocalSize mid-gesture
+  // (or any parent re-render that changes a callback identity) rebinds the
+  // window mousemove/mouseup listeners — which drops in-flight pointer events.
+  const localSizeRef = useRef(localSize);
+  useEffect(() => {
+    localSizeRef.current = localSize;
+  }, [localSize]);
+  const minWidthRef = useRef(minWidth);
+  useEffect(() => {
+    minWidthRef.current = minWidth;
+  }, [minWidth]);
+  const minHeightRef = useRef(minHeight);
+  useEffect(() => {
+    minHeightRef.current = minHeight;
+  }, [minHeight]);
+  const onSizeChangeRef = useRef(onSizeChange);
+  useEffect(() => {
+    onSizeChangeRef.current = onSizeChange;
+  }, [onSizeChange]);
+  const onPositionChangeRef = useRef(onPositionChange);
+  useEffect(() => {
+    onPositionChangeRef.current = onPositionChange;
+  }, [onPositionChange]);
+  const onResizeEndRef = useRef(onResizeEnd);
+  useEffect(() => {
+    onResizeEndRef.current = onResizeEnd;
+  }, [onResizeEnd]);
+
   // Sync size from props (only when not resizing)
   useEffect(() => {
     if (!isResizing && (localSize.width !== width || localSize.height !== height)) {
@@ -125,41 +154,43 @@ export const Resizable: React.FC<IResizableProps> = ({
       let newHeight = startSizeRef.current.height;
       let newX = startPosRef.current.x;
       let newY = startPosRef.current.y;
+      const minW = minWidthRef.current;
+      const minH = minHeightRef.current;
 
       // Calculate new size and position based on resize handle
       switch (resizeHandle) {
         case 'se':
-          newWidth = Math.max(minWidth, startSizeRef.current.width + deltaX);
-          newHeight = Math.max(minHeight, startSizeRef.current.height + deltaY);
+          newWidth = Math.max(minW, startSizeRef.current.width + deltaX);
+          newHeight = Math.max(minH, startSizeRef.current.height + deltaY);
           break;
         case 'sw':
-          newWidth = Math.max(minWidth, startSizeRef.current.width - deltaX);
-          newHeight = Math.max(minHeight, startSizeRef.current.height + deltaY);
+          newWidth = Math.max(minW, startSizeRef.current.width - deltaX);
+          newHeight = Math.max(minH, startSizeRef.current.height + deltaY);
           newX = startPosRef.current.x + (startSizeRef.current.width - newWidth);
           break;
         case 'ne':
-          newWidth = Math.max(minWidth, startSizeRef.current.width + deltaX);
-          newHeight = Math.max(minHeight, startSizeRef.current.height - deltaY);
+          newWidth = Math.max(minW, startSizeRef.current.width + deltaX);
+          newHeight = Math.max(minH, startSizeRef.current.height - deltaY);
           newY = startPosRef.current.y + (startSizeRef.current.height - newHeight);
           break;
         case 'nw':
-          newWidth = Math.max(minWidth, startSizeRef.current.width - deltaX);
-          newHeight = Math.max(minHeight, startSizeRef.current.height - deltaY);
+          newWidth = Math.max(minW, startSizeRef.current.width - deltaX);
+          newHeight = Math.max(minH, startSizeRef.current.height - deltaY);
           newX = startPosRef.current.x + (startSizeRef.current.width - newWidth);
           newY = startPosRef.current.y + (startSizeRef.current.height - newHeight);
           break;
         case 'e':
-          newWidth = Math.max(minWidth, startSizeRef.current.width + deltaX);
+          newWidth = Math.max(minW, startSizeRef.current.width + deltaX);
           break;
         case 'w':
-          newWidth = Math.max(minWidth, startSizeRef.current.width - deltaX);
+          newWidth = Math.max(minW, startSizeRef.current.width - deltaX);
           newX = startPosRef.current.x + (startSizeRef.current.width - newWidth);
           break;
         case 's':
-          newHeight = Math.max(minHeight, startSizeRef.current.height + deltaY);
+          newHeight = Math.max(minH, startSizeRef.current.height + deltaY);
           break;
         case 'n':
-          newHeight = Math.max(minHeight, startSizeRef.current.height - deltaY);
+          newHeight = Math.max(minH, startSizeRef.current.height - deltaY);
           newY = startPosRef.current.y + (startSizeRef.current.height - newHeight);
           break;
       }
@@ -174,11 +205,11 @@ export const Resizable: React.FC<IResizableProps> = ({
         rafId = requestAnimationFrame(() => {
           if (pendingSize) {
             setLocalSize(pendingSize);
-            onSizeChange?.(pendingSize);
+            onSizeChangeRef.current?.(pendingSize);
             pendingSize = null;
           }
           if (pendingPosition) {
-            onPositionChange?.(pendingPosition);
+            onPositionChangeRef.current?.(pendingPosition);
             pendingPosition = null;
           }
           rafId = null;
@@ -196,14 +227,14 @@ export const Resizable: React.FC<IResizableProps> = ({
       // Apply the last update
       if (pendingSize) {
         setLocalSize(pendingSize);
-        onSizeChange?.(pendingSize);
+        onSizeChangeRef.current?.(pendingSize);
       }
       if (pendingPosition) {
-        onPositionChange?.(pendingPosition);
+        onPositionChangeRef.current?.(pendingPosition);
       }
 
       // Capture the final size before resetting pendingSize
-      const finalSize = pendingSize ?? localSize;
+      const finalSize = pendingSize ?? localSizeRef.current;
 
       // Reset state
       pendingSize = null;
@@ -214,7 +245,7 @@ export const Resizable: React.FC<IResizableProps> = ({
       startSizeRef.current = null;
       startMouseRef.current = null;
 
-      onResizeEnd?.(finalSize);
+      onResizeEndRef.current?.(finalSize);
     };
 
     window.addEventListener('mousemove', handleMouseMove);
@@ -227,16 +258,7 @@ export const Resizable: React.FC<IResizableProps> = ({
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [
-    isResizing,
-    resizeHandle,
-    localSize,
-    minWidth,
-    minHeight,
-    onSizeChange,
-    onPositionChange,
-    onResizeEnd,
-  ]);
+  }, [isResizing, resizeHandle]);
 
   const defaultHandleStyle = useMemo(() => {
     return {

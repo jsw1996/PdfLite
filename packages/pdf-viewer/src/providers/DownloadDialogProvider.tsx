@@ -91,7 +91,10 @@ export function DownloadDialogProvider({
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
-        setTimeout(() => URL.revokeObjectURL(url), 100);
+        // Microtask-revoke: the browser has begun the download by the time
+        // `.click()` returns. Avoids both the early-revoke race and the
+        // never-revoke leak that `setTimeout(..., 100)` was prone to.
+        queueMicrotask(() => URL.revokeObjectURL(url));
 
         // Close the dialog
         setIsDialogOpen(false);

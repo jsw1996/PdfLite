@@ -4,6 +4,7 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
+      "inputs": ["src/**", "tsconfig*.json", "package.json"],
       "outputs": ["dist/**", "wasm/**"]
     },
     "dev": {
@@ -12,6 +13,7 @@
     },
     "lint": {
       "dependsOn": ["^lint"],
+      "inputs": ["src/**", "*.config.*", "tsconfig*.json", "package.json"],
       "outputs": []
     }
   }

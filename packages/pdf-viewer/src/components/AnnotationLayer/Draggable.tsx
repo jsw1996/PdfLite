@@ -62,6 +62,27 @@ export const Draggable: React.FC<IDraggableProps> = ({
   );
   const hasMovedRef = useRef(false);
 
+  // Latest-callback / latest-value refs so the drag effect can depend ONLY on
+  // `isDragging`. Without this, every mouse-move setLocalPosition rebinds the
+  // mousemove/mouseup listeners mid-gesture (effect deps were localPosition +
+  // unstable callback identities), which can drop pointer events.
+  const localPositionRef = useRef(localPosition);
+  useEffect(() => {
+    localPositionRef.current = localPosition;
+  }, [localPosition]);
+  const boundsRef = useRef(bounds);
+  useEffect(() => {
+    boundsRef.current = bounds;
+  }, [bounds]);
+  const onPositionChangeRef = useRef(onPositionChange);
+  useEffect(() => {
+    onPositionChangeRef.current = onPositionChange;
+  }, [onPositionChange]);
+  const onDragEndRef = useRef(onDragEnd);
+  useEffect(() => {
+    onDragEndRef.current = onDragEnd;
+  }, [onDragEnd]);
+
   // Sync position from props (only when not dragging)
   // Use useLayoutEffect to sync before browser paint to avoid flickering
   useLayoutEffect(() => {
@@ -140,8 +161,9 @@ export const Draggable: React.FC<IDraggableProps> = ({
           0,
           e.clientY - startMouseRef.current.containerTop - startMouseRef.current.y,
         );
-        if (bounds?.maxX != null) newX = Math.min(newX, bounds.maxX);
-        if (bounds?.maxY != null) newY = Math.min(newY, bounds.maxY);
+        const b = boundsRef.current;
+        if (b?.maxX != null) newX = Math.min(newX, b.maxX);
+        if (b?.maxY != null) newY = Math.min(newY, b.maxY);
         pendingPosition = { x: newX, y: newY };
       }
 
@@ -150,7 +172,7 @@ export const Draggable: React.FC<IDraggableProps> = ({
         rafId = requestAnimationFrame(() => {
           if (pendingPosition) {
             setLocalPosition(pendingPosition);
-            onPositionChange?.(pendingPosition);
+            onPositionChangeRef.current?.(pendingPosition);
             pendingPosition = null;
           }
           rafId = null;
@@ -168,12 +190,12 @@ export const Draggable: React.FC<IDraggableProps> = ({
       // Apply the last update
       if (pendingPosition) {
         setLocalPosition(pendingPosition);
-        onPositionChange?.(pendingPosition);
+        onPositionChangeRef.current?.(pendingPosition);
       }
 
       const hadMoved = hasMovedRef.current;
       // Capture the final position before resetting pendingPosition
-      const finalPosition = pendingPosition ?? localPosition;
+      const finalPosition = pendingPosition ?? localPositionRef.current;
 
       // Reset state
       pendingPosition = null;
@@ -183,7 +205,7 @@ export const Draggable: React.FC<IDraggableProps> = ({
       hasMovedRef.current = false;
 
       if (hadMoved) {
-        onDragEnd?.(finalPosition);
+        onDragEndRef.current?.(finalPosition);
       }
     };
 
@@ -197,7 +219,7 @@ export const Draggable: React.FC<IDraggableProps> = ({
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isDragging, localPosition, onPositionChange, onDragEnd, bounds]);
+  }, [isDragging]);
 
   const containerStyle = useMemo(() => {
     return {

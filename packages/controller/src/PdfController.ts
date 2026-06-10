@@ -479,37 +479,27 @@ export class PdfController implements IPdfController {
   ): { name: string; size: number } {
     let name = '(unknown)';
     let size = 0;
-    const p = pdfium as unknown as Record<string, unknown>;
     try {
-      if (typeof p._FPDFTextObj_GetFont_W !== 'function') return { name, size };
-      const fontHandle = (p._FPDFTextObj_GetFont_W as (obj: number) => number)(textObjectPtr);
-      if (fontHandle && typeof p._FPDFFont_GetFontName_W === 'function') {
-        const getFontName = p._FPDFFont_GetFontName_W as (
-          f: number,
-          b: number,
-          l: number,
-        ) => number;
-        const needed = getFontName(fontHandle, 0, 0);
+      const fontHandle = pdfium._FPDFTextObj_GetFont_W(textObjectPtr);
+      if (fontHandle) {
+        const needed = pdfium._FPDFFont_GetFontName_W(fontHandle, 0, 0);
         if (needed > 0) {
           const buf = pdfium._malloc(needed);
           try {
-            getFontName(fontHandle, buf, needed);
+            pdfium._FPDFFont_GetFontName_W(fontHandle, buf, needed);
             name = PdfController.utf8Decoder.decode(pdfium.HEAPU8.subarray(buf, buf + needed - 1));
           } finally {
             pdfium._free(buf);
           }
         }
       }
-      if (typeof p._FPDFTextObj_GetFontSize_W === 'function') {
-        const getFontSize = p._FPDFTextObj_GetFontSize_W as (o: number, p: number) => number;
-        const sizePtr = pdfium._malloc(4);
-        try {
-          if (getFontSize(textObjectPtr, sizePtr)) {
-            size = pdfium.getValue(sizePtr, 'float');
-          }
-        } finally {
-          pdfium._free(sizePtr);
+      const sizePtr = pdfium._malloc(4);
+      try {
+        if (pdfium._FPDFTextObj_GetFontSize_W(textObjectPtr, sizePtr)) {
+          size = pdfium.getValue(sizePtr, 'float');
         }
+      } finally {
+        pdfium._free(sizePtr);
       }
     } catch {
       // Font APIs may not be available in current WASM build
@@ -1001,6 +991,7 @@ export class PdfController implements IPdfController {
       pdfium._PDFium_SetRenderCancelFlag(1);
     };
     signal.addEventListener('abort', onAbort);
+    let started = false;
 
     try {
       // Reset cancel flag before starting
@@ -1017,13 +1008,12 @@ export class PdfController implements IPdfController {
         0,
         FPDF_RENDER_FLAGS.DEFAULT,
       );
+      started = true;
 
       // Continue rendering until done, failed, or cancelled
       while (status !== RENDER_DONE && status !== RENDER_FAILED) {
         // Check if aborted
         if (signal.aborted) {
-          // Close progressive rendering to release resources
-          pdfium._PDFium_RenderPage_Close(pagePtr);
           throw new DOMException('Render aborted', 'AbortError');
         }
 
@@ -1034,9 +1024,6 @@ export class PdfController implements IPdfController {
         status = pdfium._PDFium_RenderPage_Continue(pagePtr);
       }
 
-      // Close progressive rendering
-      pdfium._PDFium_RenderPage_Close(pagePtr);
-
       if (status === RENDER_FAILED) {
         throw new Error('Progressive rendering failed');
       }
@@ -1046,6 +1033,12 @@ export class PdfController implements IPdfController {
         throw new DOMException('Render aborted', 'AbortError');
       }
     } finally {
+      // Always close the progressive renderer if Start succeeded — otherwise
+      // PDFium leaks the per-page render context on any throw between Start
+      // and the success path.
+      if (started) {
+        pdfium._PDFium_RenderPage_Close(pagePtr);
+      }
       signal.removeEventListener('abort', onAbort);
       // Reset cancel flag
       pdfium._PDFium_SetRenderCancelFlag(0);
@@ -1161,9 +1154,10 @@ export class PdfController implements IPdfController {
               utf16Length,
             );
 
-            // Decode UTF-16LE to string
-            const u16Array = new Uint16Array(pdfium.HEAPU8.buffer, textBuffer, utf16Length);
-            const content = String.fromCharCode(...u16Array);
+            // Decode UTF-16LE via TextDecoder — `String.fromCharCode(...u16)` blows the
+            // call-stack on long pages (engines cap argument lists in the tens of thousands).
+            const utf16Bytes = pdfium.HEAPU8.subarray(textBuffer, textBuffer + utf16Length * 2);
+            const content = PdfController.utf16Decoder.decode(utf16Bytes);
             pdfium._free(textBuffer);
 
             if (!content.trim()) {
@@ -1724,11 +1718,7 @@ export class PdfController implements IPdfController {
     if (refPtr) {
       const fontInfo = this.readTextObjectFontInfo(pdfium, refPtr);
       pageFontSize = fontInfo.size > 0 ? fontInfo.size : 12;
-
-      const p = pdfium as unknown as Record<string, unknown>;
-      if (typeof p._FPDFTextObj_GetFont_W === 'function') {
-        fontHandle = (p._FPDFTextObj_GetFont_W as (obj: number) => number)(refPtr);
-      }
+      fontHandle = pdfium._FPDFTextObj_GetFont_W(refPtr);
     }
 
     // For overflow lines, prefer the LAST existing object's font — overflow typically
@@ -1741,11 +1731,8 @@ export class PdfController implements IPdfController {
       if (lastFontInfo.size > 0) {
         overflowFontSize = lastFontInfo.size;
       }
-      const p = pdfium as unknown as Record<string, unknown>;
-      if (typeof p._FPDFTextObj_GetFont_W === 'function') {
-        const lastFont = (p._FPDFTextObj_GetFont_W as (obj: number) => number)(lastPtr);
-        if (lastFont) overflowFontHandle = lastFont;
-      }
+      const lastFont = pdfium._FPDFTextObj_GetFont_W(lastPtr);
+      if (lastFont) overflowFontHandle = lastFont;
     }
 
     // Helper: compute page-coord position for line at given index
@@ -2065,8 +2052,15 @@ export class PdfController implements IPdfController {
   private mergeAdjacentTextRects(rects: ITextRect[]): ITextRect[] {
     if (rects.length === 0) return [];
 
+    // Deep-clone rect/font so merge writes don't mutate caller-owned input objects.
+    const cloneRect = (r: ITextRect): ITextRect => ({
+      ...r,
+      rect: { ...r.rect },
+      font: { ...r.font },
+    });
+
     const merged: ITextRect[] = [];
-    let current = { ...rects[0] };
+    let current = cloneRect(rects[0]);
 
     for (let i = 1; i < rects.length; i++) {
       const next = rects[i];
@@ -2078,13 +2072,15 @@ export class PdfController implements IPdfController {
 
       // Check if horizontally adjacent (with small tolerance for spacing)
       const currentRight = current.rect.left + current.rect.width;
+      const nextRight = next.rect.left + next.rect.width;
       const gap = next.rect.left - currentRight;
       const isAdjacent = gap < current.font.size;
 
       if (sameBaseline && isAdjacent) {
-        // Merge: extend current rect and append content
+        // Merge: extend current rect (use max right edge so overlapping rects
+        // don't shrink) and append content.
         current.content += next.content;
-        current.rect.width = next.rect.left + next.rect.width - current.rect.left;
+        current.rect.width = Math.max(currentRight, nextRight) - current.rect.left;
         // Extend height to cover both rects
         const currentBottom = current.rect.top + current.rect.height;
         const nextBottom = next.rect.top + next.rect.height;
@@ -2095,7 +2091,7 @@ export class PdfController implements IPdfController {
       } else {
         // Push current and start new
         merged.push(current);
-        current = { ...next };
+        current = cloneRect(next);
       }
     }
 
@@ -3290,7 +3286,10 @@ export class PdfController implements IPdfController {
     link.click();
     document.body.removeChild(link);
 
-    // Revoke the object URL after a short delay to allow the download to start
-    setTimeout(() => URL.revokeObjectURL(url), 100);
+    // Revoke on the next microtask — the browser has already kicked off the
+    // download by the time `.click()` returns synchronously. The previous
+    // `setTimeout(..., 100)` was a heuristic that could revoke too early
+    // under load or leak the URL if the page navigated away first.
+    queueMicrotask(() => URL.revokeObjectURL(url));
   }
 }
