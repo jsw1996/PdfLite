@@ -181,7 +181,11 @@ export const CanvasLayer: React.FC<ICanvasLayerProps> = ({
           transformOrigin: 'top left',
           position: 'absolute',
           display: 'block',
-          imageRendering: 'crisp-edges',
+          // crisp-edges keeps the bitmap sharp at rest (CSS size matches the
+          // rendered bitmap), but during a CSS-scaled zoom preview it forces
+          // nearest-neighbor upscaling (blocky). Use smooth interpolation while
+          // the visual scale differs from 1, then snap back to crisp.
+          imageRendering: visualScale === 1 ? 'crisp-edges' : 'auto',
           willChange: 'transform',
           visibility: hidden ? 'hidden' : undefined,
         }}

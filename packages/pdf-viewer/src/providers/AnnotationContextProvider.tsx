@@ -41,6 +41,12 @@ export interface IAnnotationContextValue {
   popAnnotation: () => IAnnotation | undefined;
   /** Get annotations for a specific page (denormalized for current scale) */
   getAnnotationsForPage: (pageIndex: number) => IAnnotation[];
+  /**
+   * Returns true exactly once per annotation id — the first time it is queried
+   * after being added. Used so freshly-created text boxes auto-focus/enter edit
+   * mode while pre-existing ones remounting (virtualization/zoom) stay idle.
+   */
+  consumeNewAnnotation: (id: string) => boolean;
   /** Set native annotations loaded from PDF */
   setNativeAnnotationsForPage: (pageIndex: number, annotations: IAnnotation[]) => void;
   /** Commit all overlay annotations to PDFium */
@@ -56,6 +62,10 @@ export interface IAnnotationContextValue {
 }
 
 const AnnotationContext = createContext<IAnnotationContextValue | null>(null);
+
+// Stable empty array so pages without annotations always return the same
+// reference (avoids spurious re-renders/redraws from a fresh [] each call).
+const EMPTY_ANNOTATIONS: IAnnotation[] = [];
 
 export function useAnnotation(): IAnnotationContextValue {
   const ctx = useContext(AnnotationContext);
@@ -145,13 +155,23 @@ export function AnnotationContextProvider({ children }: { children: React.ReactN
     return popped;
   }, []);
 
+  // Ids of annotations created this session that have not yet been "claimed" by
+  // their component on first mount (drives one-time auto-focus/edit).
+  const newAnnotationIdsRef = useRef<Set<string>>(new Set());
+
   const addAnnotation = useCallback(
     (annotation: IAnnotation) => {
+      newAnnotationIdsRef.current.add(annotation.id);
       // Normalize the annotation for scale-independent storage
       const normalizedAnnotation = normalizeAnnotation(annotation, scale);
       setAnnotationStack((prev) => [...prev, normalizedAnnotation]);
     },
     [scale],
+  );
+
+  const consumeNewAnnotation = useCallback(
+    (id: string) => newAnnotationIdsRef.current.delete(id),
+    [],
   );
 
   const updateAnnotation = useCallback(
@@ -171,12 +191,24 @@ export function AnnotationContextProvider({ children }: { children: React.ReactN
     [scale],
   );
 
+  // Pre-denormalize per page once per (annotations, scale) change so that
+  // getAnnotationsForPage returns a stable array identity across renders.
+  // Without this, every parent render produced a fresh array, defeating the
+  // downstream useMemo/redraw memoization in the annotation render hook.
+  const denormalizedByPage = useMemo(() => {
+    const map = new Map<number, IAnnotation[]>();
+    annotationsByPage.forEach((anns, pageIndex) => {
+      map.set(
+        pageIndex,
+        anns.map((annotation) => denormalizeAnnotation(annotation, scale)),
+      );
+    });
+    return map;
+  }, [annotationsByPage, scale]);
+
   const getAnnotationsForPage = useCallback(
-    (pageIndex: number) => {
-      const pageAnnotations = annotationsByPage.get(pageIndex) ?? [];
-      return pageAnnotations.map((annotation) => denormalizeAnnotation(annotation, scale));
-    },
-    [annotationsByPage, scale],
+    (pageIndex: number) => denormalizedByPage.get(pageIndex) ?? EMPTY_ANNOTATIONS,
+    [denormalizedByPage],
   );
 
   const setNativeAnnotationsForPage = useCallback(
@@ -234,6 +266,7 @@ export function AnnotationContextProvider({ children }: { children: React.ReactN
       setIsEditMode,
       addAnnotation,
       getAnnotationsForPage,
+      consumeNewAnnotation,
       setNativeAnnotationsForPage,
       annotationStack,
       popAnnotation,
@@ -246,6 +279,7 @@ export function AnnotationContextProvider({ children }: { children: React.ReactN
     [
       addAnnotation,
       getAnnotationsForPage,
+      consumeNewAnnotation,
       selectedTool,
       setSelectedTool,
       isEditMode,

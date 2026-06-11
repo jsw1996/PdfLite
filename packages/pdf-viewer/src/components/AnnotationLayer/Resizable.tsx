@@ -67,7 +67,10 @@ export const Resizable: React.FC<IResizableProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const startPosRef = useRef<{ x: number; y: number } | null>(null);
   const startSizeRef = useRef<{ width: number; height: number } | null>(null);
-  const startMouseRef = useRef<{ x: number; y: number } | null>(null);
+  // Pointer start plus client->layout scale (1 unless an ancestor uses CSS transform: scale()).
+  const startMouseRef = useRef<{ x: number; y: number; scaleX: number; scaleY: number } | null>(
+    null,
+  );
 
   // Latest-callback / latest-value refs so the resize effect can depend only
   // on `isResizing` + `resizeHandle`. Otherwise every setLocalSize mid-gesture
@@ -106,9 +109,9 @@ export const Resizable: React.FC<IResizableProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [width, height, isResizing]);
 
-  // Handle mouse down on resize handle
-  const handleResizeMouseDown = useCallback(
-    (e: React.MouseEvent) => {
+  // Handle pointer down on resize handle (mouse, touch, and pen)
+  const handleResizePointerDown = useCallback(
+    (e: React.PointerEvent) => {
       if (!enabled) return;
 
       const target = e.target as HTMLElement;
@@ -127,7 +130,18 @@ export const Resizable: React.FC<IResizableProps> = ({
       // Record initial position and size
       startPosRef.current = { ...position };
       startSizeRef.current = { ...localSize };
-      startMouseRef.current = { x: e.clientX, y: e.clientY };
+      const container = containerRef.current;
+      const rect = container?.getBoundingClientRect();
+      const scaleX =
+        container && rect && container.offsetWidth > 0 ? rect.width / container.offsetWidth : 1;
+      const scaleY =
+        container && rect && container.offsetHeight > 0 ? rect.height / container.offsetHeight : 1;
+      startMouseRef.current = {
+        x: e.clientX,
+        y: e.clientY,
+        scaleX: scaleX || 1,
+        scaleY: scaleY || 1,
+      };
 
       e.preventDefault();
       e.stopPropagation();
@@ -145,11 +159,12 @@ export const Resizable: React.FC<IResizableProps> = ({
     let pendingSize: { width: number; height: number } | null = null;
     let pendingPosition: { x: number; y: number } | null = null;
 
-    const handleMouseMove = (e: MouseEvent) => {
+    const handlePointerMove = (e: PointerEvent) => {
       if (!startMouseRef.current || !startSizeRef.current || !startPosRef.current) return;
 
-      const deltaX = e.clientX - startMouseRef.current.x;
-      const deltaY = e.clientY - startMouseRef.current.y;
+      // Convert client-space movement to layout space via the scale factor.
+      const deltaX = (e.clientX - startMouseRef.current.x) / startMouseRef.current.scaleX;
+      const deltaY = (e.clientY - startMouseRef.current.y) / startMouseRef.current.scaleY;
       let newWidth = startSizeRef.current.width;
       let newHeight = startSizeRef.current.height;
       let newX = startPosRef.current.x;
@@ -217,7 +232,7 @@ export const Resizable: React.FC<IResizableProps> = ({
       }
     };
 
-    const handleMouseUp = () => {
+    const handlePointerUp = () => {
       // Cancel pending animation frame
       if (rafId !== null) {
         cancelAnimationFrame(rafId);
@@ -248,15 +263,17 @@ export const Resizable: React.FC<IResizableProps> = ({
       onResizeEndRef.current?.(finalSize);
     };
 
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+    window.addEventListener('pointercancel', handlePointerUp);
 
     return () => {
       if (rafId !== null) {
         cancelAnimationFrame(rafId);
       }
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+      window.removeEventListener('pointercancel', handlePointerUp);
     };
   }, [isResizing, resizeHandle]);
 
@@ -269,6 +286,8 @@ export const Resizable: React.FC<IResizableProps> = ({
       border: '1px solid white',
       borderRadius: '50%',
       zIndex: 1001,
+      // Prevent touch-scroll from stealing the resize gesture on touch/pen.
+      touchAction: 'none' as const,
       ...handleStyle,
     };
   }, [handleStyle]);
@@ -376,7 +395,7 @@ export const Resizable: React.FC<IResizableProps> = ({
       ref={containerRef}
       className={className}
       style={containerStyle}
-      onMouseDown={handleResizeMouseDown}
+      onPointerDown={handleResizePointerDown}
     >
       {children}
       {resizeHandles.map(({ handle, style: handleStyleProp }) => (

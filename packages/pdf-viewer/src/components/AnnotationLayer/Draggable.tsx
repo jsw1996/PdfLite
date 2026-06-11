@@ -57,9 +57,15 @@ export const Draggable: React.FC<IDraggableProps> = ({
   const [isDragging, setIsDragging] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const startPosRef = useRef<IPoint | null>(null);
-  const startMouseRef = useRef<(IPoint & { containerLeft?: number; containerTop?: number }) | null>(
-    null,
-  );
+  // Pointer position at drag start plus the layout<->client scale factor, so
+  // movement deltas are converted from client px to layout px. The factor is 1
+  // unless an ancestor applies a CSS transform: scale().
+  const startMouseRef = useRef<{
+    clientX: number;
+    clientY: number;
+    scaleX: number;
+    scaleY: number;
+  } | null>(null);
   const hasMovedRef = useRef(false);
 
   // Latest-callback / latest-value refs so the drag effect can depend ONLY on
@@ -92,9 +98,9 @@ export const Draggable: React.FC<IDraggableProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [position, isDragging]);
 
-  // Handle mouse down
-  const handleMouseDown = useCallback(
-    (e: React.MouseEvent) => {
+  // Handle pointer down (mouse, touch, and pen)
+  const handlePointerDown = useCallback(
+    (e: React.PointerEvent) => {
       if (!enabled) return;
 
       const target = e.target as HTMLElement;
@@ -112,17 +118,22 @@ export const Draggable: React.FC<IDraggableProps> = ({
         return;
       }
 
-      if (containerRef.current?.contains(target)) {
+      const container = containerRef.current;
+      if (container?.contains(target)) {
         hasMovedRef.current = false;
         setIsDragging(true);
-        const containerRect = containerRef.current.getBoundingClientRect();
+        const containerRect = container.getBoundingClientRect();
         startPosRef.current = { ...localPosition };
-        // Cache container initial position to avoid recalculating on every move
+        // Derive the client->layout scale from the element's rendered rect vs its
+        // layout size. Equals 1 with no CSS transform; >1 / <1 under transform: scale().
+        const scaleX = container.offsetWidth > 0 ? containerRect.width / container.offsetWidth : 1;
+        const scaleY =
+          container.offsetHeight > 0 ? containerRect.height / container.offsetHeight : 1;
         startMouseRef.current = {
-          x: e.clientX - containerRect.left - localPosition.x,
-          y: e.clientY - containerRect.top - localPosition.y,
-          containerLeft: containerRect.left,
-          containerTop: containerRect.top,
+          clientX: e.clientX,
+          clientY: e.clientY,
+          scaleX: scaleX || 1,
+          scaleY: scaleY || 1,
         };
 
         if (preventTextSelection) {
@@ -144,28 +155,20 @@ export const Draggable: React.FC<IDraggableProps> = ({
     let rafId: number | null = null;
     let pendingPosition: IPoint | null = null;
 
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!startMouseRef.current || !startPosRef.current) return;
+    const handlePointerMove = (e: PointerEvent) => {
+      const start = startMouseRef.current;
+      const startPos = startPosRef.current;
+      if (!start || !startPos) return;
 
       hasMovedRef.current = true;
 
-      if (
-        startMouseRef.current.containerLeft !== undefined &&
-        startMouseRef.current.containerTop !== undefined
-      ) {
-        let newX = Math.max(
-          0,
-          e.clientX - startMouseRef.current.containerLeft - startMouseRef.current.x,
-        );
-        let newY = Math.max(
-          0,
-          e.clientY - startMouseRef.current.containerTop - startMouseRef.current.y,
-        );
-        const b = boundsRef.current;
-        if (b?.maxX != null) newX = Math.min(newX, b.maxX);
-        if (b?.maxY != null) newY = Math.min(newY, b.maxY);
-        pendingPosition = { x: newX, y: newY };
-      }
+      // Convert client-space movement to layout space via the scale factor.
+      let newX = Math.max(0, startPos.x + (e.clientX - start.clientX) / start.scaleX);
+      let newY = Math.max(0, startPos.y + (e.clientY - start.clientY) / start.scaleY);
+      const b = boundsRef.current;
+      if (b?.maxX != null) newX = Math.min(newX, b.maxX);
+      if (b?.maxY != null) newY = Math.min(newY, b.maxY);
+      pendingPosition = { x: newX, y: newY };
 
       // Use requestAnimationFrame to throttle updates
       if (pendingPosition && rafId === null) {
@@ -180,7 +183,7 @@ export const Draggable: React.FC<IDraggableProps> = ({
       }
     };
 
-    const handleMouseUp = () => {
+    const handlePointerUp = () => {
       // Cancel pending animation frame
       if (rafId !== null) {
         cancelAnimationFrame(rafId);
@@ -209,15 +212,17 @@ export const Draggable: React.FC<IDraggableProps> = ({
       }
     };
 
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+    window.addEventListener('pointercancel', handlePointerUp);
 
     return () => {
       if (rafId !== null) {
         cancelAnimationFrame(rafId);
       }
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+      window.removeEventListener('pointercancel', handlePointerUp);
     };
   }, [isDragging]);
 
@@ -234,6 +239,8 @@ export const Draggable: React.FC<IDraggableProps> = ({
       userSelect: preventTextSelection ? ('none' as const) : undefined,
       WebkitUserSelect: preventTextSelection ? ('none' as const) : undefined,
       MozUserSelect: preventTextSelection ? ('none' as const) : undefined,
+      // Prevent touch-scrolling from stealing the drag gesture on touch/pen.
+      touchAction: 'none' as const,
       ...style,
     };
   }, [
@@ -251,7 +258,7 @@ export const Draggable: React.FC<IDraggableProps> = ({
       ref={containerRef}
       className={className}
       style={containerStyle}
-      onMouseDown={handleMouseDown}
+      onPointerDown={handlePointerDown}
     >
       {children}
     </div>

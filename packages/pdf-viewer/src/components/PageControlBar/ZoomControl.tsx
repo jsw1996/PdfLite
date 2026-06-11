@@ -9,11 +9,13 @@ export const ZoomControl: React.FC = () => {
   const minScale = VIEWER_CONFIG.MIN_SCALE;
   const maxScale = VIEWER_CONFIG.MAX_SCALE;
 
+  // Round to 2 decimals to avoid floating-point drift accumulating across steps
+  // (e.g. 0.1 + 0.2 = 0.30000000000000004).
   const handleZoomIn = () => {
-    setScale(Math.min(maxScale, scale + zoomStep));
+    setScale(Math.min(maxScale, Math.round((scale + zoomStep) * 100) / 100));
   };
   const handleZoomOut = () => {
-    setScale(Math.max(minScale, scale - zoomStep));
+    setScale(Math.max(minScale, Math.round((scale - zoomStep) * 100) / 100));
   };
   return (
     <div className="flex items-center gap-1">

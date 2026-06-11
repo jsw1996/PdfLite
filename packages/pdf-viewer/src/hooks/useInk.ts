@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import {
   type IAnnotation,
   type IDrawAnnotation,
@@ -29,7 +29,12 @@ export interface IUseInkOptions {
 
 export interface IUseInkResult {
   isDrawing: boolean;
-  currentPath: IPoint[];
+  /**
+   * Live in-progress stroke, held in a ref so per-pointermove updates do NOT
+   * trigger React re-renders / full-layer redraws. The render hook reads this
+   * for previewing when it redraws for other reasons (annotation/metrics change).
+   */
+  currentPathRef: React.RefObject<IPoint[]>;
   onPointerDown: (e: React.PointerEvent<HTMLCanvasElement>) => void;
   onPointerMove: (e: React.PointerEvent<HTMLCanvasElement>) => void;
   onPointerUp: () => void;
@@ -44,7 +49,11 @@ export function useInk({
   onAddAnnotation,
 }: IUseInkOptions): IUseInkResult {
   const [isDrawing, setIsDrawing] = useState(false);
-  const [currentPath, setCurrentPath] = useState<IPoint[]>([]);
+  // Path is kept in a ref (not state): a dense stroke fires many pointermove
+  // events, and updating state on each would re-render AnnotationLayer and
+  // redraw every committed annotation (O(n^2)). Instead we draw each new segment
+  // incrementally to the canvas and only touch React state on stroke start/end.
+  const currentPathRef = useRef<IPoint[]>([]);
 
   const getPoint = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>): IPoint | null => {
@@ -60,10 +69,37 @@ export function useInk({
     [canvasRef, metrics],
   );
 
+  // Draw a single new segment onto the draw canvas using the same logical->physical
+  // transform and stroke style the render hook's preview uses, so an incremental
+  // draw and a full redraw look identical.
+  const drawSegment = useCallback(
+    (from: IPoint, to: IPoint) => {
+      const c = canvasRef.current;
+      if (!c || !metrics) return;
+      const ctx = c.getContext('2d');
+      if (!ctx) return;
+      const sx = metrics.cssWidth > 0 ? metrics.pixelWidth / metrics.cssWidth : 1;
+      const sy = metrics.cssHeight > 0 ? metrics.pixelHeight / metrics.cssHeight : 1;
+      ctx.save();
+      ctx.setTransform(sx, 0, 0, sy, 0, 0);
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.strokeStyle = ANNOTATION_COLORS.HIGHLIGHT;
+      ctx.lineWidth = ANNOTATION_STROKE_WIDTH.DRAW;
+      ctx.beginPath();
+      ctx.moveTo(from.x, from.y);
+      ctx.lineTo(to.x, to.y);
+      ctx.stroke();
+      ctx.restore();
+    },
+    [canvasRef, metrics],
+  );
+
   const finish = useCallback(() => {
-    if (!isDrawing || !selectedTool || currentPath.length === 0) {
+    const path = currentPathRef.current;
+    if (!isDrawing || !selectedTool || path.length === 0) {
       setIsDrawing(false);
-      setCurrentPath([]);
+      currentPathRef.current = [];
       return;
     }
 
@@ -74,7 +110,7 @@ export function useInk({
         type: 'draw',
         source: 'overlay',
         pageIndex,
-        points: currentPath,
+        points: [...path],
         color: ANNOTATION_COLORS.DRAW,
         strokeWidth: ANNOTATION_STROKE_WIDTH.DRAW,
         createdAt: Date.now(),
@@ -83,8 +119,8 @@ export function useInk({
     }
 
     setIsDrawing(false);
-    setCurrentPath([]);
-  }, [currentPath, isDrawing, onAddAnnotation, pageIndex, selectedTool]);
+    currentPathRef.current = [];
+  }, [isDrawing, onAddAnnotation, pageIndex, selectedTool]);
 
   const onPointerDown = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -93,7 +129,7 @@ export function useInk({
       if (!p) return;
       (e.currentTarget as HTMLCanvasElement).setPointerCapture(e.pointerId);
       setIsDrawing(true);
-      setCurrentPath([p]);
+      currentPathRef.current = [p];
     },
     [getPoint, selectedTool],
   );
@@ -103,9 +139,12 @@ export function useInk({
       if (!isDrawing || !selectedTool) return;
       const p = getPoint(e);
       if (!p) return;
-      setCurrentPath((prev) => [...prev, p]);
+      const path = currentPathRef.current;
+      const prev = path[path.length - 1];
+      path.push(p);
+      if (prev) drawSegment(prev, p);
     },
-    [getPoint, isDrawing, selectedTool],
+    [drawSegment, getPoint, isDrawing, selectedTool],
   );
 
   const onPointerUp = useCallback(() => finish(), [finish]);
@@ -113,7 +152,7 @@ export function useInk({
 
   return {
     isDrawing,
-    currentPath,
+    currentPathRef,
     onPointerDown,
     onPointerMove,
     onPointerUp,

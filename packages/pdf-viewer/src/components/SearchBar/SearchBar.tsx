@@ -15,6 +15,9 @@ export const SearchBar = () => {
   const [debouncedValue, setDebouncedValue] = useState<string>('');
   const { controller, goToPage } = usePdfController();
   const highlightRef = useRef<HTMLDivElement | null>(null);
+  // Tracks the pending highlight-retry timer so a new navigation cancels any
+  // in-flight retry chain from a previous index (avoids overlapping draws).
+  const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Debounce the search value
   useEffect(() => {
@@ -24,11 +27,18 @@ export const SearchBar = () => {
     return () => clearTimeout(timer);
   }, [value]);
 
+  // Search in page-space coordinates (scale = 1) so the expensive full-document
+  // scan only re-runs when the query changes, not on every zoom. The resulting
+  // rects are scaled to the current zoom level locally when drawing the highlight.
   const matches: ISearchResult[] = useMemo(() => {
     if (!debouncedValue) return [];
-    return controller.searchText(debouncedValue, { scale });
-  }, [controller, debouncedValue, scale]);
+    return controller.searchText(debouncedValue);
+  }, [controller, debouncedValue]);
   const [currentIndex, setCurrentIndex] = useState(0);
+  // Clamp against the latest results: navigation can advance currentIndex past a
+  // stale `matches` array before a new scan lands. Derived (not stored) so we
+  // don't setState inside an effect.
+  const safeIndex = matches.length === 0 ? 0 : Math.min(currentIndex, matches.length - 1);
   const searchBoxId = useId();
   // CSS-escape the useId() result for use in querySelector
   const escapedSearchBoxId = useMemo(() => CSS.escape(searchBoxId), [searchBoxId]);
@@ -39,8 +49,21 @@ export const SearchBar = () => {
     setCurrentIndex(0);
   }, []);
 
+  const goToNextMatch = useCallback(() => {
+    setCurrentIndex(safeIndex < matches.length - 1 ? safeIndex + 1 : 0);
+  }, [safeIndex, matches.length]);
+
+  const goToPrevMatch = useCallback(() => {
+    setCurrentIndex(safeIndex > 0 ? safeIndex - 1 : matches.length - 1);
+  }, [safeIndex, matches.length]);
+
   const drawHighlight = useCallback(
     (index: number) => {
+      // Cancel any in-flight retry chain from a previous navigation.
+      if (highlightTimerRef.current) {
+        clearTimeout(highlightTimerRef.current);
+        highlightTimerRef.current = null;
+      }
       // Clean up previous highlight
       if (highlightRef.current) {
         highlightRef.current.remove();
@@ -75,11 +98,12 @@ export const SearchBar = () => {
           maxBottom = Math.max(maxBottom, match.rects[i].top + match.rects[i].height);
         }
 
+        // Rects are in page-space (scale = 1); scale to the current zoom level.
         const rect = {
-          left: minLeft,
-          top: minTop,
-          width: maxRight - minLeft,
-          height: maxBottom - minTop,
+          left: minLeft * scale,
+          top: minTop * scale,
+          width: (maxRight - minLeft) * scale,
+          height: (maxBottom - minTop) * scale,
         };
 
         // Try to find the text layer (waits for page to render)
@@ -110,19 +134,26 @@ export const SearchBar = () => {
           });
         } else if (retryCount < maxRetries) {
           // Text layer not ready yet, retry after delay
-          setTimeout(() => performHighlight(retryCount + 1), retryDelay);
+          highlightTimerRef.current = setTimeout(
+            () => performHighlight(retryCount + 1),
+            retryDelay,
+          );
         }
       };
 
       // Wait for page to scroll and render, then highlight
-      setTimeout(() => performHighlight(), 100);
+      highlightTimerRef.current = setTimeout(() => performHighlight(), 100);
     },
-    [matches, goToPage],
+    [matches, goToPage, scale],
   );
 
   // Cleanup highlight on unmount or when value is cleared
   useEffect(() => {
     return () => {
+      if (highlightTimerRef.current) {
+        clearTimeout(highlightTimerRef.current);
+        highlightTimerRef.current = null;
+      }
       if (highlightRef.current) {
         highlightRef.current.remove();
         highlightRef.current = null;
@@ -148,8 +179,8 @@ export const SearchBar = () => {
 
   // Draw highlight when index changes or when matches change
   useEffect(() => {
-    drawHighlight(currentIndex);
-  }, [currentIndex, drawHighlight, scale]);
+    drawHighlight(safeIndex);
+  }, [safeIndex, drawHighlight, scale]);
 
   return (
     <div className="w-full max-w-xs space-y-2">
@@ -157,9 +188,9 @@ export const SearchBar = () => {
         <Input
           onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
             if (e.key === 'Enter' && e.shiftKey) {
-              setCurrentIndex((prev) => (prev > 0 ? prev - 1 : matches.length - 1));
+              goToPrevMatch();
             } else if (e.key === 'Enter') {
-              setCurrentIndex((prev) => (prev < matches.length - 1 ? prev + 1 : 0));
+              goToNextMatch();
             }
           }}
           type="text"
@@ -176,13 +207,13 @@ export const SearchBar = () => {
               className="mx-2 !h-5 bg-border/50 dark:bg-foreground/25"
             />
             <span className="px-1 text-xs font-medium tabular-nums">
-              {matches.length > 0 ? `${currentIndex + 1}/${matches.length}` : '0/0'}
+              {matches.length > 0 ? `${safeIndex + 1}/${matches.length}` : '0/0'}
             </span>
             <Button
               variant="ghost"
               size="icon"
               className="w-6 h-6 rounded-lg hover:bg-primary/10 hover:text-primary transition-colors duration-200"
-              onClick={() => setCurrentIndex((prev) => (prev > 0 ? prev - 1 : matches.length - 1))}
+              onClick={goToPrevMatch}
               disabled={matches.length === 0}
             >
               <ChevronUp className="w-3.5 h-3.5" />
@@ -191,7 +222,7 @@ export const SearchBar = () => {
               variant="ghost"
               size="icon"
               className="w-6 h-6 rounded-lg hover:bg-primary/10 hover:text-primary transition-colors duration-200"
-              onClick={() => setCurrentIndex((prev) => (prev < matches.length - 1 ? prev + 1 : 0))}
+              onClick={goToNextMatch}
               disabled={matches.length === 0}
             >
               <ChevronDown className="w-3.5 h-3.5" />

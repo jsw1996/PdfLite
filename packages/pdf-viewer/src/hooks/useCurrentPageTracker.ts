@@ -28,6 +28,10 @@ export const useCurrentPageTracker = ({
   const observerRef = useRef<IntersectionObserver | null>(null);
   const pageElementsRef = useRef<Map<number, Element>>(new Map());
   const lastDetectedPageRef = useRef<number | null>(null);
+  // Latest visibility ratio per observed page; the current page is the one with
+  // the highest ratio (ties broken by lowest index), which is far more accurate
+  // near page boundaries than "lowest intersecting index".
+  const ratiosRef = useRef<Map<number, number>>(new Map());
   // Use ref for callback to avoid recreating observer when callback changes
   const onPageChangeRef = useRef(onPageChange);
   useEffect(() => {
@@ -40,30 +44,42 @@ export const useCurrentPageTracker = ({
       observerRef.current.disconnect();
     }
 
+    const ratios = ratiosRef.current;
+
     // Create new observer
     observerRef.current = new IntersectionObserver(
       (entries) => {
-        // Find the first visible page (lowest page index that's intersecting)
-        let minPageIndex = Infinity;
-
+        // Update the visibility ratio for each changed page.
         for (const entry of entries) {
-          if (entry.isIntersecting) {
-            const pageIndex = parseInt(entry.target.getAttribute('data-page-index') ?? '0', 10);
-            if (pageIndex < minPageIndex) {
-              minPageIndex = pageIndex;
-            }
+          const pageIndex = parseInt(entry.target.getAttribute('data-page-index') ?? '0', 10);
+          if (entry.isIntersecting && entry.intersectionRatio > 0) {
+            ratios.set(pageIndex, entry.intersectionRatio);
+          } else {
+            ratios.delete(pageIndex);
           }
         }
 
-        if (minPageIndex !== Infinity && lastDetectedPageRef.current !== minPageIndex) {
-          lastDetectedPageRef.current = minPageIndex;
-          onPageChangeRef.current(minPageIndex);
+        // Pick the most-visible page (highest ratio; lowest index on tie).
+        let bestPage: number | null = null;
+        let bestRatio = 0;
+        ratios.forEach((ratio, idx) => {
+          if (ratio > bestRatio || (ratio === bestRatio && bestPage !== null && idx < bestPage)) {
+            bestRatio = ratio;
+            bestPage = idx;
+          }
+        });
+
+        if (bestPage !== null && lastDetectedPageRef.current !== bestPage) {
+          lastDetectedPageRef.current = bestPage;
+          onPageChangeRef.current(bestPage);
         }
       },
       {
         root,
         rootMargin,
-        threshold,
+        // Multiple thresholds give smooth ratio updates as pages scroll through,
+        // so the most-visible computation has the resolution it needs.
+        threshold: [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1],
       },
     );
 
@@ -89,6 +105,8 @@ export const useCurrentPageTracker = ({
         observerRef.current?.unobserve(existing);
         pageElementsRef.current.delete(pageIndex);
       }
+      // Drop its stale visibility ratio so an unmounted page can't win selection.
+      ratiosRef.current.delete(pageIndex);
     }
   }, []);
 

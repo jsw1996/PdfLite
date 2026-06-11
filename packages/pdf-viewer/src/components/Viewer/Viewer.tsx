@@ -262,6 +262,11 @@ export const Viewer: React.FC<IViewerProps> = ({ pageCount }) => {
         window.clearTimeout(commitTimerRef.current);
         commitTimerRef.current = null;
       }
+      // Reset transient gesture state so a teardown mid-gesture (e.g. scroll
+      // container swap) can't leave a half-applied preview behind.
+      previewIntentRef.current = null;
+      previewScaleRef.current = null;
+      pendingWheelRef.current = null;
     };
   }, [getAnchorFromY, scrollContainer, setScale, virtualizer]);
 

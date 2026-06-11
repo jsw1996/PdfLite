@@ -36,6 +36,13 @@ export const TextLayer: React.FC<ITextLayerProps> = ({ pageIndex, scale = 1.5 })
   const originalTextsRef = useRef<Map<number, string>>(new Map());
   // Live text from each editor, updated on every input event
   const editorTextsRef = useRef<Map<number, string>>(new Map());
+  // True while an IME composition is in progress so onInput doesn't stage
+  // half-composed (CJK) buffers.
+  const composingRef = useRef(false);
+  // Debounce timer for input staging — avoids running innerText (a layout-thrashing
+  // accessor) + normalization on every keystroke. Commits are deferred to exit, so
+  // staging only needs to be eventually-consistent for remount rehydration.
+  const stageTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const deferredScale = useDeferredValue(scale);
 
@@ -87,7 +94,12 @@ export const TextLayer: React.FC<ITextLayerProps> = ({ pageIndex, scale = 1.5 })
         }
       }
       if (!originalTextsRef.current.has(i)) {
-        originalTextsRef.current.set(i, paragraph.text);
+        // Store the normalized form so the commit-time equality check
+        // (nextText === originalText) compares like-for-like — staged editor
+        // text is always normalized. Otherwise an untouched paragraph whose raw
+        // text differs only by NBSP/\r normalization would be needlessly
+        // reflowed (and could corrupt text the user never edited).
+        originalTextsRef.current.set(i, normalizeEditableText(paragraph.text));
       }
       if (!editorTextsRef.current.has(i)) {
         editorTextsRef.current.set(i, normalizeEditableText(paragraph.text));
@@ -244,6 +256,12 @@ export const TextLayer: React.FC<ITextLayerProps> = ({ pageIndex, scale = 1.5 })
     const ctrl = controller;
     const page = pageIndex;
     return () => {
+      // Cancel any pending debounced stage; blur/compositionEnd already flushed
+      // the latest content synchronously on the normal exit path.
+      if (stageTimerRef.current) {
+        clearTimeout(stageTimerRef.current);
+        stageTimerRef.current = null;
+      }
       // Batch all commits with skipGenerateContent, then regenerate once
       // per page. Without this, each paragraph triggers a separate
       // GenerateContent call, compounding content-stream corruption.
@@ -271,15 +289,61 @@ export const TextLayer: React.FC<ITextLayerProps> = ({ pageIndex, scale = 1.5 })
     [pageIndex, savedEditorText],
   );
 
+  // Stage immediately (clearing any pending debounced stage). Used on blur and
+  // composition end where we want the latest content captured synchronously.
+  const flushStageEditorContent = useCallback(
+    (editor: HTMLElement, idx: number) => {
+      if (stageTimerRef.current) {
+        clearTimeout(stageTimerRef.current);
+        stageTimerRef.current = null;
+      }
+      stageEditorContent(editor, idx);
+    },
+    [stageEditorContent],
+  );
+
+  // Debounced staging for the per-keystroke onInput path. The isConnected guard
+  // prevents a late timer from reading a detached editor (innerText === '') and
+  // clobbering staged text with an empty string after the editor unmounts.
+  const scheduleStageEditorContent = useCallback(
+    (editor: HTMLElement, idx: number) => {
+      if (stageTimerRef.current) clearTimeout(stageTimerRef.current);
+      stageTimerRef.current = setTimeout(() => {
+        stageTimerRef.current = null;
+        if (editor.isConnected) stageEditorContent(editor, idx);
+      }, 150);
+    },
+    [stageEditorContent],
+  );
+
   const handleEditorPaste = useCallback(
     (event: React.ClipboardEvent, idx: number) => {
       event.preventDefault();
       const text = event.clipboardData.getData('text/plain');
-      document.execCommand('insertText', false, text);
       const target = event.currentTarget as HTMLElement;
-      queueMicrotask(() => stageEditorContent(target, idx));
+      // execCommand is deprecated but widely supported and handles multi-line
+      // insertion natively. Fall back to a Range-based insert if it no-ops so
+      // paste never silently fails.
+      const inserted = document.execCommand('insertText', false, text);
+      if (!inserted) {
+        const selection = window.getSelection();
+        if (selection && selection.rangeCount > 0) {
+          const range = selection.getRangeAt(0);
+          range.deleteContents();
+          const fragment = document.createDocumentFragment();
+          text.split('\n').forEach((segment, i) => {
+            if (i > 0) fragment.appendChild(document.createElement('br'));
+            if (segment) fragment.appendChild(document.createTextNode(segment));
+          });
+          range.insertNode(fragment);
+          range.collapse(false);
+          selection.removeAllRanges();
+          selection.addRange(range);
+        }
+      }
+      queueMicrotask(() => flushStageEditorContent(target, idx));
     },
-    [stageEditorContent],
+    [flushStageEditorContent],
   );
 
   if (!textContent) {
@@ -340,9 +404,18 @@ export const TextLayer: React.FC<ITextLayerProps> = ({ pageIndex, scale = 1.5 })
             const firstLineFontSize = paragraph.lines[0]?.fontSizePx ?? 0;
             const halfLeading = (style.lineHeightPx - firstLineFontSize) / 2;
 
+            // Key by a stable paragraph identity (page-space rect) rather than
+            // the array index. If the paragraph set is recomputed mid-session,
+            // index keys would reuse a DOM node for a different paragraph while
+            // the editorInit guard blocks re-initialization, desyncing the
+            // editor content from the paragraph model.
+            const paraKey = `p-${Math.round(paragraph.rect.left)}-${Math.round(
+              paragraph.rect.top,
+            )}-${Math.round(paragraph.rect.width)}-${idx}`;
+
             return (
               <div
-                key={idx}
+                key={paraKey}
                 ref={(el) => {
                   if (el && !el.dataset.editorInit) {
                     el.innerHTML = html;
@@ -363,9 +436,18 @@ export const TextLayer: React.FC<ITextLayerProps> = ({ pageIndex, scale = 1.5 })
                   backgroundColor: 'white',
                   outline: '1px dotted rgba(0, 0, 0, 0.4)',
                 }}
-                onBlur={(e) => stageEditorContent(e.currentTarget, idx)}
-                onInput={(e) => stageEditorContent(e.currentTarget as HTMLElement, idx)}
-                onCompositionEnd={(e) => stageEditorContent(e.currentTarget as HTMLElement, idx)}
+                onBlur={(e) => flushStageEditorContent(e.currentTarget, idx)}
+                onInput={(e) => {
+                  if (composingRef.current) return;
+                  scheduleStageEditorContent(e.currentTarget as HTMLElement, idx);
+                }}
+                onCompositionStart={() => {
+                  composingRef.current = true;
+                }}
+                onCompositionEnd={(e) => {
+                  composingRef.current = false;
+                  flushStageEditorContent(e.currentTarget as HTMLElement, idx);
+                }}
                 onPaste={(e) => handleEditorPaste(e, idx)}
               />
             );

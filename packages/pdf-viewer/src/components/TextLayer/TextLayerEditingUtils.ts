@@ -812,18 +812,22 @@ export function wordWrapText(
     const testLine = currentLine + token;
     const testWidth = measureTextWidthAtBaseSize(testLine, fontFamily) * fontSizePx;
 
+    // Track the width of currentLine so the overflow check below reuses it
+    // instead of re-measuring the same string every iteration.
+    let currentWidth: number;
     if (testWidth <= maxWidthPx || currentLine.length === 0) {
       // Fits, or we must accept at least one token per line
       currentLine = testLine;
+      currentWidth = testWidth;
     } else {
       // Push current line and start new one
       lines.push(currentLine);
       currentLine = token.trimStart();
+      currentWidth = measureTextWidthAtBaseSize(currentLine, fontFamily) * fontSizePx;
     }
 
     // If a single token still overflows after starting a new line, force-break it
     if (currentLine.length > 0) {
-      const currentWidth = measureTextWidthAtBaseSize(currentLine, fontFamily) * fontSizePx;
       if (currentWidth > maxWidthPx && currentLine.length > 1) {
         // Force-break grapheme by grapheme so we don't split surrogate pairs or
         // ZWJ clusters (emoji families, flags, skin-tone modifiers, etc.).

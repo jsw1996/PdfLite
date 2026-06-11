@@ -1,7 +1,7 @@
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { TooltipButton } from '@pdfviewer/ui/components/tooltipButton';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { usePdfController } from '@/providers/PdfControllerContextProvider';
+import { useCurrentPage } from '@/providers/PdfControllerContextProvider';
 
 export interface IPageStepperProps {
   pageCount: number;
@@ -9,7 +9,7 @@ export interface IPageStepperProps {
 }
 
 export const PageStepper: React.FC<IPageStepperProps> = ({ pageCount, onJumpToPage }) => {
-  const { currentPage } = usePdfController();
+  const currentPage = useCurrentPage();
   const [draft, setDraft] = useState('');
 
   useEffect(() => {
@@ -41,9 +41,18 @@ export const PageStepper: React.FC<IPageStepperProps> = ({ pageCount, onJumpToPa
   }, [draft]);
 
   const commitDraft = useCallback(() => {
-    if (!parsedDraft) return;
-    onJumpToPage(clampPageIndex(parsedDraft - 1));
-  }, [clampPageIndex, onJumpToPage, parsedDraft]);
+    // parsedDraft is null only for non-numeric input; "0" parses to 0 and must
+    // still be clamped (to page 1) rather than silently ignored.
+    if (parsedDraft == null) {
+      setDraft(String(currentPage + 1));
+      return;
+    }
+    const targetIndex = clampPageIndex(parsedDraft - 1);
+    onJumpToPage(targetIndex);
+    // Reset the visible draft to the clamped target so the input always reflects
+    // the real page (e.g. typing "0" or "9999" snaps back to a valid value).
+    setDraft(String(targetIndex + 1));
+  }, [clampPageIndex, currentPage, onJumpToPage, parsedDraft]);
 
   return (
     <div className="flex items-center gap-1">

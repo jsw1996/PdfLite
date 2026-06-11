@@ -29,8 +29,10 @@ export function useFormContext(): IFormContextValue {
 }
 
 function getFieldStorageKey(field: IFormField): string {
-  if (field.type === 'radio') return field.name || field.id;
-  if (field.type === 'checkbox') return field.id;
+  // Key every field type by its (fully-qualified) field name. Widgets that share
+  // a name are the same logical PDF field, so they must share one value — this
+  // keeps in-app state consistent with applyFormValues, which applies by name.
+  // Fall back to the widget id only for unnamed fields.
   return field.name || field.id;
 }
 

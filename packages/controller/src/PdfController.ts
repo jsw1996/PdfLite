@@ -307,6 +307,15 @@ export class PdfController implements IPdfController {
    * For those pages we switch to replacement mode (remove old object, insert new text object).
    */
   private editPageReplaceOnly = new Set<number>();
+  /**
+   * Cache of page media-box dimensions, keyed by page index. Page dimensions are
+   * immutable for the lifetime of a loaded document, so they can be cached to
+   * avoid a synchronous LoadPage/ClosePage round-trip on every call.
+   * getPageDimension is invoked from render paths (CanvasLayer, PagePreview) and
+   * from the viewer's initial full-document size pass, so the round-trips add up.
+   * Cleared in closeCurrentDocument() when a new document is loaded.
+   */
+  private pageDimensionCache = new Map<number, IPageDimension>();
   private static toImagePdfium(pdfium: IPDFiumModule): IPDFiumModule & {
     _FPDFImageObj_SetBitmap_W: (
       pagesPtr: number,
@@ -541,12 +550,20 @@ export class PdfController implements IPdfController {
 
   private withPage<T>(pageIndex: number, fn: (pdfium: IPDFiumModule, pagePtr: number) => T): T {
     const { pdfium, docPtr } = this.requireDoc();
-    const pagePtr = pdfium._PDFium_LoadPage(docPtr, pageIndex);
+    // Reuse the cached edit-mode page handle when present so we never hold two
+    // independent FPDF_PAGE handles to the same page. A second handle would have
+    // its own in-memory object list, so in-flight text edits would be invisible
+    // to it (and annotations added through it could be lost on save). Cached
+    // pages are owned by editPageCache and released via releaseEditPages().
+    const cachedEditPage = this.editPageCache.get(pageIndex);
+    const pagePtr = cachedEditPage ?? pdfium._PDFium_LoadPage(docPtr, pageIndex);
     if (!pagePtr) throw new Error(`Failed to load page ${pageIndex}`);
     try {
       return fn(pdfium, pagePtr);
     } finally {
-      pdfium._PDFium_ClosePage(pagePtr);
+      if (!cachedEditPage) {
+        pdfium._PDFium_ClosePage(pagePtr);
+      }
     }
   }
 
@@ -672,6 +689,7 @@ export class PdfController implements IPdfController {
     this.releaseEditPages();
     this.editPageReplaceOnly.clear();
     this.generatedPages.clear();
+    this.pageDimensionCache.clear();
     this.closeFormFillEnvironment();
     if (this.docPtr) {
       this.pdfiumModule._PDFium_CloseDocument(this.docPtr);
@@ -794,16 +812,25 @@ export class PdfController implements IPdfController {
         pdfium._PDFium_GetBookmarkTitle(bookmarkPtr, buffer, bufferLen),
       );
 
-    // Track visited bookmark dict pointers — malformed PDFs can have circular
-    // /Next or /First chains that would otherwise blow the stack.
-    const visited = new Set<number>();
+    // Malformed PDFs can have circular /Next or /First chains. Guard cycles
+    // without a single global visited set (which would also drop a dict that is
+    // legitimately referenced from two sibling branches): detect /Next loops via
+    // a per-level sibling set, detect /First loops via the ancestor chain, and
+    // cap depth as a final backstop.
+    const MAX_OUTLINE_DEPTH = 64;
 
-    const buildList = (firstBookmarkPtr: number): IPdfOutlineNode[] => {
+    const buildList = (
+      firstBookmarkPtr: number,
+      ancestors: Set<number>,
+      depth: number,
+    ): IPdfOutlineNode[] => {
       const nodes: IPdfOutlineNode[] = [];
+      if (depth > MAX_OUTLINE_DEPTH) return nodes;
+      const seenSiblings = new Set<number>();
       let current = firstBookmarkPtr;
       while (current) {
-        if (visited.has(current)) break;
-        visited.add(current);
+        if (seenSiblings.has(current) || ancestors.has(current)) break;
+        seenSiblings.add(current);
 
         const title = readTitle(current);
         const destPtr = pdfium._PDFium_GetBookmarkDest(docPtr, current);
@@ -821,7 +848,9 @@ export class PdfController implements IPdfController {
         }
 
         const firstChild = pdfium._PDFium_GetFirstChildBookmark(docPtr, current);
-        const children = firstChild ? buildList(firstChild) : undefined;
+        const childAncestors = new Set(ancestors);
+        childAncestors.add(current);
+        const children = firstChild ? buildList(firstChild, childAncestors, depth + 1) : undefined;
 
         const node: IPdfOutlineNode = { title };
         if (dest) node.dest = dest;
@@ -838,7 +867,7 @@ export class PdfController implements IPdfController {
     if (!first) {
       return [];
     }
-    return buildList(first);
+    return buildList(first, new Set(), 0);
   }
 
   public getPageDimension(pageIndex: number): IPageDimension {
@@ -846,11 +875,16 @@ export class PdfController implements IPdfController {
       throw new Error('PDF not loaded. Call loadFile() first.');
     }
 
-    return this.withPage(pageIndex, (pdfium, pagePtr) => {
+    const cached = this.pageDimensionCache.get(pageIndex);
+    if (cached) return cached;
+
+    const dimension = this.withPage(pageIndex, (pdfium, pagePtr) => {
       const width = pdfium._PDFium_GetPageWidth(pagePtr);
       const height = pdfium._PDFium_GetPageHeight(pagePtr);
       return { width, height };
     });
+    this.pageDimensionCache.set(pageIndex, dimension);
+    return dimension;
   }
 
   public async renderPdf(canvas: HTMLCanvasElement, options: IRenderOptions = {}): Promise<void> {
@@ -2077,11 +2111,13 @@ export class PdfController implements IPdfController {
         Math.abs(current.rect.top + current.rect.height - (next.rect.top + next.rect.height)) <
         current.rect.height;
 
-      // Check if horizontally adjacent (with small tolerance for spacing)
+      // Check if horizontally adjacent (with small tolerance for spacing).
+      // Use the larger of the two font sizes as the gap threshold so a small
+      // leading glyph doesn't cause separate words/columns to over-merge.
       const currentRight = current.rect.left + current.rect.width;
       const nextRight = next.rect.left + next.rect.width;
       const gap = next.rect.left - currentRight;
-      const isAdjacent = gap < current.font.size;
+      const isAdjacent = gap < Math.max(current.font.size, next.font.size);
 
       if (sameBaseline && isAdjacent) {
         // Merge: extend current rect (use max right edge so overlapping rects
@@ -2343,6 +2379,20 @@ export class PdfController implements IPdfController {
       const count = pdfium._FPDFPage_GetAnnotCount_W(pagePtr);
       const out: IFormField[] = [];
 
+      // Register the page with the form-fill environment so the form-field value
+      // APIs below read from initialized form state (mirrors the click path in
+      // tryClickFormFieldWithFormFill). Without this, values/checked-state/options
+      // can be read from an uninitialized form state.
+      const formPage =
+        formHandle &&
+        typeof pdfium._FORM_OnAfterLoadPage_W === 'function' &&
+        typeof pdfium._FORM_OnBeforeClosePage_W === 'function'
+          ? formHandle
+          : null;
+      if (formPage) {
+        pdfium._FORM_OnAfterLoadPage_W?.(pagePtr, formPage);
+      }
+
       const rectPtr = pdfium._malloc(4 * 4); // FS_RECTF: left,bottom,right,top float
       const fontSizePtr = pdfium._malloc(4);
 
@@ -2479,6 +2529,9 @@ export class PdfController implements IPdfController {
       } finally {
         pdfium._free(rectPtr);
         pdfium._free(fontSizePtr);
+        if (formPage) {
+          pdfium._FORM_OnBeforeClosePage_W?.(pagePtr, formPage);
+        }
       }
 
       return out;
@@ -2710,13 +2763,14 @@ export class PdfController implements IPdfController {
             const searchHandle = pdfium._PDFium_FindStart(textPagePtr, textPtr, 0, 0);
             if (!searchHandle) return;
 
+            // Page dimensions are constant for this page — read once, not per match.
+            const pageWidth = pdfium._PDFium_GetPageWidth(pagePtr);
+            const pageHeight = pdfium._PDFium_GetPageHeight(pagePtr);
+
             try {
               while (pdfium._PDFium_FindNext(searchHandle)) {
                 const charIndex = pdfium._PDFium_GetSchResultIndex(searchHandle);
                 const charCount = pdfium._PDFium_GetSchCount(searchHandle);
-
-                const pageWidth = pdfium._PDFium_GetPageWidth(pagePtr);
-                const pageHeight = pdfium._PDFium_GetPageHeight(pagePtr);
 
                 const rects = this.getTextRects(
                   pagePtr,
@@ -2799,12 +2853,15 @@ export class PdfController implements IPdfController {
     if (canvasPoints.length < 2) return;
 
     this.withPage(pageIndex, (pdfium, pagePtr) => {
+      // Feature-detect the actual ink-annotation API this method uses (the
+      // previous guard checked the unrelated image-object API and threw a
+      // misleading "signature commit" error).
       if (
-        typeof (pdfium as IPDFiumModule & { _FPDFPageObj_NewImageObj_W?: unknown })
-          ._FPDFPageObj_NewImageObj_W !== 'function'
+        typeof (pdfium as IPDFiumModule & { _FPDFAnnot_AddInkStroke_W?: unknown })
+          ._FPDFAnnot_AddInkStroke_W !== 'function'
       ) {
         throw new Error(
-          'PDFium WASM build is missing image object APIs. Rebuild @pdfviewer/pdfium-wasm to enable signature commit.',
+          'PDFium WASM build is missing ink annotation APIs (FPDFAnnot_AddInkStroke). Rebuild @pdfviewer/pdfium-wasm.',
         );
       }
       const pageW = pdfium._PDFium_GetPageWidth(pagePtr);
@@ -2835,8 +2892,10 @@ export class PdfController implements IPdfController {
           pdfium._free(bufPtr);
         }
 
-        // NOTE: 当前 wasm wrapper 未暴露 FPDFPage_GenerateContent，因此这里无法强制生成内容流；
-        // 对于很多阅读/渲染路径，annotation 仍能生效，但“保存导出”必须补齐 Save API（见 exportPdfBytes）。
+        // No FPDFPage_GenerateContent needed here: this is an annotation (not a
+        // page content object), so PDFium persists it through FPDF_SaveAsCopy
+        // (see exportPdfBytes). GenerateContent is only required for page-content
+        // edits (e.g. inline text editing).
       } finally {
         pdfium._FPDFPage_CloseAnnot_W(annot);
       }

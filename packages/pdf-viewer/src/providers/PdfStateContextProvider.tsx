@@ -17,22 +17,6 @@ export const usePdfScale = (): IPdfScaleContext => {
 };
 
 // ============================================================================
-// Page Context - for current page tracking (isolated)
-// ============================================================================
-interface IPdfPageContext {
-  currentPage: number;
-  setCurrentPage: (page: number) => void;
-}
-
-const PdfPageContext = React.createContext<IPdfPageContext | null>(null);
-
-export const usePdfPage = (): IPdfPageContext => {
-  const ctx = React.useContext(PdfPageContext);
-  if (!ctx) throw new Error('usePdfPage must be used within PdfStateContextProvider');
-  return ctx;
-};
-
-// ============================================================================
 // Rotation Context - for page rotation (isolated)
 // ============================================================================
 interface IPdfRotationContext {
@@ -49,24 +33,22 @@ export const usePdfRotation = (): IPdfRotationContext => {
 };
 
 // ============================================================================
-// Combined Provider - wraps all three contexts
+// Combined Provider - wraps scale + rotation contexts
+//
+// NOTE: current-page tracking lives in PdfControllerContextProvider
+// (usePdfController().currentPage / goToPage), which is the single source of
+// truth. Do not reintroduce page state here.
 // ============================================================================
 export const PdfStateContextProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [currentPage, setCurrentPageState] = React.useState(0);
   const [scale, setScaleState] = React.useState(1);
   const [rotation, setRotationState] = React.useState(0);
 
   // Stable setter functions via useCallback
-  const setCurrentPage = useCallback((page: number) => setCurrentPageState(page), []);
   const setScale = useCallback((s: number) => setScaleState(s), []);
   const setRotation = useCallback((r: number) => setRotationState(r), []);
 
   // Memoize each context value separately to prevent unnecessary re-renders
   const scaleValue = useMemo<IPdfScaleContext>(() => ({ scale, setScale }), [scale, setScale]);
-  const pageValue = useMemo<IPdfPageContext>(
-    () => ({ currentPage, setCurrentPage }),
-    [currentPage, setCurrentPage],
-  );
   const rotationValue = useMemo<IPdfRotationContext>(
     () => ({ rotation, setRotation }),
     [rotation, setRotation],
@@ -74,23 +56,18 @@ export const PdfStateContextProvider: React.FC<{ children: React.ReactNode }> = 
 
   return (
     <PdfScaleContext.Provider value={scaleValue}>
-      <PdfPageContext.Provider value={pageValue}>
-        <PdfRotationContext.Provider value={rotationValue}>{children}</PdfRotationContext.Provider>
-      </PdfPageContext.Provider>
+      <PdfRotationContext.Provider value={rotationValue}>{children}</PdfRotationContext.Provider>
     </PdfScaleContext.Provider>
   );
 };
 
 // ============================================================================
-// Legacy hook for backwards compatibility
-// Components should migrate to specific hooks for better performance:
+// Legacy aggregate hook for backwards compatibility.
+// Components should migrate to the specific hooks for better performance:
 // - usePdfScale() - for scale only
-// - usePdfPage() - for currentPage only
 // - usePdfRotation() - for rotation only
 // ============================================================================
 interface IPdfStateContext {
-  currentPage: number;
-  setCurrentPage: (page: number) => void;
   scale: number;
   setScale: (scale: number) => void;
   rotation: number;
@@ -99,8 +76,7 @@ interface IPdfStateContext {
 
 export const usePdfState = (): IPdfStateContext => {
   const { scale, setScale } = usePdfScale();
-  const { currentPage, setCurrentPage } = usePdfPage();
   const { rotation, setRotation } = usePdfRotation();
 
-  return { currentPage, setCurrentPage, scale, setScale, rotation, setRotation };
+  return { scale, setScale, rotation, setRotation };
 };

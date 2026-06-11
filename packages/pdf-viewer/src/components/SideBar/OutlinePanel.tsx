@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import type { IPdfOutlineNode } from '@pdfviewer/controller';
 import { ChevronRight, ChevronsDown, ChevronsUp } from 'lucide-react';
 import { Button } from '@pdfviewer/ui/components/button';
@@ -25,21 +25,27 @@ export function OutlinePanel({ outline, onGoToPage }: IOutlinePanelProps) {
     });
   }, []);
 
+  // Keys of all nodes that have children — recomputed only when the outline
+  // changes, not on every expand/collapse or parent re-render.
+  const allKeys = useMemo(() => {
+    const keys: string[] = [];
+    const collect = (nodes: IPdfOutlineNode[], prefix: string) => {
+      nodes.forEach((node, index) => {
+        const key = `${prefix}${index}`;
+        if (node.children?.length) {
+          keys.push(key);
+          collect(node.children, `${key}-`);
+        }
+      });
+    };
+    collect(outline, 'outline-');
+    return keys;
+  }, [outline]);
+
   if (!outline.length) {
     return <div className="px-3 py-4 text-sm text-slate-500">No outline.</div>;
   }
 
-  const allKeys: string[] = [];
-  const collectKeys = (nodes: IPdfOutlineNode[], prefix: string) => {
-    nodes.forEach((node, index) => {
-      const key = `${prefix}${index}`;
-      if (node.children?.length) {
-        allKeys.push(key);
-        collectKeys(node.children, `${key}-`);
-      }
-    });
-  };
-  collectKeys(outline, 'outline-');
   const allExpanded = allKeys.length > 0 && allKeys.every((key) => expanded.has(key));
 
   const renderNode = (node: IPdfOutlineNode, depth: number, key: string) => {
