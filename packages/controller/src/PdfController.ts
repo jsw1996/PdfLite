@@ -308,6 +308,15 @@ export class PdfController implements IPdfController {
    */
   private editPageReplaceOnly = new Set<number>();
   /**
+   * EXPERIMENTAL A/B toggle. When true, getPageTextContent uses the logical
+   * character-stream extraction (FPDFText_GetText / GetCharBox — the pdf.js
+   * model) instead of the geometry-first FPDFText_GetRect + mergeAdjacentTextRects
+   * path. Only affects unedited pages; edited pages still route through the
+   * page-object path because FPDFText_* is corrupted after GenerateContent.
+   * Flip at runtime and re-render to compare. See getPageTextContentViaGetText.
+   */
+  public useLogicalTextExtraction = true;
+  /**
    * Cache of page media-box dimensions, keyed by page index. Page dimensions are
    * immutable for the lifetime of a loaded document, so they can be cached to
    * avoid a synchronous LoadPage/ClosePage round-trip on every call.
@@ -1104,6 +1113,12 @@ export class PdfController implements IPdfController {
       return this.getPageTextContentFromObjects(pageIndex);
     }
 
+    // EXPERIMENTAL: logical character-stream path (A/B toggle). Edited pages
+    // already returned above, so this only ever runs on unedited pages.
+    if (this.useLogicalTextExtraction) {
+      return this.getPageTextContentViaGetText(pageIndex);
+    }
+
     const pdfium = this.pdfiumModule;
 
     // Use cached edit-mode page pointer if available so text content
@@ -1205,8 +1220,14 @@ export class PdfController implements IPdfController {
               continue;
             }
 
-            // Get font info via char index at this position
-            const charIndex = pdfium._PDFium_GetCharIndexAtPos(textPagePtr, left, top, 2, 2);
+            // Get font info via char index at this position.
+            // Retry with a wider tolerance: PDFium sometimes returns a rect
+            // whose reported top-left corner doesn't exactly coincide with any
+            // glyph box (e.g. backtick-height glyphs in mixed CJK/mono layouts).
+            let charIndex = pdfium._PDFium_GetCharIndexAtPos(textPagePtr, left, top, 2, 2);
+            if (charIndex < 0) {
+              charIndex = pdfium._PDFium_GetCharIndexAtPos(textPagePtr, left, top, 10, 10);
+            }
 
             let fontFamily = '';
             let fontSize = Math.abs(top - bottom);
@@ -1289,6 +1310,239 @@ export class PdfController implements IPdfController {
       } finally {
         pdfium._PDFium_ClosePageText(textPagePtr);
       }
+    } finally {
+      if (!cachedEditPage) {
+        pdfium._PDFium_ClosePage(pagePtr);
+      }
+    }
+  }
+
+  /**
+   * EXPERIMENTAL alternative to getPageTextContent's geometry-first extraction.
+   *
+   * Walks the logical character stream (FPDFText_CountChars + per-char
+   * FPDFText_GetUnicode / GetCharBox / GetFontSize) instead of enumerating
+   * FPDFText_GetRect boxes and reading text out of each box. PDFium inserts word
+   * spaces and line-break characters into this stream itself, so inter-word
+   * spacing is preserved without geometric guessing — the pdf.js model. Each
+   * visual line (delimited by \r/\n chars, with a baseline-jump fallback)
+   * becomes a single ITextRect carrying engine-spaced text. No
+   * mergeAdjacentTextRects post-pass is required.
+   *
+   * Unedited pages only — getPageTextContent routes edited pages through
+   * getPageTextContentFromObjects because FPDFText_* is corrupted post-
+   * GenerateContent.
+   */
+  private getPageTextContentViaGetText(pageIndex: number): IPageTextContent | null {
+    if (!this.pdfiumModule || !this.docPtr) return null;
+    const pdfium = this.pdfiumModule;
+
+    const cachedEditPage = this.editPageCache.get(pageIndex);
+    const pagePtr = cachedEditPage ?? pdfium._PDFium_LoadPage(this.docPtr, pageIndex);
+    if (!pagePtr) return null;
+
+    try {
+      const pageWidth = pdfium._PDFium_GetPageWidth(pagePtr);
+      const pageHeight = pdfium._PDFium_GetPageHeight(pagePtr);
+      const deviceWidth = Math.round(pageWidth);
+      const deviceHeight = Math.round(pageHeight);
+
+      const textPagePtr = pdfium._PDFium_LoadPageText(pagePtr);
+      if (!textPagePtr) {
+        return { pageIndex, pageWidth, pageHeight, textRects: [] };
+      }
+
+      // NOTE: GetCharBox writes left, right, bottom, top — a different argument
+      // order than GetRect (left, top, right, bottom).
+      const leftPtr = pdfium._malloc(8);
+      const rightPtr = pdfium._malloc(8);
+      const bottomPtr = pdfium._malloc(8);
+      const topPtr = pdfium._malloc(8);
+      const fillRPtr = pdfium._malloc(4);
+      const fillGPtr = pdfium._malloc(4);
+      const fillBPtr = pdfium._malloc(4);
+      const fillAPtr = pdfium._malloc(4);
+      const flagsPtr = pdfium._malloc(4);
+
+      const textRects: ITextRect[] = [];
+
+      // Accumulator for the current visual line (page coordinates, y-up).
+      interface ILineAcc {
+        text: string;
+        minLeft: number;
+        maxRight: number;
+        minBottom: number; // smallest y — visual bottom
+        maxTop: number; // largest y — visual top
+        hasBox: boolean;
+        baselineY: number | null; // bottom y of the first boxed glyph on the line
+        fontSize: number;
+        sampleCharIndex: number; // first visible glyph — for font/color sampling
+      }
+      let line: ILineAcc | null = null;
+
+      const sampleFont = (
+        charIndex: number,
+        fallbackSize: number,
+      ): {
+        family: string;
+        size: number;
+        color: { r: number; g: number; b: number; a: number };
+      } => {
+        let family = '';
+        let size = fallbackSize;
+        const color = { r: 0, g: 0, b: 0, a: 255 };
+        if (charIndex < 0) return { family, size, color };
+
+        const fs = pdfium._PDFium_GetFontSize(textPagePtr, charIndex);
+        if (fs > 0) size = fs;
+
+        if (
+          pdfium._PDFium_GetFillColor(
+            textPagePtr,
+            charIndex,
+            fillRPtr,
+            fillGPtr,
+            fillBPtr,
+            fillAPtr,
+          )
+        ) {
+          color.r = pdfium.getValue(fillRPtr, 'i32');
+          color.g = pdfium.getValue(fillGPtr, 'i32');
+          color.b = pdfium.getValue(fillBPtr, 'i32');
+          color.a = pdfium.getValue(fillAPtr, 'i32');
+        }
+
+        const nameLen = pdfium._PDFium_GetFontInfo(textPagePtr, charIndex, 0, 0, 0);
+        if (nameLen > 0) {
+          const nameBuf = pdfium._malloc(nameLen + 1);
+          pdfium._PDFium_GetFontInfo(textPagePtr, charIndex, nameBuf, nameLen + 1, flagsPtr);
+          family = new TextDecoder()
+            .decode(pdfium.HEAPU8.subarray(nameBuf, nameBuf + nameLen))
+            .replace(/^[A-Z]{6}\+/, '');
+          pdfium._free(nameBuf);
+        }
+        return { family, size, color };
+      };
+
+      const flushLine = () => {
+        if (!line) return;
+        const current = line;
+        line = null;
+        if (!current.hasBox || current.text.trim().length === 0) return;
+
+        // Page coords: top = larger y, bottom = smaller y.
+        const deviceRect = this.pageRectToDeviceRect(
+          pagePtr,
+          current.minLeft,
+          current.maxTop,
+          current.maxRight,
+          current.minBottom,
+          deviceWidth,
+          deviceHeight,
+        );
+        const fallbackSize = Math.abs(current.maxTop - current.minBottom);
+        const font = sampleFont(current.sampleCharIndex, current.fontSize || fallbackSize);
+
+        textRects.push({
+          content: current.text,
+          rect: deviceRect,
+          font: { family: font.family, size: font.size, color: font.color },
+        });
+      };
+
+      try {
+        const charCount = pdfium._PDFium_GetPageCharCount(textPagePtr);
+
+        for (let i = 0; i < charCount; i++) {
+          const u = pdfium._PDFium_GetUnicode(textPagePtr, i);
+
+          // Hard line breaks PDFium inserts between visual lines.
+          if (u === 0x0a) {
+            flushLine();
+            continue;
+          }
+          if (u === 0x0d) {
+            continue; // usually paired with the following \n
+          }
+          // Skip null / surrogate-range / out-of-range codepoints.
+          if (u === 0 || (u >= 0xd800 && u <= 0xdfff) || u > 0x10ffff) {
+            continue;
+          }
+
+          const ch = String.fromCodePoint(u);
+          const hasBox = !!pdfium._PDFium_GetCharBox(
+            textPagePtr,
+            i,
+            leftPtr,
+            rightPtr,
+            bottomPtr,
+            topPtr,
+          );
+          const cl = pdfium.getValue(leftPtr, 'double');
+          const cr = pdfium.getValue(rightPtr, 'double');
+          const cb = pdfium.getValue(bottomPtr, 'double');
+          const ct = pdfium.getValue(topPtr, 'double');
+          const validBox = hasBox && cr > cl;
+
+          // Baseline-jump fallback for PDFs where PDFium emits no explicit break.
+          if (line && validBox && line.baselineY !== null) {
+            const fs = line.fontSize || Math.abs(ct - cb) || 12;
+            if (Math.abs(cb - line.baselineY) > fs * 0.6) {
+              flushLine();
+            }
+          }
+
+          line ??= {
+            text: '',
+            minLeft: Number.POSITIVE_INFINITY,
+            maxRight: Number.NEGATIVE_INFINITY,
+            minBottom: Number.POSITIVE_INFINITY,
+            maxTop: Number.NEGATIVE_INFINITY,
+            hasBox: false,
+            baselineY: null,
+            fontSize: 0,
+            sampleCharIndex: -1,
+          };
+
+          line.text += ch;
+
+          if (validBox) {
+            line.minLeft = Math.min(line.minLeft, cl);
+            line.maxRight = Math.max(line.maxRight, cr);
+            line.minBottom = Math.min(line.minBottom, cb);
+            line.maxTop = Math.max(line.maxTop, ct);
+            line.hasBox = true;
+            line.baselineY ??= cb;
+            if (line.fontSize === 0) {
+              const fs = pdfium._PDFium_GetFontSize(textPagePtr, i);
+              line.fontSize = fs > 0 ? fs : Math.abs(ct - cb);
+            }
+            if (line.sampleCharIndex < 0 && ch.trim()) {
+              line.sampleCharIndex = i;
+            }
+          }
+        }
+        flushLine();
+      } finally {
+        pdfium._free(leftPtr);
+        pdfium._free(rightPtr);
+        pdfium._free(bottomPtr);
+        pdfium._free(topPtr);
+        pdfium._free(fillRPtr);
+        pdfium._free(fillGPtr);
+        pdfium._free(fillBPtr);
+        pdfium._free(fillAPtr);
+        pdfium._free(flagsPtr);
+        pdfium._PDFium_ClosePageText(textPagePtr);
+      }
+
+      // Run the same merge pass as the other paths. On clean line-level output
+      // this is largely a no-op (adjacent rects sit on different baselines), but
+      // it coalesces any same-line fragments — e.g. when PDFium splits a line
+      // into multiple char runs — keeping behaviour consistent across paths.
+      const mergedRects = this.mergeAdjacentTextRects(textRects);
+
+      return { pageIndex, pageWidth, pageHeight, textRects: mergedRects };
     } finally {
       if (!cachedEditPage) {
         pdfium._PDFium_ClosePage(pagePtr);
@@ -2087,61 +2341,333 @@ export class PdfController implements IPdfController {
   }
 
   /**
-   * Merge adjacent text rects that are on the same line and have similar font properties.
-   * This handles PDFs where text is stored character-by-character.
+   * Merge text fragments into stable visual runs.
+   *
+   * PDFium can expose text as many tiny geometry rects. This pass first rebuilds
+   * visual lines, then performs a single left-to-right merge per line so input
+   * ordering quirks do not produce broken spans or accidental cross-line merges.
+   *
+   * Algorithm overview:
+   * 1. Clone and normalize input: deep-clone each ITextRect, including nested
+   *    rect, font, and color, so the merge pass does not mutate caller-owned
+   *    data. Decorate each valid rect with cached geometry: left, right, top,
+   *    bottom, centerY, height, and font size.
+   * 2. Build visual line buckets: sort rects by vertical center, then assign
+   *    them to line buckets if their vertical center or vertical overlap is
+   *    close enough. This recovers sane rows even if PDFium returns fragments
+   *    in a slightly odd order.
+   * 3. Sort each line left-to-right: inside each bucket, sort fragments by left,
+   *    then top, then original source index for deterministic reading order.
+   * 4. Compute an adaptive gap limit: inspect positive gaps between neighboring
+   *    fragments on each line and derive a per-line merge threshold. This keeps
+   *    normal character and word fragments mergeable while reducing accidental
+   *    joins across columns or table cells.
+   * 5. Merge compatible fragments: active gates currently require similar
+   *    color, close vertical alignment, and a horizontal gap within the line's
+   *    adaptive limit. Font-family, font-size, and heavy-horizontal-overlap
+   *    gates are kept below as commented-out tuning checks.
+   * 6. Preserve readable text: when fragments merge, union their rectangles and
+   *    append text. If the geometric gap looks like a word gap and neither side
+   *    already has whitespace or punctuation, insert a single space.
    */
   private mergeAdjacentTextRects(rects: ITextRect[]): ITextRect[] {
-    if (rects.length === 0) return [];
-
-    // Deep-clone rect/font so merge writes don't mutate caller-owned input objects.
-    const cloneRect = (r: ITextRect): ITextRect => ({
-      ...r,
-      rect: { ...r.rect },
-      font: { ...r.font },
+    const cloneRect = (rect: ITextRect): ITextRect => ({
+      ...rect,
+      rect: { ...rect.rect },
+      font: {
+        ...rect.font,
+        color: { ...rect.font.color },
+      },
     });
 
-    const merged: ITextRect[] = [];
-    let current = cloneRect(rects[0]);
+    if (rects.length <= 1) return rects.map(cloneRect);
 
-    for (let i = 1; i < rects.length; i++) {
-      const next = rects[i];
+    interface IMergeItem {
+      sourceIndex: number;
+      source: ITextRect;
+      left: number;
+      top: number;
+      right: number;
+      bottom: number;
+      width: number;
+      height: number;
+      centerY: number;
+      fontSize: number;
+    }
 
-      // Check if rects are on the same line (similar top position)
-      const sameBaseline =
-        Math.abs(current.rect.top + current.rect.height - (next.rect.top + next.rect.height)) <
-        current.rect.height;
+    interface ILineBucket {
+      items: IMergeItem[];
+      centerY: number;
+      minLeft: number;
+      minTop: number;
+      maxBottom: number;
+      totalHeight: number;
+      maxHeight: number;
+      medianHeight: number;
+      mergeGapLimit: number;
+    }
 
-      // Check if horizontally adjacent (with small tolerance for spacing).
-      // Use the larger of the two font sizes as the gap threshold so a small
-      // leading glyph doesn't cause separate words/columns to over-merge.
-      const currentRight = current.rect.left + current.rect.width;
-      const nextRight = next.rect.left + next.rect.width;
-      const gap = next.rect.left - currentRight;
-      const isAdjacent = gap < Math.max(current.font.size, next.font.size);
+    const median = (values: number[]): number => {
+      if (values.length === 0) return 0;
+      const sorted = [...values].sort((a, b) => a - b);
+      const middle = Math.floor(sorted.length / 2);
+      if (sorted.length % 2 === 1) return sorted[middle];
+      return (sorted[middle - 1] + sorted[middle]) / 2;
+    };
 
-      if (sameBaseline && isAdjacent) {
-        // Merge: extend current rect (use max right edge so overlapping rects
-        // don't shrink) and append content.
-        current.content += next.content;
-        current.rect.width = Math.max(currentRight, nextRight) - current.rect.left;
-        // Extend height to cover both rects
-        const currentBottom = current.rect.top + current.rect.height;
-        const nextBottom = next.rect.top + next.rect.height;
-        const minTop = Math.min(current.rect.top, next.rect.top);
-        const maxBottom = Math.max(currentBottom, nextBottom);
-        current.rect.top = minTop;
-        current.rect.height = maxBottom - minTop;
+    // const normalizedFontFamily = (fontFamily: string): string =>
+    //   fontFamily
+    //     .replace(/\0/g, '')
+    //     .replace(/^[A-Z]{6}\+/, '')
+    //     .trim()
+    //     .toLowerCase();
+
+    const rectRight = (rect: ITextRect): number => rect.rect.left + rect.rect.width;
+    const rectBottom = (rect: ITextRect): number => rect.rect.top + rect.rect.height;
+    const fontSizeFor = (rect: ITextRect): number =>
+      rect.font.size > 0 ? rect.font.size : Math.max(1, rect.rect.height);
+
+    const startsWithPunctuation = (text: string): boolean => {
+      const trimmed = text.trimStart();
+      return trimmed.length > 0 && /^[,.;:!?)]/.test(trimmed);
+    };
+
+    const colorsCompatible = (a: ITextRect['font']['color'], b: ITextRect['font']['color']) => {
+      const tolerance = 3;
+      return (
+        Math.abs(a.r - b.r) <= tolerance &&
+        Math.abs(a.g - b.g) <= tolerance &&
+        Math.abs(a.b - b.b) <= tolerance &&
+        Math.abs(a.a - b.a) <= tolerance
+      );
+    };
+
+    const fontsCompatible = (a: ITextRect, b: ITextRect): boolean => {
+      // const familyA = normalizedFontFamily(a.font.family);
+      // const familyB = normalizedFontFamily(b.font.family);
+      // if (familyA && familyB && familyA !== familyB) return false;
+
+      // const sizeA = fontSizeFor(a);
+      // const sizeB = fontSizeFor(b);
+      // const sizeTolerance = Math.max(1.5, Math.min(sizeA, sizeB) * 0.25);
+      // if (Math.abs(sizeA - sizeB) > sizeTolerance) return false;
+
+      return colorsCompatible(a.font.color, b.font.color);
+    };
+
+    const toMergeItem = (source: ITextRect, sourceIndex: number): IMergeItem | null => {
+      const { left, top, width, height } = source.rect;
+      if (
+        !Number.isFinite(left) ||
+        !Number.isFinite(top) ||
+        !Number.isFinite(width) ||
+        !Number.isFinite(height) ||
+        width <= 0 ||
+        height <= 0
+      ) {
+        return null;
+      }
+
+      const right = left + width;
+      const bottom = top + height;
+      return {
+        sourceIndex,
+        source,
+        left,
+        top,
+        right,
+        bottom,
+        width,
+        height,
+        centerY: top + height / 2,
+        fontSize: fontSizeFor(source),
+      };
+    };
+
+    const visualItems: IMergeItem[] = [];
+    const unmergeableRects: { sourceIndex: number; rect: ITextRect }[] = [];
+
+    for (let i = 0; i < rects.length; i++) {
+      const item = toMergeItem(rects[i], i);
+      if (item) {
+        visualItems.push(item);
       } else {
-        // Push current and start new
-        merged.push(current);
-        current = cloneRect(next);
+        unmergeableRects.push({ sourceIndex: i, rect: cloneRect(rects[i]) });
       }
     }
 
-    // Don't forget the last one
-    merged.push(current);
+    if (visualItems.length === 0) return unmergeableRects.map((item) => item.rect);
 
-    return merged;
+    const sortedByRow = [...visualItems].sort(
+      (a, b) => a.centerY - b.centerY || a.left - b.left || a.sourceIndex - b.sourceIndex,
+    );
+
+    const lineOverlapRatio = (item: IMergeItem, line: ILineBucket): number => {
+      const overlap = Math.min(item.bottom, line.maxBottom) - Math.max(item.top, line.minTop);
+      if (overlap <= 0) return 0;
+      return overlap / Math.max(1, Math.min(item.height, line.maxHeight));
+    };
+
+    const lineCenterToleranceRatio = 0.55;
+    const lineOverlapToleranceRatio = 0.55;
+    const mergeCenterToleranceRatio = 0.6;
+
+    const itemFitsLine = (item: IMergeItem, line: ILineBucket): boolean => {
+      const averageHeight = line.totalHeight / line.items.length;
+      const centerTolerance = Math.max(
+        2,
+        Math.min(item.height, averageHeight) * lineCenterToleranceRatio,
+      );
+      return (
+        Math.abs(item.centerY - line.centerY) <= centerTolerance ||
+        lineOverlapRatio(item, line) >= lineOverlapToleranceRatio
+      );
+    };
+
+    const appendToLine = (line: ILineBucket, item: IMergeItem) => {
+      const count = line.items.length;
+      line.items.push(item);
+      line.centerY = (line.centerY * count + item.centerY) / (count + 1);
+      line.minLeft = Math.min(line.minLeft, item.left);
+      line.minTop = Math.min(line.minTop, item.top);
+      line.maxBottom = Math.max(line.maxBottom, item.bottom);
+      line.totalHeight += item.height;
+      line.maxHeight = Math.max(line.maxHeight, item.height);
+    };
+
+    const lines: ILineBucket[] = [];
+
+    for (const item of sortedByRow) {
+      let targetLine: ILineBucket | null = null;
+
+      for (let i = lines.length - 1; i >= 0 && i >= lines.length - 3; i--) {
+        if (itemFitsLine(item, lines[i])) {
+          targetLine = lines[i];
+          break;
+        }
+      }
+
+      if (targetLine) {
+        appendToLine(targetLine, item);
+      } else {
+        lines.push({
+          items: [item],
+          centerY: item.centerY,
+          minLeft: item.left,
+          minTop: item.top,
+          maxBottom: item.bottom,
+          totalHeight: item.height,
+          maxHeight: item.height,
+          medianHeight: item.height,
+          mergeGapLimit: Math.max(2, item.height),
+        });
+      }
+    }
+
+    const sortedLineItems = (line: ILineBucket): IMergeItem[] => {
+      const items = [...line.items].sort(
+        (a, b) => a.left - b.left || a.top - b.top || a.sourceIndex - b.sourceIndex,
+      );
+      const lineHeight = Math.max(1, median(items.map((item) => item.height)));
+      const positiveGaps: number[] = [];
+
+      for (let i = 1; i < items.length; i++) {
+        const gap = items[i].left - items[i - 1].right;
+        if (gap > 0 && gap <= lineHeight * 2.5) positiveGaps.push(gap);
+      }
+
+      const medianGap = median(positiveGaps);
+      const adaptiveGap = medianGap > 0 ? medianGap * 3 : lineHeight * 0.9;
+      line.medianHeight = lineHeight;
+      line.mergeGapLimit = Math.max(2, Math.min(lineHeight, adaptiveGap));
+
+      return items;
+    };
+
+    const shouldInsertSpace = (
+      current: ITextRect,
+      next: ITextRect,
+      gap: number,
+      lineHeight: number,
+    ): boolean => {
+      const wordGapThreshold = Math.max(1, lineHeight * 0.22);
+      return (
+        gap > wordGapThreshold &&
+        !/\s$/.test(current.content) &&
+        !/^\s/.test(next.content) &&
+        !startsWithPunctuation(next.content)
+      );
+    };
+
+    // const hasHeavyHorizontalOverlap = (current: ITextRect, next: ITextRect): boolean => {
+    //   const overlapWidth = rectRight(current) - next.rect.left;
+    //   if (overlapWidth <= 0) return false;
+    //   const smallerWidth = Math.min(current.rect.width, next.rect.width);
+    //   return smallerWidth > 0 && overlapWidth > smallerWidth * 0.5;
+    // };
+
+    const canMerge = (current: ITextRect, next: ITextRect, line: ILineBucket): boolean => {
+      if (!fontsCompatible(current, next)) return false;
+      // if (hasHeavyHorizontalOverlap(current, next)) return false;
+
+      const currentCenterY = current.rect.top + current.rect.height / 2;
+      const nextCenterY = next.rect.top + next.rect.height / 2;
+      const centerTolerance = Math.max(
+        2,
+        Math.min(current.rect.height, next.rect.height) * mergeCenterToleranceRatio,
+      );
+      if (Math.abs(currentCenterY - nextCenterY) > centerTolerance) return false;
+
+      const gap = next.rect.left - rectRight(current);
+      return gap <= line.mergeGapLimit;
+    };
+
+    const mergeIntoCurrent = (current: ITextRect, next: ITextRect, line: ILineBucket) => {
+      const gap = next.rect.left - rectRight(current);
+      current.content += `${shouldInsertSpace(current, next, gap, line.medianHeight) ? ' ' : ''}${
+        next.content
+      }`;
+
+      const left = Math.min(current.rect.left, next.rect.left);
+      const top = Math.min(current.rect.top, next.rect.top);
+      const right = Math.max(rectRight(current), rectRight(next));
+      const bottom = Math.max(rectBottom(current), rectBottom(next));
+
+      current.rect.left = left;
+      current.rect.top = top;
+      current.rect.width = right - left;
+      current.rect.height = bottom - top;
+    };
+
+    const merged: { sourceIndex: number; rect: ITextRect }[] = [];
+
+    for (const line of [...lines].sort(
+      (a, b) => a.minTop - b.minTop || a.minLeft - b.minLeft || a.centerY - b.centerY,
+    )) {
+      const items = sortedLineItems(line);
+      let current = cloneRect(items[0].source);
+      let currentSourceIndex = items[0].sourceIndex;
+
+      for (let i = 1; i < items.length; i++) {
+        const next = items[i].source;
+        if (canMerge(current, next, line)) {
+          mergeIntoCurrent(current, next, line);
+        } else {
+          merged.push({ sourceIndex: currentSourceIndex, rect: current });
+          current = cloneRect(next);
+          currentSourceIndex = items[i].sourceIndex;
+        }
+      }
+
+      merged.push({ sourceIndex: currentSourceIndex, rect: current });
+    }
+
+    if (unmergeableRects.length > 0) {
+      merged.push(...unmergeableRects);
+      merged.sort((a, b) => a.sourceIndex - b.sourceIndex);
+    }
+
+    return merged.map((item) => item.rect);
   }
 
   public listNativeAnnotations(pageIndex: number, opts: { scale: number }): INativeAnnotation[] {
