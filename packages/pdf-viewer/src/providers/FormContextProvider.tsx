@@ -1,4 +1,12 @@
-import React, { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import type { IFormField } from '@pdfviewer/controller';
 import { usePdfController } from './PdfControllerContextProvider';
 
@@ -46,6 +54,16 @@ export function FormContextProvider({ children }: { children: React.ReactNode })
 
   const fieldMetaRef = useRef<Map<string, IFormField>>(new Map());
   const fieldKeyByIdRef = useRef<Map<string, string>>(new Map());
+  // Mirror state so `getFormValuesSnapshot` can be a stable identity while
+  // still reading the latest values + dirty keys.
+  const valuesRef = useRef(values);
+  useEffect(() => {
+    valuesRef.current = values;
+  }, [values]);
+  const dirtyKeysRef = useRef(dirtyKeys);
+  useEffect(() => {
+    dirtyKeysRef.current = dirtyKeys;
+  }, [dirtyKeys]);
 
   const registerFields = useCallback((fields: IFormField[]) => {
     if (!fields.length) return;
@@ -106,22 +124,25 @@ export function FormContextProvider({ children }: { children: React.ReactNode })
 
   const getFormValuesSnapshot = useCallback(() => {
     const snapshot: { field: IFormField; value: FormValue }[] = [];
+    const currentValues = valuesRef.current;
     fieldMetaRef.current.forEach((field) => {
       const key = fieldKeyByIdRef.current.get(field.id) ?? getFieldStorageKey(field);
-      const value = values.get(key);
+      const value = currentValues.get(key);
       if (value == null) return;
       snapshot.push({ field, value });
     });
     return snapshot;
-  }, [values]);
+  }, []);
 
   const commitFormValues = useCallback(() => {
-    if (dirtyKeys.size === 0) return;
+    const currentDirty = dirtyKeysRef.current;
+    if (currentDirty.size === 0) return;
+    const currentValues = valuesRef.current;
 
     fieldMetaRef.current.forEach((field) => {
       const key = fieldKeyByIdRef.current.get(field.id) ?? getFieldStorageKey(field);
-      if (!dirtyKeys.has(key)) return;
-      const value = values.get(key);
+      if (!currentDirty.has(key)) return;
+      const value = currentValues.get(key);
       if (value == null) return;
 
       if (field.type === 'pushbutton' || field.type === 'signature') {
@@ -132,7 +153,7 @@ export function FormContextProvider({ children }: { children: React.ReactNode })
     });
 
     setDirtyKeys(new Set());
-  }, [controller, dirtyKeys, values]);
+  }, [controller]);
 
   const contextValue = useMemo<IFormContextValue>(
     () => ({

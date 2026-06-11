@@ -2,6 +2,24 @@ import type { CSSProperties } from 'react';
 import type { IEditableTextObject, ITextRect } from '@pdfviewer/controller';
 import { measureTextWidthAtBaseSize } from './TextMeasurementUtils';
 
+// Lazy singleton: `Intl.Segmenter` is widely available (Chrome 87+, Safari 14.1+,
+// Node 16+). Falls back to codepoint splitting if missing.
+let graphemeSegmenter: Intl.Segmenter | null | undefined;
+function splitGraphemes(text: string): string[] {
+  if (graphemeSegmenter === undefined) {
+    graphemeSegmenter =
+      typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function'
+        ? new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+        : null;
+  }
+  if (graphemeSegmenter) {
+    const out: string[] = [];
+    for (const { segment } of graphemeSegmenter.segment(text)) out.push(segment);
+    return out;
+  }
+  return Array.from(text);
+}
+
 export interface IBaseTextSpan {
   text: string;
   left: number;
@@ -807,19 +825,18 @@ export function wordWrapText(
     if (currentLine.length > 0) {
       const currentWidth = measureTextWidthAtBaseSize(currentLine, fontFamily) * fontSizePx;
       if (currentWidth > maxWidthPx && currentLine.length > 1) {
-        // Force-break character by character
+        // Force-break grapheme by grapheme so we don't split surrogate pairs or
+        // ZWJ clusters (emoji families, flags, skin-tone modifiers, etc.).
+        const graphemes = splitGraphemes(currentLine);
         let broken = '';
-        for (let ci = 0; ci < currentLine.length; ci++) {
-          const charLen = (currentLine.codePointAt(ci) ?? 0) > 0xffff ? 2 : 1;
-          const nextChar = currentLine.slice(ci, ci + charLen);
-          const nextWidth = measureTextWidthAtBaseSize(broken + nextChar, fontFamily) * fontSizePx;
+        for (const g of graphemes) {
+          const nextWidth = measureTextWidthAtBaseSize(broken + g, fontFamily) * fontSizePx;
           if (nextWidth > maxWidthPx && broken.length > 0) {
             lines.push(broken);
-            broken = nextChar;
+            broken = g;
           } else {
-            broken += nextChar;
+            broken += g;
           }
-          if (charLen === 2) ci++; // skip surrogate pair
         }
         currentLine = broken;
       }
@@ -835,7 +852,12 @@ export function wordWrapText(
 // ─── ContentEditable helpers ────────────────────────────────────────────────
 
 function escapeHtml(text: string): string {
-  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 function buildLineDivHtml(

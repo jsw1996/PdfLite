@@ -794,10 +794,17 @@ export class PdfController implements IPdfController {
         pdfium._PDFium_GetBookmarkTitle(bookmarkPtr, buffer, bufferLen),
       );
 
+    // Track visited bookmark dict pointers — malformed PDFs can have circular
+    // /Next or /First chains that would otherwise blow the stack.
+    const visited = new Set<number>();
+
     const buildList = (firstBookmarkPtr: number): IPdfOutlineNode[] => {
       const nodes: IPdfOutlineNode[] = [];
       let current = firstBookmarkPtr;
       while (current) {
+        if (visited.has(current)) break;
+        visited.add(current);
+
         const title = readTitle(current);
         const destPtr = pdfium._PDFium_GetBookmarkDest(docPtr, current);
         let dest: IPdfOutlineNode['dest'];
@@ -2154,13 +2161,16 @@ export class PdfController implements IPdfController {
             if (subtype === FPDF_ANNOTATION_SUBTYPE.INK) {
               const pathCount = pdfium._FPDFAnnot_GetInkListCount_W(annot);
               for (let p = 0; p < pathCount; p++) {
-                // 先用“一个大 buffer”试探读取：length 参数是点数量；这里我们先读 1024 点（够用），返回值会告诉我们实际写入了多少点（若 pdfium 实现如此）
-                // 如果以后需要更严谨，可增加“先查长度”的 wrapper。
-                const maxPts = 1024;
-                const bufPtr = pdfium._malloc(maxPts * 2 * 4); // FS_POINTF * maxPts
+                // Probe with a null buffer first — PDFium returns the required
+                // point count regardless of whether the buffer is big enough.
+                // Previously we used a fixed 1024 cap, which silently truncated
+                // long strokes.
+                const required = pdfium._FPDFAnnot_GetInkListPath_W(annot, p, 0, 0);
+                if (required <= 0) continue;
+                const bufPtr = pdfium._malloc(required * 2 * 4); // FS_POINTF * required
                 try {
-                  const written = pdfium._FPDFAnnot_GetInkListPath_W(annot, p, bufPtr, maxPts);
-                  const n = Math.max(0, Math.min(maxPts, written | 0));
+                  const written = pdfium._FPDFAnnot_GetInkListPath_W(annot, p, bufPtr, required);
+                  const n = Math.max(0, Math.min(required, written | 0));
                   const pts: IPoint[] = [];
                   for (let k = 0; k < n; k++) {
                     const x = pdfium.HEAPF32[bufPtr / 4 + k * 2 + 0];
@@ -2424,8 +2434,9 @@ export class PdfController implements IPdfController {
               controlIndex = pdfium._FPDFAnnot_GetFormControlIndex_W(formHandle, annot);
             } else {
               const keyTPtr = this.allocUtf8('T');
-              const keyVPtr = this.allocUtf8('V');
+              let keyVPtr = 0;
               try {
+                keyVPtr = this.allocUtf8('V');
                 name = this.readFormFieldString((buf, len) =>
                   pdfium._FPDFAnnot_GetStringValue_W(annot, keyTPtr, buf, len),
                 );
@@ -2514,7 +2525,13 @@ export class PdfController implements IPdfController {
       };
 
       const keyVPtr = this.allocUtf8('V');
-      const keyASPtr = this.allocUtf8('AS');
+      let keyASPtr: number;
+      try {
+        keyASPtr = this.allocUtf8('AS');
+      } catch (e) {
+        pdfium._free(keyVPtr);
+        throw e;
+      }
 
       try {
         if (field.type === 'checkbox') {
@@ -2581,12 +2598,18 @@ export class PdfController implements IPdfController {
     if (groupFields.length === 0) return;
 
     const { pdfium } = this.requireDoc();
-    const keyVPtr = this.allocUtf8('V');
-    const keyASPtr = this.allocUtf8('AS');
-    const selectedStatePtr = this.allocUtf16(selectedOnState);
-    const offStatePtr = this.allocUtf16('Off');
-
+    // Allocate inside a try/catch chain so a later allocUtf failure can't leak
+    // earlier allocations.
+    let keyVPtr = 0;
+    let keyASPtr = 0;
+    let selectedStatePtr = 0;
+    let offStatePtr = 0;
     try {
+      keyVPtr = this.allocUtf8('V');
+      keyASPtr = this.allocUtf8('AS');
+      selectedStatePtr = this.allocUtf16(selectedOnState);
+      offStatePtr = this.allocUtf16('Off');
+
       for (const candidate of groupFields) {
         this.withPage(candidate.pageIndex, (pagePdfium, pagePtr) => {
           const annot = pagePdfium._FPDFPage_GetAnnot_W(pagePtr, candidate.annotIndex);

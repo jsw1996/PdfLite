@@ -51,6 +51,12 @@ export const CanvasLayer: React.FC<ICanvasLayerProps> = ({
 
   // Track last annotation version we actually rendered
   const lastRenderedVersionRef = useRef(renderVersion);
+  // Mirror renderVersion in a ref so the post-await assignment below reflects
+  // the latest value, not the one captured when the callback was created.
+  const renderVersionRef = useRef(renderVersion);
+  useEffect(() => {
+    renderVersionRef.current = renderVersion;
+  }, [renderVersion]);
 
   const { width: pageWidth, height: pageHeight } = controller.getPageDimension(pageIndex);
 
@@ -87,8 +93,9 @@ export const CanvasLayer: React.FC<ICanvasLayerProps> = ({
 
       if (abortController.signal.aborted) return;
 
-      // Mark that this scale + annotation version are now sharp
-      lastRenderedVersionRef.current = renderVersion;
+      // Mark that this scale + annotation version are now sharp. Read from the
+      // ref so we record the latest version even if it ticked during the await.
+      lastRenderedVersionRef.current = renderVersionRef.current;
       setRenderedScale(scale);
       setCanvasDimensions({
         width: canvas.width / pixelRatio,
@@ -101,7 +108,7 @@ export const CanvasLayer: React.FC<ICanvasLayerProps> = ({
 
       console.warn('Failed to render PDF on canvas.', error);
     }
-  }, [controller, isInitialized, pageIndex, scale, onCanvasReady, renderVersion]);
+  }, [controller, isInitialized, pageIndex, scale, onCanvasReady]);
 
   // Debounce expensive render; only run when actually needed
   useEffect(() => {

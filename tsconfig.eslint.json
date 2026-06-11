@@ -10,11 +10,5 @@
       "@pdfviewer/ui": ["./packages/ui/src/index.ts"]
     }
   },
-  "include": [
-    "apps/**/*",
-    "packages/**/*",
-    "eslint.config.js",
-    "commitlint.config.js",
-    "lint-staged.config.js"
-  ]
+  "include": ["packages/**/*", "eslint.config.js", "commitlint.config.js", "lint-staged.config.js"]
 }

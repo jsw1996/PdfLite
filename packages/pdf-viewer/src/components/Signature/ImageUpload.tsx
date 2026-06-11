@@ -1,6 +1,11 @@
 import React, { useState, useCallback } from 'react';
 import { safeBase64Decode } from '@/utils/shared';
 
+// Limits to keep the embedded signature reasonable and avoid blowing up the
+// PDF / WASM memory on accidentally-huge phone-camera uploads.
+const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 MB
+const MAX_IMAGE_DIMENSION = 2048; // px on the longer side
+
 export interface IImageUploadProps {
   onSignatureReady: (args: {
     pngDataUrl: string;
@@ -32,6 +37,12 @@ export const ImageUpload: React.FC<IImageUploadProps> = ({ onSignatureReady }) =
       return;
     }
 
+    // Cap raw upload size
+    if (file.size > MAX_FILE_BYTES) {
+      setError(`Image is too large (max ${MAX_FILE_BYTES / 1024 / 1024} MB)`);
+      return;
+    }
+
     setError(null);
 
     // Create preview
@@ -49,17 +60,24 @@ export const ImageUpload: React.FC<IImageUploadProps> = ({ onSignatureReady }) =
         setError('Failed to load the image');
       };
       img.onload = () => {
-        // Convert to PNG bytes
+        // Downscale to MAX_IMAGE_DIMENSION on the longer side, preserving aspect ratio.
+        const scale = Math.min(
+          1,
+          MAX_IMAGE_DIMENSION / Math.max(img.naturalWidth, img.naturalHeight),
+        );
+        const targetWidth = Math.max(1, Math.round(img.naturalWidth * scale));
+        const targetHeight = Math.max(1, Math.round(img.naturalHeight * scale));
+
         const canvas = document.createElement('canvas');
-        canvas.width = img.naturalWidth;
-        canvas.height = img.naturalHeight;
+        canvas.width = targetWidth;
+        canvas.height = targetHeight;
         const ctx = canvas.getContext('2d');
         if (!ctx) {
           setError('Failed to create canvas context');
           return;
         }
 
-        ctx.drawImage(img, 0, 0);
+        ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
         const pngDataUrl = canvas.toDataURL('image/png');
 
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
@@ -78,8 +96,8 @@ export const ImageUpload: React.FC<IImageUploadProps> = ({ onSignatureReady }) =
           dataUrl: pngDataUrl,
           bytes: pngBytes,
           rgbaBytes,
-          width: img.naturalWidth,
-          height: img.naturalHeight,
+          width: targetWidth,
+          height: targetHeight,
         });
       };
       img.src = dataUrl;

@@ -715,14 +715,18 @@ export interface IPDFiumModule {
   /**
    * Get the fill color of a page object (RGBA, 0-255).
    * Returns 1 on success, 0 on failure. Writes to the provided pointers.
+   *
+   * NOTE: Declared in the C++ wrapper but not yet present in the compiled
+   * .wasm — callers must guard with `typeof pdfium._FPDFPageObj_GetFillColor_W
+   * === 'function'` until the WASM is rebuilt.
    */
-  _FPDFPageObj_GetFillColor_W(
+  _FPDFPageObj_GetFillColor_W?: (
     pageObject: number,
     rPtr: number,
     gPtr: number,
     bPtr: number,
     aPtr: number,
-  ): number;
+  ) => number;
   /**
    * Set the fill color for a page object (RGBA, 0-255)
    */
