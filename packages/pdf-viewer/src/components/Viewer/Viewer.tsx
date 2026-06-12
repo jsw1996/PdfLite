@@ -11,6 +11,10 @@ import { OBSERVER_CONFIG, VIEWER_CONFIG } from '@/utils/config';
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 const PAGE_GAP_PX = 16; // Matches previous mb-4 spacing on pages
+const getDevicePixelRatio = () =>
+  typeof window === 'undefined' ? 1 : Math.max(1, window.devicePixelRatio || 1);
+const snapCssPxToDevicePixel = (value: number, devicePixelRatio: number) =>
+  Math.round(value * devicePixelRatio) / devicePixelRatio;
 
 interface IZoomAnchor {
   index: number;
@@ -317,6 +321,7 @@ export const Viewer: React.FC<IViewerProps> = ({ pageCount }) => {
     }
     return Array.from(itemsByIndex.values()).sort((a, b) => a.index - b.index);
   }, [getScaledStart, pageCount, pageHeights, pinnedIndices, scale, virtualItems]);
+  const currentDevicePixelRatio = getDevicePixelRatio();
 
   return (
     <div className="h-full relative">
@@ -345,7 +350,10 @@ export const Viewer: React.FC<IViewerProps> = ({ pageCount }) => {
                 left: 0,
                 width: '100%',
                 height: virtualRow.size,
-                transform: `translateY(${virtualRow.start}px)`,
+                transform: `translateY(${snapCssPxToDevicePixel(
+                  virtualRow.start,
+                  currentDevicePixelRatio,
+                )}px)`,
               }}
             >
               {itemContent(virtualRow.index)}

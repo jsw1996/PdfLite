@@ -181,11 +181,10 @@ export const CanvasLayer: React.FC<ICanvasLayerProps> = ({
           transformOrigin: 'top left',
           position: 'absolute',
           display: 'block',
-          // crisp-edges keeps the bitmap sharp at rest (CSS size matches the
-          // rendered bitmap), but during a CSS-scaled zoom preview it forces
-          // nearest-neighbor upscaling (blocky). Use smooth interpolation while
-          // the visual scale differs from 1, then snap back to crisp.
-          imageRendering: visualScale === 1 ? 'crisp-edges' : 'auto',
+          // Let the browser use normal interpolation. PDFium already renders
+          // text with LCD antialiasing; forcing crisp-edges can make glyphs
+          // look jagged whenever the bitmap is even slightly transformed.
+          imageRendering: 'auto',
           willChange: 'transform',
           visibility: hidden ? 'hidden' : undefined,
         }}
