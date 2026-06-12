@@ -16,6 +16,7 @@ import {
 } from '../annotations';
 import { usePdfState } from './PdfStateContextProvider';
 import { usePdfController } from './PdfControllerContextProvider';
+import { useEditHistory } from './EditHistoryContextProvider';
 
 export interface IEditSessionData {
   /** Editor plain text saved across virtualized unmount/remount cycles. Key: `${pageIndex}:${paragraphIndex}` */
@@ -51,6 +52,8 @@ export interface IAnnotationContextValue {
   setNativeAnnotationsForPage: (pageIndex: number, annotations: IAnnotation[]) => void;
   /** Commit all overlay annotations to PDFium */
   commitAnnotations: () => void;
+  /** Commit overlay annotations to PDFium without changing React working state. */
+  commitAnnotationsToPdfium: () => boolean;
   /** Update an existing annotation by ID */
   updateAnnotation: (id: string, updates: Partial<IAnnotation>) => void;
   /** Version counter that increments when page content changes (e.g., text flattened) */
@@ -80,6 +83,11 @@ export function AnnotationContextProvider({ children }: { children: React.ReactN
   const [renderVersion, setRenderVersion] = useState(0);
   const scale = usePdfState().scale;
   const { controller } = usePdfController();
+  const history = useEditHistory();
+  const annotationStackRef = useRef(annotationStack);
+  useEffect(() => {
+    annotationStackRef.current = annotationStack;
+  }, [annotationStack]);
 
   // Mutable session data for text-editing mode. Created once via lazy
   // initializer so mutations don't trigger React re-renders (we never call
@@ -144,16 +152,21 @@ export function AnnotationContextProvider({ children }: { children: React.ReactN
   }, [annotationStack]);
 
   const popAnnotation = useCallback(() => {
-    let popped: IAnnotation | undefined;
-    setAnnotationStack((prev) => {
-      if (prev.length === 0) return prev;
-      // Don't pop native annotations
-      if (prev[prev.length - 1].source === 'native') return prev;
-      popped = prev[prev.length - 1];
-      return prev.slice(0, -1);
+    const current = annotationStackRef.current;
+    const popped = current[current.length - 1];
+    if (!popped || popped.source === 'native') return undefined;
+    history.run({
+      label: 'Delete annotation',
+      redo: () => {
+        newAnnotationIdsRef.current.delete(popped.id);
+        setAnnotationStack((prev) => prev.filter((ann) => ann.id !== popped.id));
+      },
+      undo: () => {
+        setAnnotationStack((prev) => [...prev, popped]);
+      },
     });
     return popped;
-  }, []);
+  }, [history]);
 
   // Ids of annotations created this session that have not yet been "claimed" by
   // their component on first mount (drives one-time auto-focus/edit).
@@ -161,12 +174,24 @@ export function AnnotationContextProvider({ children }: { children: React.ReactN
 
   const addAnnotation = useCallback(
     (annotation: IAnnotation) => {
-      newAnnotationIdsRef.current.add(annotation.id);
       // Normalize the annotation for scale-independent storage
       const normalizedAnnotation = normalizeAnnotation(annotation, scale);
-      setAnnotationStack((prev) => [...prev, normalizedAnnotation]);
+      history.run({
+        label: 'Add annotation',
+        redo: () => {
+          newAnnotationIdsRef.current.add(annotation.id);
+          setAnnotationStack((prev) => {
+            if (prev.some((ann) => ann.id === normalizedAnnotation.id)) return prev;
+            return [...prev, normalizedAnnotation];
+          });
+        },
+        undo: () => {
+          newAnnotationIdsRef.current.delete(annotation.id);
+          setAnnotationStack((prev) => prev.filter((ann) => ann.id !== normalizedAnnotation.id));
+        },
+      });
     },
-    [scale],
+    [history, scale],
   );
 
   const consumeNewAnnotation = useCallback(
@@ -176,19 +201,26 @@ export function AnnotationContextProvider({ children }: { children: React.ReactN
 
   const updateAnnotation = useCallback(
     (id: string, updates: Partial<IAnnotation>) => {
-      setAnnotationStack((prev) =>
-        prev.map((ann) => {
-          if (ann.id !== id) return ann;
-          // Stored annotations are normalized (scale=1).
-          // Updates come from UI in denormalized (current scale) coordinates.
-          // Denormalize the stored annotation, merge with updates, then re-normalize.
-          const denormalized = denormalizeAnnotation(ann, scale);
-          const merged = { ...denormalized, ...updates } as IAnnotation;
-          return normalizeAnnotation(merged, scale);
-        }),
-      );
+      const before = annotationStackRef.current.find((ann) => ann.id === id);
+      if (!before) return;
+      // Stored annotations are normalized (scale=1). Updates come from UI in
+      // denormalized (current scale) coordinates.
+      const denormalized = denormalizeAnnotation(before, scale);
+      const merged = { ...denormalized, ...updates } as IAnnotation;
+      const after = normalizeAnnotation(merged, scale);
+      history.run({
+        label: 'Update annotation',
+        coalesceKey: `annotation:${id}`,
+        coalesceMs: 500,
+        redo: () => {
+          setAnnotationStack((prev) => prev.map((ann) => (ann.id === id ? after : ann)));
+        },
+        undo: () => {
+          setAnnotationStack((prev) => prev.map((ann) => (ann.id === id ? before : ann)));
+        },
+      });
     },
-    [scale],
+    [history, scale],
   );
 
   // Pre-denormalize per page once per (annotations, scale) change so that
@@ -225,18 +257,24 @@ export function AnnotationContextProvider({ children }: { children: React.ReactN
     [],
   );
 
+  const commitAnnotationsToPdfium = useCallback(() => {
+    const overlays = annotationStackRef.current.filter(
+      (annotation) => annotation.source === 'overlay',
+    );
+    overlays.forEach((annotation) => {
+      commitAnnotation(controller, annotation);
+    });
+    return overlays.length > 0;
+  }, [controller]);
+
   const commitAnnotations = useCallback(() => {
     // Check if any flattened annotations exist (text/signature)
     const hasFlattenedAnnotations = annotationStack.some(
       (a) => a.source === 'overlay' && (a.type === 'text' || a.type === 'signature'),
     );
 
-    // Commit all overlay annotations to PDFium using handlers
-    annotationStack.forEach((annotation) => {
-      if (annotation.source === 'overlay') {
-        commitAnnotation(controller, annotation);
-      }
-    });
+    // Commit all overlay annotations to PDFium using handlers.
+    commitAnnotationsToPdfium();
     // After commit:
     // - Text and signature annotations are flattened into page content (not real annotations),
     //   so they must be REMOVED from the stack (PDFium won't list them as annotations)
@@ -252,7 +290,7 @@ export function AnnotationContextProvider({ children }: { children: React.ReactN
     if (hasFlattenedAnnotations) {
       setRenderVersion((v) => v + 1);
     }
-  }, [annotationStack, controller]);
+  }, [annotationStack, commitAnnotationsToPdfium]);
 
   const bumpRenderVersion = useCallback(() => {
     setRenderVersion((v) => v + 1);
@@ -271,6 +309,7 @@ export function AnnotationContextProvider({ children }: { children: React.ReactN
       annotationStack,
       popAnnotation,
       commitAnnotations,
+      commitAnnotationsToPdfium,
       updateAnnotation,
       renderVersion,
       bumpRenderVersion,
@@ -290,6 +329,7 @@ export function AnnotationContextProvider({ children }: { children: React.ReactN
       renderVersion,
       bumpRenderVersion,
       commitAnnotations,
+      commitAnnotationsToPdfium,
       updateAnnotation,
       editSessionData,
     ],

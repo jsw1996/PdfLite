@@ -33,8 +33,8 @@ export function DownloadDialogProvider({
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const { controller } = usePdfController();
-  const { commitAnnotations } = useAnnotation();
-  const { commitFormValues, getFormValuesSnapshot } = useFormContext();
+  const { commitAnnotationsToPdfium } = useAnnotation();
+  const { getFormValuesSnapshot } = useFormContext();
 
   const openDownloadDialog = useCallback(() => {
     setIsDialogOpen(true);
@@ -53,48 +53,62 @@ export function DownloadDialogProvider({
       try {
         setIsProcessing(true);
 
-        // Commit any pending form values and annotations first
-        commitFormValues();
-        commitAnnotations();
+        const rollbackBytes = controller.exportPdfBytes();
+        let shouldRollbackController = false;
 
-        // Export the PDF bytes
-        let pdfBytes = controller.exportPdfBytes();
+        try {
+          // Apply pending overlay annotations to PDFium only for this export.
+          // React working state remains undoable; the controller is restored
+          // after bytes are produced.
+          shouldRollbackController = true;
+          shouldRollbackController = commitAnnotationsToPdfium();
 
-        // Ensure form values (especially radio groups) are persisted for external viewers.
-        const formValues = getFormValuesSnapshot();
-        if (formValues.length > 0) {
-          pdfBytes = await applyFormValues(pdfBytes, formValues);
+          // Export the PDF bytes
+          let pdfBytes = controller.exportPdfBytes();
+
+          // Ensure form values (especially radio groups) are persisted for external viewers.
+          const formValues = getFormValuesSnapshot();
+          if (formValues.length > 0) {
+            pdfBytes = await applyFormValues(pdfBytes, formValues);
+          }
+
+          // If password protection is enabled, encrypt the PDF
+          if (options.enablePassword && options.password) {
+            pdfBytes = await encryptPdf(pdfBytes, {
+              userPassword: options.password,
+              permissions: options.permissions
+                ? {
+                    printing: options.permissions.printing,
+                    copying: options.permissions.copying,
+                    modifying: options.permissions.modifying,
+                    annotating: options.permissions.modifying,
+                  }
+                : undefined,
+            });
+          }
+
+          // Trigger download - create a copy with standard ArrayBuffer for Blob compatibility
+          const blob = new Blob([new Uint8Array(pdfBytes)], { type: 'application/pdf' });
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = fileName;
+          link.style.display = 'none';
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          // Microtask-revoke: the browser has begun the download by the time
+          // `.click()` returns. Avoids both the early-revoke race and the
+          // never-revoke leak that `setTimeout(..., 100)` was prone to.
+          queueMicrotask(() => URL.revokeObjectURL(url));
+        } finally {
+          if (shouldRollbackController) {
+            const rollbackFile = new File([new Uint8Array(rollbackBytes)], fileName, {
+              type: 'application/pdf',
+            });
+            await controller.loadFile(rollbackFile);
+          }
         }
-
-        // If password protection is enabled, encrypt the PDF
-        if (options.enablePassword && options.password) {
-          pdfBytes = await encryptPdf(pdfBytes, {
-            userPassword: options.password,
-            permissions: options.permissions
-              ? {
-                  printing: options.permissions.printing,
-                  copying: options.permissions.copying,
-                  modifying: options.permissions.modifying,
-                  annotating: options.permissions.modifying,
-                }
-              : undefined,
-          });
-        }
-
-        // Trigger download - create a copy with standard ArrayBuffer for Blob compatibility
-        const blob = new Blob([new Uint8Array(pdfBytes)], { type: 'application/pdf' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = fileName;
-        link.style.display = 'none';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        // Microtask-revoke: the browser has begun the download by the time
-        // `.click()` returns. Avoids both the early-revoke race and the
-        // never-revoke leak that `setTimeout(..., 100)` was prone to.
-        queueMicrotask(() => URL.revokeObjectURL(url));
 
         // Close the dialog
         setIsDialogOpen(false);
@@ -105,7 +119,7 @@ export function DownloadDialogProvider({
         setIsProcessing(false);
       }
     },
-    [controller, fileName, commitAnnotations, commitFormValues, getFormValuesSnapshot],
+    [controller, fileName, commitAnnotationsToPdfium, getFormValuesSnapshot],
   );
 
   const value = useMemo<IDownloadDialogContextValue>(

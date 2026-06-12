@@ -1,4 +1,11 @@
-import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef } from 'react';
+import React, {
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+} from 'react';
 import { usePdfController } from '@/providers/PdfControllerContextProvider';
 import { useAnnotation } from '@/providers/AnnotationContextProvider';
 import type { IEditableTextObject } from '@pdfviewer/controller';
@@ -43,6 +50,10 @@ export const TextLayer: React.FC<ITextLayerProps> = ({ pageIndex, scale = 1.5 })
   // accessor) + normalization on every keystroke. Commits are deferred to exit, so
   // staging only needs to be eventually-consistent for remount rehydration.
   const stageTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isEditModeRef = useRef(isEditMode);
+  useLayoutEffect(() => {
+    isEditModeRef.current = isEditMode;
+  }, [isEditMode]);
 
   const deferredScale = useDeferredValue(scale);
 
@@ -102,10 +113,14 @@ export const TextLayer: React.FC<ITextLayerProps> = ({ pageIndex, scale = 1.5 })
         originalTextsRef.current.set(i, normalizeEditableText(paragraph.text));
       }
       if (!editorTextsRef.current.has(i)) {
-        editorTextsRef.current.set(i, normalizeEditableText(paragraph.text));
+        const key = `${pageIndex}:${i}`;
+        editorTextsRef.current.set(
+          i,
+          savedEditorText.get(key) ?? normalizeEditableText(paragraph.text),
+        );
       }
     }
-  }, [controller, editableParagraphs, pageIndex]);
+  }, [controller, editableParagraphs, pageIndex, savedEditorText]);
 
   // Pre-compute lineObjectGroups for all paragraphs when entering edit mode.
   // NOTE: We do NOT clear refs here when isEditMode becomes false — the exit-mode
@@ -238,12 +253,11 @@ export const TextLayer: React.FC<ITextLayerProps> = ({ pageIndex, scale = 1.5 })
     ],
   );
 
-  // Per-page commit on exit OR on unmount-during-edit (e.g., page scrolled out
-  // of the virtualized viewport). The cleanup runs when isEditMode flips to
-  // false, when pageIndex/controller change, or when the component unmounts —
-  // any of these means "this page's edits need to land now". Doc-wide finalize
+  // Per-page commit on edit-mode exit. If a page unmounts while edit mode is
+  // still active, staged plain text is preserved in editSessionData and the PDF
+  // is not mutated as a side effect of virtualization. Doc-wide finalize
   // (releaseEditPages, bumpRenderVersion) lives on the provider so it runs
-  // exactly once after every page's cleanup has flushed.
+  // exactly once after mounted pages have flushed.
   const commitParagraphTextRef = useRef(commitParagraphText);
   useEffect(() => {
     commitParagraphTextRef.current = commitParagraphText;
@@ -261,6 +275,9 @@ export const TextLayer: React.FC<ITextLayerProps> = ({ pageIndex, scale = 1.5 })
       if (stageTimerRef.current) {
         clearTimeout(stageTimerRef.current);
         stageTimerRef.current = null;
+      }
+      if (isEditModeRef.current) {
+        return;
       }
       // Batch all commits with skipGenerateContent, then regenerate once
       // per page. Without this, each paragraph triggers a separate
@@ -308,6 +325,7 @@ export const TextLayer: React.FC<ITextLayerProps> = ({ pageIndex, scale = 1.5 })
   const scheduleStageEditorContent = useCallback(
     (editor: HTMLElement, idx: number) => {
       if (stageTimerRef.current) clearTimeout(stageTimerRef.current);
+      if (editor.isConnected) stageEditorContent(editor, idx);
       stageTimerRef.current = setTimeout(() => {
         stageTimerRef.current = null;
         if (editor.isConnected) stageEditorContent(editor, idx);
