@@ -28,6 +28,7 @@ export {
   ANNOTATION_COLORS,
   ANNOTATION_STROKE_WIDTH,
   TEXT_ANNOTATION_DEFAULTS,
+  TEXT_COLOR_PRESETS,
   ANNOTATION_TIMING,
 } from './constants';
 
@@ -35,6 +36,7 @@ export {
 export {
   type ICanvasMetrics,
   type IAnnotationHandler,
+  type ICommitContext,
   drawHandler,
   highlightHandler,
   textHandler,

@@ -882,6 +882,27 @@ FPDF_FONT FPDFText_LoadStandardFont_W(FPDF_DOCUMENT document, const char* font_n
     return FPDFText_LoadStandardFont(document, font_name);
 }
 
+// Load a font from embedded font-file bytes (e.g. a subsetted TrueType/OTF).
+// font_type: 1 = Type1, 2 = TrueType. cid: true for composite (CID-keyed)
+// fonts, which is REQUIRED for fonts with > 255 glyphs such as CJK. The font
+// program is embedded into the document on save, so the text renders in any
+// viewer without depending on system fonts.
+EMSCRIPTEN_KEEPALIVE
+FPDF_FONT FPDFText_LoadFont_W(FPDF_DOCUMENT document,
+                             const uint8_t* data,
+                             uint32_t size,
+                             int font_type,
+                             FPDF_BOOL cid) {
+    return FPDFText_LoadFont(document, data, size, font_type, cid);
+}
+
+// Set the stroke width (in points) for a page object. Combined with the
+// FILL_STROKE text render mode this synthesizes a bold weight.
+EMSCRIPTEN_KEEPALIVE
+FPDF_BOOL FPDFPageObj_SetStrokeWidth_W(FPDF_PAGEOBJECT page_object, float width) {
+    return FPDFPageObj_SetStrokeWidth(page_object, width);
+}
+
 // Create a new text object using the specified font
 EMSCRIPTEN_KEEPALIVE
 FPDF_PAGEOBJECT FPDFPageObj_CreateTextObj_W(FPDF_DOCUMENT document, FPDF_FONT font, float font_size) {

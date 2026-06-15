@@ -56,6 +56,10 @@ export interface ITextAnnotation extends IBaseAnnotation {
   content: string;
   fontSize: number;
   fontColor: string;
+  /** Font weight (defaults to 'normal' when omitted) */
+  fontWeight?: 'normal' | 'bold';
+  /** Font style (defaults to 'normal' when omitted) */
+  fontStyle?: 'normal' | 'italic';
   /** Computed dimensions from text content, updated when text changes */
   dimensions?: { width: number; height: number };
 }

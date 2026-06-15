@@ -27,13 +27,24 @@ export interface ICanvasMetrics {
 }
 
 /**
+ * Optional context passed through to commit handlers.
+ */
+export interface ICommitContext {
+  /**
+   * Handle from PdfController.loadEmbeddedFont(), used so added text containing
+   * non-Latin (e.g. CJK) glyphs embeds a real font instead of base-14 Helvetica.
+   */
+  embeddedFontPtr?: number;
+}
+
+/**
  * Handler interface for annotation operations
  */
 export interface IAnnotationHandler<T extends IAnnotation> {
   /** Render the annotation to a canvas context */
   render(ctx: CanvasRenderingContext2D, annotation: T): void;
   /** Commit the annotation to PDFium */
-  commit(controller: PdfController, annotation: T): void;
+  commit(controller: PdfController, annotation: T, ctx?: ICommitContext): void;
   /** Normalize coordinates when scale changes (scale-independent storage) */
   normalize(annotation: T, scale: number): T;
   /** Denormalize coordinates for rendering at current scale */
@@ -238,8 +249,27 @@ function wrapTextToLines(text: string, fontSize: number, maxWidth: number): stri
   return lines.length > 0 ? lines : [''];
 }
 
-function commitTextAnnotation(controller: PdfController, annotation: ITextAnnotation): void {
+/** Parse a CSS rgb()/hex color string into 0-255 RGB components. */
+function cssColorToRgb255(color: string): { r: number; g: number; b: number } | null {
+  const m = /rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i.exec(color);
+  if (m) return { r: +m[1], g: +m[2], b: +m[3] };
+  const hex = /^#([0-9a-f]{6})$/i.exec(color);
+  if (hex) {
+    const n = parseInt(hex[1], 16);
+    return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+  }
+  return null;
+}
+
+function commitTextAnnotation(
+  controller: PdfController,
+  annotation: ITextAnnotation,
+  ctx?: ICommitContext,
+): void {
   const { position, content, fontSize, dimensions } = annotation;
+
+  // Skip empty boxes — nothing to flatten into the page.
+  if (!content.trim()) return;
 
   // Use dimensions if available, otherwise estimate based on content
   const width =
@@ -260,7 +290,10 @@ function commitTextAnnotation(controller: PdfController, annotation: ITextAnnota
     },
     lines,
     fontSize,
-    fontColor: TEXT_ANNOTATION_DEFAULTS.FONT_COLOR_RGB,
+    fontColor: cssColorToRgb255(annotation.fontColor) ?? TEXT_ANNOTATION_DEFAULTS.FONT_COLOR_RGB,
+    bold: annotation.fontWeight === 'bold',
+    italic: annotation.fontStyle === 'italic',
+    embeddedFontPtr: ctx?.embeddedFontPtr,
   });
 }
 
@@ -423,8 +456,12 @@ export function renderAnnotation(ctx: CanvasRenderingContext2D, annotation: IAnn
 /**
  * Commit any annotation based on its type
  */
-export function commitAnnotation(controller: PdfController, annotation: IAnnotation): void {
-  getHandler(annotation.type).commit(controller, annotation);
+export function commitAnnotation(
+  controller: PdfController,
+  annotation: IAnnotation,
+  ctx?: ICommitContext,
+): void {
+  getHandler(annotation.type).commit(controller, annotation, ctx);
 }
 
 /**
