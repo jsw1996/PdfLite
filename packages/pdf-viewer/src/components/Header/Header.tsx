@@ -1,7 +1,6 @@
 import { ToolBar } from '../Toolbar/Toolbar';
 import { SearchBar } from '../SearchBar/SearchBar';
 import type { IToolButton } from '../ToolButtons/ToolButton.type';
-import { FileText } from 'lucide-react';
 
 interface IHeaderProps {
   fileName: string;
@@ -15,9 +14,6 @@ export const Header: React.FC<IHeaderProps> = ({ fileName, centerButtons, rightB
       <div className="flex items-center justify-between gap-4">
         {/* Left: File info */}
         <div className="flex items-center gap-3 flex-1 min-w-0">
-          <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
-            <FileText className="w-5 h-5 text-primary-emphasis" />
-          </div>
           <h1 className="text-sm font-semibold text-foreground truncate">{fileName}</h1>
         </div>
 
