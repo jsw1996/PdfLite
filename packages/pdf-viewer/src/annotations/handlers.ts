@@ -63,15 +63,38 @@ function renderDrawAnnotation(ctx: CanvasRenderingContext2D, annotation: IDrawAn
   ctx.restore();
 }
 
+/** Parse a CSS `rgb()`/`rgba()` string into 0-255 channel values. */
+function parseRgbColor(color: string): { r: number; g: number; b: number; a: number } | undefined {
+  const m = /rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*(?:,\s*([\d.]+)\s*)?\)/i.exec(
+    color,
+  );
+  if (!m) return undefined;
+  return {
+    r: Math.round(Number(m[1])),
+    g: Math.round(Number(m[2])),
+    b: Math.round(Number(m[3])),
+    a: m[4] !== undefined ? Math.round(Number(m[4]) * 255) : 255,
+  };
+}
+
 function commitDrawAnnotation(controller: PdfController, annotation: IDrawAnnotation): void {
   // Draw annotations are committed as INK annotations
   // Points are already normalized to scale=1 (page coordinates)
   // We need at least 2 points for a valid ink stroke
   if (annotation.points.length < 2) return;
 
+  // Points were already smoothed at stroke-finish (see useInk), so the saved
+  // ink matches what's shown on the canvas. Re-smoothing here would over-round
+  // the stroke, so we commit the stored points as-is.
+  //
+  // Pass the annotation's own color and stroke width through. Without these,
+  // addInkHighlight falls back to the highlighter defaults (yellow, width 14),
+  // which made downloaded strokes far thicker than the on-screen preview.
   controller.addInkHighlight(annotation.pageIndex, {
     scale: 1,
     canvasPoints: annotation.points,
+    color: parseRgbColor(annotation.color),
+    borderWidth: annotation.strokeWidth,
   });
 }
 

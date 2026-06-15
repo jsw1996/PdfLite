@@ -139,10 +139,11 @@ export function useRenderAnnotation({
     // in-progress stroke; per-segment drawing during a stroke is handled in useInk.
     const currentPath = currentPathRef.current;
     if (selectedTool && currentPath.length > 0) {
-      const color = ANNOTATION_COLORS.HIGHLIGHT;
       if (selectedTool === 'draw') {
+        // Use the draw color (black) for the live preview so the stroke does
+        // not change color when it's committed to a stored draw annotation.
         const strokeWidth = ANNOTATION_STROKE_WIDTH.DRAW;
-        drawStrokePreview(dctx, currentPath, color, strokeWidth);
+        drawStrokePreview(dctx, currentPath, ANNOTATION_COLORS.DRAW, strokeWidth);
       }
     }
   }, [annotations, currentPathRef, highlightCanvasRef, drawCanvasRef, metrics, selectedTool]);
