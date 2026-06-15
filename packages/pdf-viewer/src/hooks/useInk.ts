@@ -5,6 +5,7 @@ import {
   type IPoint,
   type AnnotationType,
   generateAnnotationId,
+  chaikinSmooth,
   ANNOTATION_COLORS,
   ANNOTATION_STROKE_WIDTH,
 } from '../annotations';
@@ -84,7 +85,7 @@ export function useInk({
       ctx.setTransform(sx, 0, 0, sy, 0, 0);
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
-      ctx.strokeStyle = ANNOTATION_COLORS.HIGHLIGHT;
+      ctx.strokeStyle = ANNOTATION_COLORS.DRAW;
       ctx.lineWidth = ANNOTATION_STROKE_WIDTH.DRAW;
       ctx.beginPath();
       ctx.moveTo(from.x, from.y);
@@ -105,12 +106,15 @@ export function useInk({
 
     // Only handle DRAW tool - highlight is now text-selection based
     if (selectedTool === 'draw') {
+      // Smooth the raw pointer samples once, on release, so the stored stroke
+      // (used for both canvas rendering and the committed PDF ink) shows
+      // rounded curves instead of angular segments between samples.
       const annotation: IDrawAnnotation = {
         id: generateAnnotationId('draw'),
         type: 'draw',
         source: 'overlay',
         pageIndex,
-        points: [...path],
+        points: chaikinSmooth(path),
         color: ANNOTATION_COLORS.DRAW,
         strokeWidth: ANNOTATION_STROKE_WIDTH.DRAW,
         createdAt: Date.now(),

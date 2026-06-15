@@ -20,6 +20,9 @@ export {
   generateAnnotationId,
 } from './types';
 
+// Geometry
+export { chaikinSmooth } from './smoothing';
+
 // Constants
 export {
   ANNOTATION_COLORS,

@@ -195,7 +195,15 @@ export interface IPdfController {
   listFormFields(pageIndex: number, opts: { scale: number }): IFormField[];
   hideAnnotation(pageIndex: number, annotIndex: number): void;
   setFormFieldValue(field: IFormField, value: string | boolean): void;
-  addInkHighlight(pageIndex: number, opts: { scale: number; canvasPoints: IPoint[] }): void;
+  addInkHighlight(
+    pageIndex: number,
+    opts: {
+      scale: number;
+      canvasPoints: IPoint[];
+      color?: { r: number; g: number; b: number; a?: number };
+      borderWidth?: number;
+    },
+  ): void;
   addHighlightAnnotation(
     pageIndex: number,
     opts: {
@@ -3560,8 +3568,16 @@ export class PdfController implements IPdfController {
     return rects;
   }
 
-  public addInkHighlight(pageIndex: number, opts: { scale: number; canvasPoints: IPoint[] }): void {
-    const { scale, canvasPoints } = opts;
+  public addInkHighlight(
+    pageIndex: number,
+    opts: {
+      scale: number;
+      canvasPoints: IPoint[];
+      color?: { r: number; g: number; b: number; a?: number };
+      borderWidth?: number;
+    },
+  ): void {
+    const { scale, canvasPoints, color, borderWidth } = opts;
     if (canvasPoints.length < 2) return;
 
     this.withPage(pageIndex, (pdfium, pagePtr) => {
@@ -3583,10 +3599,16 @@ export class PdfController implements IPdfController {
       if (!annot) throw new Error('Failed to create INK annotation');
 
       try {
-        // yellow (rgb 248,196,72)
-        pdfium._FPDFAnnot_SetColor_W(annot, FPDFANNOT_COLORTYPE.COLOR, 248, 196, 72, 255);
-        // border width in page units: roughly map pixels->page by /scale
-        pdfium._FPDFAnnot_SetBorder_W(annot, 0, 0, 14 / scale);
+        // Default to the highlighter look (yellow rgb 248,196,72) when no color
+        // is supplied; the draw tool passes its own color/width through opts.
+        const r = color?.r ?? 248;
+        const g = color?.g ?? 196;
+        const b = color?.b ?? 72;
+        const a = color?.a ?? 255;
+        pdfium._FPDFAnnot_SetColor_W(annot, FPDFANNOT_COLORTYPE.COLOR, r, g, b, a);
+        // border width in page units: callers pass a width already in page units
+        // (scale=1); otherwise fall back to the highlighter's pixel->page mapping.
+        pdfium._FPDFAnnot_SetBorder_W(annot, 0, 0, borderWidth ?? 14 / scale);
 
         const ptsPage = canvasPoints.map((p) =>
           this.canvasToPagePoint(pagePtr, pageW, pageH, scale, p.x, p.y),
