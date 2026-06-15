@@ -19,6 +19,27 @@ function validatePdfFile(file: File): string | null {
   return null;
 }
 
+/**
+ * Verifies the file actually starts with the PDF magic bytes ("%PDF-").
+ * Extension/MIME type are user-controlled and spoofable, so this guards against
+ * feeding a non-PDF to PDFium.
+ */
+async function hasPdfMagicBytes(file: File): Promise<boolean> {
+  try {
+    const header = new Uint8Array(await file.slice(0, 5).arrayBuffer());
+    // 0x25 0x50 0x44 0x46 0x2d === "%PDF-"
+    return (
+      header[0] === 0x25 &&
+      header[1] === 0x50 &&
+      header[2] === 0x44 &&
+      header[3] === 0x46 &&
+      header[4] === 0x2d
+    );
+  } catch {
+    return false;
+  }
+}
+
 export const LandingPage: React.FC<ILandingPageProps> = ({ onFileSelect }) => {
   const inputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -32,10 +53,14 @@ export const LandingPage: React.FC<ILandingPageProps> = ({ onFileSelect }) => {
     setIsDragging(false);
   };
 
-  const acceptFile = (file: File) => {
+  const acceptFile = async (file: File) => {
     const error = validatePdfFile(file);
     if (error) {
       alert(error);
+      return;
+    }
+    if (!(await hasPdfMagicBytes(file))) {
+      alert('This file does not appear to be a valid PDF.');
       return;
     }
     onFileSelect(file);
@@ -45,12 +70,12 @@ export const LandingPage: React.FC<ILandingPageProps> = ({ onFileSelect }) => {
     e.preventDefault();
     setIsDragging(false);
     const file = e.dataTransfer.files?.[0];
-    if (file) acceptFile(file);
+    if (file) void acceptFile(file);
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) acceptFile(file);
+    if (file) void acceptFile(file);
     // Reset so picking the same file again still fires change.
     e.target.value = '';
   };

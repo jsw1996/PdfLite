@@ -8,9 +8,14 @@ import { usePdfState } from '@/providers/PdfStateContextProvider';
 import { useUndo } from '../../hooks/useUndo';
 import { useCurrentPageTracker } from '../../hooks/useCurrentPageTracker';
 import { OBSERVER_CONFIG, VIEWER_CONFIG } from '@/utils/config';
+import { useAnnotation } from '@/providers/AnnotationContextProvider';
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 const PAGE_GAP_PX = 16; // Matches previous mb-4 spacing on pages
+const getDevicePixelRatio = () =>
+  typeof window === 'undefined' ? 1 : Math.max(1, window.devicePixelRatio || 1);
+const snapCssPxToDevicePixel = (value: number, devicePixelRatio: number) =>
+  Math.round(value * devicePixelRatio) / devicePixelRatio;
 
 interface IZoomAnchor {
   index: number;
@@ -37,6 +42,7 @@ export interface IViewerProps {
 export const Viewer: React.FC<IViewerProps> = ({ pageCount }) => {
   const { goToPage, controller, registerScrollToIndex } = usePdfController();
   const { scale, setScale } = usePdfState();
+  const { isEditMode } = useAnnotation();
 
   const scrollElementRef = useRef<HTMLDivElement | null>(null);
   const [scrollContainer, setScrollContainer] = useState<HTMLDivElement | null>(null);
@@ -262,6 +268,11 @@ export const Viewer: React.FC<IViewerProps> = ({ pageCount }) => {
         window.clearTimeout(commitTimerRef.current);
         commitTimerRef.current = null;
       }
+      // Reset transient gesture state so a teardown mid-gesture (e.g. scroll
+      // container swap) can't leave a half-applied preview behind.
+      previewIntentRef.current = null;
+      previewScaleRef.current = null;
+      pendingWheelRef.current = null;
     };
   }, [getAnchorFromY, scrollContainer, setScale, virtualizer]);
 
@@ -299,6 +310,13 @@ export const Viewer: React.FC<IViewerProps> = ({ pageCount }) => {
 
   const virtualItems = virtualizer.getVirtualItems();
   const mergedItems = useMemo(() => {
+    if (isEditMode) {
+      return Array.from({ length: pageCount }, (_, index) => ({
+        index,
+        start: getScaledStart(index, scale),
+        size: (pageHeights[index] ?? 0) * scale + PAGE_GAP_PX,
+      }));
+    }
     const itemsByIndex = new Map<number, { index: number; start: number; size: number }>();
     for (const item of virtualItems) {
       itemsByIndex.set(item.index, { index: item.index, start: item.start, size: item.size });
@@ -311,7 +329,8 @@ export const Viewer: React.FC<IViewerProps> = ({ pageCount }) => {
       itemsByIndex.set(idx, { index: idx, start, size });
     }
     return Array.from(itemsByIndex.values()).sort((a, b) => a.index - b.index);
-  }, [getScaledStart, pageCount, pageHeights, pinnedIndices, scale, virtualItems]);
+  }, [getScaledStart, isEditMode, pageCount, pageHeights, pinnedIndices, scale, virtualItems]);
+  const currentDevicePixelRatio = getDevicePixelRatio();
 
   return (
     <div className="h-full relative">
@@ -340,7 +359,10 @@ export const Viewer: React.FC<IViewerProps> = ({ pageCount }) => {
                 left: 0,
                 width: '100%',
                 height: virtualRow.size,
-                transform: `translateY(${virtualRow.start}px)`,
+                transform: `translateY(${snapCssPxToDevicePixel(
+                  virtualRow.start,
+                  currentDevicePixelRatio,
+                )}px)`,
               }}
             >
               {itemContent(virtualRow.index)}

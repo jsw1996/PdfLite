@@ -118,7 +118,7 @@ export const AnnotationLayer: React.FC<IAnnotationLayerProps> = ({
     };
   }, [canInteract, style]);
 
-  const { currentPath, onPointerDown, onPointerMove, onPointerUp, onPointerCancel } = useInk({
+  const { currentPathRef, onPointerDown, onPointerMove, onPointerUp, onPointerCancel } = useInk({
     canvasRef: drawCanvasRef,
     metrics,
     selectedTool: canInteract ? selectedTool : null,
@@ -133,7 +133,7 @@ export const AnnotationLayer: React.FC<IAnnotationLayerProps> = ({
     metrics,
     annotations,
     selectedTool,
-    currentPath,
+    currentPathRef,
   });
 
   if (!metrics) return null;

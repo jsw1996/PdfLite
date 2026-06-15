@@ -12,8 +12,26 @@ export interface IEncryptPdfOptions {
 }
 
 /**
+ * Generates a cryptographically-random password (used as the owner password when
+ * the caller doesn't supply one). A random owner password means the document's
+ * permission flags can't be removed by anyone who only knows the open password.
+ */
+function generateRandomPassword(byteLength = 32): string {
+  const bytes = new Uint8Array(byteLength);
+  crypto.getRandomValues(bytes);
+  // Base64 is fine for an owner password the user never types.
+  let binary = '';
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary);
+}
+
+/**
  * Encrypts a PDF with password protection.
- * Uses RC4 128-bit encryption (widely compatible).
+ *
+ * NOTE: This uses RC4 128-bit (via pdf-lib-with-encrypt), which is broadly
+ * compatible but cryptographically weak and removed in PDF 2.0. Treat this as
+ * "compatibility-grade" protection, not strong confidentiality. Prefer AES-256
+ * if/when the encryption library supports it.
  *
  * @param pdfBytes - The original PDF as a Uint8Array
  * @param options - Encryption options including passwords and permissions
@@ -54,7 +72,9 @@ export async function encryptPdf(
     }
   ).encrypt({
     userPassword,
-    ownerPassword: ownerPassword ?? userPassword,
+    // Default to a random owner password (NOT the user password) so permission
+    // restrictions aren't trivially removable by anyone who can open the file.
+    ownerPassword: ownerPassword ?? generateRandomPassword(),
     permissions: permissionFlags,
   });
 

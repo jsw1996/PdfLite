@@ -24,7 +24,6 @@ export interface IPdfControllerContextValue {
   initialize: () => Promise<void>;
   isLoaded: boolean;
   setIsLoaded: (isLoaded: boolean) => void;
-  currentPage: number;
   goToPage: (
     page: number,
     options?: { scrollIntoView?: boolean; scrollIntoPreview?: boolean },
@@ -35,12 +34,21 @@ export interface IPdfControllerContextValue {
 
 const PdfControllerContext = createContext<IPdfControllerContextValue | null>(null);
 
+// currentPage lives in its own context so that scroll-driven page changes only
+// re-render the small set of components that display it (page stepper, sidebar,
+// thumbnails) rather than every usePdfController() consumer (incl. the canvas tree).
+const PdfCurrentPageContext = createContext<number>(0);
+
 export function usePdfController(): IPdfControllerContextValue {
   const ctx = useContext(PdfControllerContext);
   if (!ctx) {
     throw new Error('usePdfController must be used within PdfControllerContextProvider');
   }
   return ctx;
+}
+
+export function useCurrentPage(): number {
+  return useContext(PdfCurrentPageContext);
 }
 
 interface IPdfControllerContextProviderProps {
@@ -138,21 +146,17 @@ export function PdfControllerContextProvider({
       error,
       initialize,
       setIsLoaded,
-      currentPage,
       goToPage,
       registerScrollToIndex,
     }),
-    [
-      controller,
-      currentPage,
-      error,
-      initialize,
-      isInitialized,
-      isLoaded,
-      goToPage,
-      registerScrollToIndex,
-    ],
+    [controller, error, initialize, isInitialized, isLoaded, goToPage, registerScrollToIndex],
   );
 
-  return <PdfControllerContext.Provider value={value}>{children}</PdfControllerContext.Provider>;
+  return (
+    <PdfControllerContext.Provider value={value}>
+      <PdfCurrentPageContext.Provider value={currentPage}>
+        {children}
+      </PdfCurrentPageContext.Provider>
+    </PdfControllerContext.Provider>
+  );
 }

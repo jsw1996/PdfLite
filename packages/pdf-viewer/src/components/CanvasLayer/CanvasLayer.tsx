@@ -181,7 +181,10 @@ export const CanvasLayer: React.FC<ICanvasLayerProps> = ({
           transformOrigin: 'top left',
           position: 'absolute',
           display: 'block',
-          imageRendering: 'crisp-edges',
+          // Let the browser use normal interpolation. PDFium already renders
+          // text with LCD antialiasing; forcing crisp-edges can make glyphs
+          // look jagged whenever the bitmap is even slightly transformed.
+          imageRendering: 'auto',
           willChange: 'transform',
           visibility: hidden ? 'hidden' : undefined,
         }}

@@ -24,6 +24,24 @@ function createBookmarkId(): string {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+/**
+ * Validates a value parsed from localStorage is a well-formed bookmark.
+ * Corrupt/tampered storage could otherwise yield entries with a missing id
+ * (breaking React keys) or an out-of-range/non-integer pageIndex.
+ */
+function isValidBookmark(value: unknown): value is IUserBookmark {
+  if (typeof value !== 'object' || value === null) return false;
+  const b = value as Record<string, unknown>;
+  return (
+    typeof b.id === 'string' &&
+    b.id.length > 0 &&
+    typeof b.title === 'string' &&
+    typeof b.pageIndex === 'number' &&
+    Number.isInteger(b.pageIndex) &&
+    b.pageIndex >= 0
+  );
+}
+
 export function BookmarksPanel({ storageKey, currentPage, onGoToPage }: IBookmarksPanelProps) {
   const [bookmarks, setBookmarks] = useState<IUserBookmark[]>([]);
   const [isReady, setIsReady] = useState(false);
@@ -33,8 +51,8 @@ export function BookmarksPanel({ storageKey, currentPage, onGoToPage }: IBookmar
     try {
       const raw = window.localStorage.getItem(storageKey);
       if (raw) {
-        const parsed = JSON.parse(raw) as IUserBookmark[];
-        setBookmarks(Array.isArray(parsed) ? parsed : []);
+        const parsed: unknown = JSON.parse(raw);
+        setBookmarks(Array.isArray(parsed) ? parsed.filter(isValidBookmark) : []);
       } else {
         setBookmarks([]);
       }

@@ -1,4 +1,4 @@
-import { usePdfController } from '@/providers/PdfControllerContextProvider';
+import { useCurrentPage, usePdfController } from '@/providers/PdfControllerContextProvider';
 import { CanvasLayer } from '../CanvasLayer/CanvasLayer';
 import React, { useCallback, useRef, useState, useEffect } from 'react';
 import { RENDER_CONFIG } from '@/utils/config';
@@ -8,7 +8,8 @@ interface IPagePreviewProps {
 }
 
 export const PagePreview = React.memo(({ page }: IPagePreviewProps) => {
-  const { currentPage, goToPage, controller } = usePdfController();
+  const { goToPage, controller } = usePdfController();
+  const currentPage = useCurrentPage();
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(0);
 

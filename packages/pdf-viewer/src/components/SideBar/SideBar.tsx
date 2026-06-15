@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { Sidebar, SidebarContent, useSidebar } from '@pdfviewer/ui/components/sidebar';
 import { Button } from '@pdfviewer/ui/components/button';
-import { usePdfController } from '@/providers/PdfControllerContextProvider';
+import { useCurrentPage, usePdfController } from '@/providers/PdfControllerContextProvider';
 import { PagePreview } from './PagePreview';
 import { OutlinePanel } from './OutlinePanel';
 import { BookmarksPanel } from './BookmarksPanel';
@@ -19,7 +19,8 @@ interface IAppSidebarProps {
 }
 
 export function AppSidebar({ file, isFileLoaded }: IAppSidebarProps) {
-  const { controller, currentPage, goToPage } = usePdfController();
+  const { controller, goToPage } = usePdfController();
+  const currentPage = useCurrentPage();
   const { state, setOpen, isMobile, setOpenMobile } = useSidebar();
   const [activeTab, setActiveTab] = useState<SidebarTab>('pages');
   const [outline, setOutline] = useState<IPdfOutlineNode[]>([]);
@@ -36,10 +37,12 @@ export function AppSidebar({ file, isFileLoaded }: IAppSidebarProps) {
     if (pageCount <= 0) return;
     if (currentPage < 0 || currentPage >= pageCount) return;
 
+    // 'auto' (not 'smooth') so the sidebar doesn't animate-fight the user while
+    // they're actively scrolling the main document.
     virtuosoRef.current?.scrollToIndex({
       index: currentPage,
       align: 'center',
-      behavior: 'smooth',
+      behavior: 'auto',
     });
   }, [currentPage, pageCount]);
 
@@ -142,7 +145,10 @@ export function AppSidebar({ file, isFileLoaded }: IAppSidebarProps) {
                   ref={virtuosoRef}
                   totalCount={pageCount}
                   itemContent={itemContent}
-                  overscan={500}
+                  // Each off-screen preview mounts a CanvasLayer that renders a
+                  // PDFium page; keep the overscan small so we don't render many
+                  // invisible thumbnails on large documents.
+                  overscan={200}
                   className="h-full custom-scrollbar"
                 />
               )}

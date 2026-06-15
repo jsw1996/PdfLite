@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { safeBase64Decode } from '@/utils/shared';
 
 // Limits to keep the embedded signature reasonable and avoid blowing up the
@@ -45,65 +45,67 @@ export const ImageUpload: React.FC<IImageUploadProps> = ({ onSignatureReady }) =
 
     setError(null);
 
-    // Create preview
-    const reader = new FileReader();
-    reader.onerror = () => {
-      setError('Failed to read the file');
+    // Use an object URL for the preview instead of a base64 data URL. A 10 MB
+    // upload becomes a small handle rather than a ~13 MB string held in state.
+    // The previous URL (if any) is revoked by the cleanup effect below.
+    const objectUrl = URL.createObjectURL(file);
+    setPreviewUrl(objectUrl);
+
+    // Load image to get dimensions
+    const img = new Image();
+    img.onerror = () => {
+      setError('Failed to load the image');
     };
-    reader.onload = (event) => {
-      const dataUrl = event.target?.result as string;
-      setPreviewUrl(dataUrl);
+    img.onload = () => {
+      // Downscale to MAX_IMAGE_DIMENSION on the longer side, preserving aspect ratio.
+      const scale = Math.min(
+        1,
+        MAX_IMAGE_DIMENSION / Math.max(img.naturalWidth, img.naturalHeight),
+      );
+      const targetWidth = Math.max(1, Math.round(img.naturalWidth * scale));
+      const targetHeight = Math.max(1, Math.round(img.naturalHeight * scale));
 
-      // Load image to get dimensions
-      const img = new Image();
-      img.onerror = () => {
-        setError('Failed to load the image');
-      };
-      img.onload = () => {
-        // Downscale to MAX_IMAGE_DIMENSION on the longer side, preserving aspect ratio.
-        const scale = Math.min(
-          1,
-          MAX_IMAGE_DIMENSION / Math.max(img.naturalWidth, img.naturalHeight),
-        );
-        const targetWidth = Math.max(1, Math.round(img.naturalWidth * scale));
-        const targetHeight = Math.max(1, Math.round(img.naturalHeight * scale));
+      const canvas = document.createElement('canvas');
+      canvas.width = targetWidth;
+      canvas.height = targetHeight;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        setError('Failed to create canvas context');
+        return;
+      }
 
-        const canvas = document.createElement('canvas');
-        canvas.width = targetWidth;
-        canvas.height = targetHeight;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) {
-          setError('Failed to create canvas context');
-          return;
-        }
+      ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
+      const pngDataUrl = canvas.toDataURL('image/png');
 
-        ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
-        const pngDataUrl = canvas.toDataURL('image/png');
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const rgbaBytes = new Uint8Array(imageData.data);
 
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const rgbaBytes = new Uint8Array(imageData.data);
+      // Safe base64 decoding
+      const base64Data = pngDataUrl.split(',')[1];
+      const pngBytes = safeBase64Decode(base64Data);
 
-        // Safe base64 decoding
-        const base64Data = pngDataUrl.split(',')[1];
-        const pngBytes = safeBase64Decode(base64Data);
+      if (!pngBytes) {
+        setError('Failed to process the image');
+        return;
+      }
 
-        if (!pngBytes) {
-          setError('Failed to process the image');
-          return;
-        }
-
-        setImageData({
-          dataUrl: pngDataUrl,
-          bytes: pngBytes,
-          rgbaBytes,
-          width: targetWidth,
-          height: targetHeight,
-        });
-      };
-      img.src = dataUrl;
+      setImageData({
+        dataUrl: pngDataUrl,
+        bytes: pngBytes,
+        rgbaBytes,
+        width: targetWidth,
+        height: targetHeight,
+      });
     };
-    reader.readAsDataURL(file);
+    img.src = objectUrl;
   }, []);
+
+  // Revoke the object URL when it changes or the component unmounts so the
+  // browser releases the backing blob.
+  useEffect(() => {
+    if (!previewUrl) return;
+    return () => URL.revokeObjectURL(previewUrl);
+  }, [previewUrl]);
 
   // Auto-update signature when image is loaded
   React.useEffect(() => {

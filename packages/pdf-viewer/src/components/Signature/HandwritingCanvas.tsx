@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@pdfviewer/ui/components/button';
 import { safeBase64Decode } from '@/utils/shared';
 
@@ -23,6 +23,15 @@ export const HandwritingCanvas: React.FC<IHandwritingCanvasProps> = ({ onSignatu
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [hasContent, setHasContent] = useState(false);
+  // Pending capture timer so it can be cancelled if the component unmounts
+  // (e.g. dialog closes) before it fires, avoiding a callback on a stale parent.
+  const captureTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (captureTimerRef.current) clearTimeout(captureTimerRef.current);
+    };
+  }, []);
 
   const getPoint = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
@@ -112,19 +121,18 @@ export const HandwritingCanvas: React.FC<IHandwritingCanvasProps> = ({ onSignatu
     setIsDrawing(false);
     // Auto-update signature when drawing ends
     if (hasContent) {
+      if (captureTimerRef.current) clearTimeout(captureTimerRef.current);
       // Use setTimeout to ensure canvas is fully updated
-      setTimeout(() => {
+      captureTimerRef.current = setTimeout(() => {
+        captureTimerRef.current = null;
         const canvas = canvasRef.current;
         if (!canvas) return;
 
         // Convert canvas to PNG data URL (base64 encoded)
         const pngDataUrl = canvas.toDataURL('image/png');
-        console.log('===pngDataUrl===', pngDataUrl);
         // Convert base64 string to Uint8Array with error handling
         const base64Data = pngDataUrl.split(',')[1];
-        console.log('===base64Data===', base64Data);
         const pngBytes = safeBase64Decode(base64Data);
-        console.log('===pngBytes=', pngBytes);
 
         if (!pngBytes) {
           console.error('Failed to decode signature image data');

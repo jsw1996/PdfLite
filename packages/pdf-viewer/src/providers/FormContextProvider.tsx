@@ -9,6 +9,7 @@ import React, {
 } from 'react';
 import type { IFormField } from '@pdfviewer/controller';
 import { usePdfController } from './PdfControllerContextProvider';
+import { useEditHistory } from './EditHistoryContextProvider';
 
 type FormValue = string | boolean;
 
@@ -29,8 +30,10 @@ export function useFormContext(): IFormContextValue {
 }
 
 function getFieldStorageKey(field: IFormField): string {
-  if (field.type === 'radio') return field.name || field.id;
-  if (field.type === 'checkbox') return field.id;
+  // Key every field type by its (fully-qualified) field name. Widgets that share
+  // a name are the same logical PDF field, so they must share one value — this
+  // keeps in-app state consistent with applyFormValues, which applies by name.
+  // Fall back to the widget id only for unnamed fields.
   return field.name || field.id;
 }
 
@@ -49,6 +52,7 @@ function getDefaultValue(field: IFormField): FormValue {
 
 export function FormContextProvider({ children }: { children: React.ReactNode }) {
   const { controller } = usePdfController();
+  const history = useEditHistory();
   const [values, setValues] = useState<Map<string, FormValue>>(new Map());
   const [dirtyKeys, setDirtyKeys] = useState<Set<string>>(new Set());
 
@@ -108,19 +112,36 @@ export function FormContextProvider({ children }: { children: React.ReactNode })
     [values],
   );
 
-  const setValue = useCallback((field: IFormField, value: FormValue) => {
-    const key = fieldKeyByIdRef.current.get(field.id) ?? getFieldStorageKey(field);
+  const applyValue = useCallback((key: string, value: FormValue) => {
     setValues((prev) => {
       const next = new Map(prev);
       next.set(key, value);
+      valuesRef.current = next;
       return next;
     });
     setDirtyKeys((prev) => {
       const next = new Set(prev);
       next.add(key);
+      dirtyKeysRef.current = next;
       return next;
     });
   }, []);
+
+  const setValue = useCallback(
+    (field: IFormField, value: FormValue) => {
+      const key = fieldKeyByIdRef.current.get(field.id) ?? getFieldStorageKey(field);
+      const before = valuesRef.current.get(key) ?? getDefaultValue(field);
+      if (before === value) return;
+      history.run({
+        label: 'Set form value',
+        coalesceKey: `form:${key}`,
+        coalesceMs: 1000,
+        redo: () => applyValue(key, value),
+        undo: () => applyValue(key, before),
+      });
+    },
+    [applyValue, history],
+  );
 
   const getFormValuesSnapshot = useCallback(() => {
     const snapshot: { field: IFormField; value: FormValue }[] = [];

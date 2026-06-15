@@ -29,7 +29,8 @@ export interface IUseRenderAnnotationOptions {
   metrics: ICanvasMetrics | null;
   annotations: IAnnotation[];
   selectedTool: AnnotationType | null;
-  currentPath: IPoint[];
+  /** Live in-progress stroke (ref); read at draw time so it doesn't drive re-renders. */
+  currentPathRef: RefObject<IPoint[]>;
 }
 
 /**
@@ -63,7 +64,7 @@ export function useRenderAnnotation({
   metrics,
   annotations,
   selectedTool,
-  currentPath,
+  currentPathRef,
 }: IUseRenderAnnotationOptions): {
   textAnnotations: React.ReactElement[];
   signatureAnnotations: React.ReactElement[];
@@ -133,7 +134,10 @@ export function useRenderAnnotation({
       // Text annotations are rendered as React components, not on canvas
     }
 
-    // Draw current path preview (live drawing)
+    // Draw current path preview (live drawing). Read the live ref so a redraw
+    // triggered for other reasons (annotation/metrics change) re-paints the
+    // in-progress stroke; per-segment drawing during a stroke is handled in useInk.
+    const currentPath = currentPathRef.current;
     if (selectedTool && currentPath.length > 0) {
       const color = ANNOTATION_COLORS.HIGHLIGHT;
       if (selectedTool === 'draw') {
@@ -141,7 +145,7 @@ export function useRenderAnnotation({
         drawStrokePreview(dctx, currentPath, color, strokeWidth);
       }
     }
-  }, [annotations, currentPath, highlightCanvasRef, drawCanvasRef, metrics, selectedTool]);
+  }, [annotations, currentPathRef, highlightCanvasRef, drawCanvasRef, metrics, selectedTool]);
 
   useEffect(() => {
     redraw();

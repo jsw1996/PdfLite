@@ -18,6 +18,32 @@ export interface ITextBoxProps {
 
 type Mode = 'editing' | 'selected' | 'idle';
 
+// Single reused hidden textarea for measurement. Creating/appending/removing a
+// fresh element on every keystroke forces extra layout churn; reusing one node
+// (set up once, left detached-but-cached in <body>) avoids the DOM mutation cost.
+let measureEl: HTMLTextAreaElement | null = null;
+
+function getMeasureEl(): HTMLTextAreaElement {
+  if (!measureEl) {
+    measureEl = document.createElement('textarea');
+    const s = measureEl.style;
+    s.position = 'absolute';
+    s.visibility = 'hidden';
+    s.left = '-9999px';
+    s.top = '0';
+    s.whiteSpace = 'pre-wrap';
+    s.wordBreak = 'break-all';
+    s.padding = '0';
+    s.border = 'none';
+    s.boxSizing = 'border-box';
+    s.minWidth = '50px';
+    measureEl.setAttribute('aria-hidden', 'true');
+    measureEl.tabIndex = -1;
+    document.body.appendChild(measureEl);
+  }
+  return measureEl;
+}
+
 /**
  * Measure the natural (content-based) size of a textarea so we have a
  * baseline for the Resizable wrapper before the user has ever resized.
@@ -27,26 +53,14 @@ function measureTextArea(
   fontSize: number,
   maxWidth?: number,
 ): { width: number; height: number } {
-  const el = document.createElement('textarea');
-  el.style.position = 'absolute';
-  el.style.visibility = 'hidden';
-  el.style.whiteSpace = 'pre-wrap';
-  el.style.wordBreak = 'break-all';
+  const el = getMeasureEl();
   el.style.fontSize = `${fontSize}px`;
   el.style.lineHeight = '1.4';
-  el.style.padding = '0';
-  el.style.border = 'none';
-  el.style.boxSizing = 'border-box';
   el.style.setProperty('field-sizing', 'content');
-  el.style.minWidth = '50px';
-  if (maxWidth != null) {
-    el.style.width = `${maxWidth}px`;
-  }
+  el.style.width = maxWidth != null ? `${maxWidth}px` : '';
   el.value = content || ' ';
-  document.body.appendChild(el);
   const width = maxWidth ?? Math.max(el.scrollWidth, 50);
   const height = Math.max(el.scrollHeight, fontSize * 1.5);
-  document.body.removeChild(el);
   return { width, height };
 }
 
@@ -59,11 +73,15 @@ export const TextBox: React.FC<ITextBoxProps> = ({
   dimensions,
   containerSize,
 }) => {
-  const { updateAnnotation } = useAnnotation();
+  const { updateAnnotation, consumeNewAnnotation } = useAnnotation();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [mode, setMode] = useState<Mode>('editing');
-  const [isSelected, setIsSelected] = useState(true);
+  // Only a freshly-created box should auto-enter edit mode and grab focus.
+  // A pre-existing box remounting (virtualization/zoom) must stay idle so it
+  // doesn't steal focus or scroll the viewport. Computed once on mount.
+  const [isNew] = useState(() => consumeNewAnnotation(id));
+  const [mode, setMode] = useState<Mode>(isNew ? 'editing' : 'idle');
+  const [isSelected, setIsSelected] = useState(isNew);
   const [localPosition, setLocalPosition] = useState<IPoint>(position);
 
   // Compute size: use persisted dimensions or measure from content
@@ -101,10 +119,10 @@ export const TextBox: React.FC<ITextBoxProps> = ({
     setLocalPosition(position);
   }, [position]);
 
-  // Auto-focus on mount
+  // Auto-focus only newly-created boxes (not remounts of existing ones).
   useEffect(() => {
-    textareaRef.current?.focus();
-  }, []);
+    if (isNew) textareaRef.current?.focus();
+  }, [isNew]);
 
   // ---------- selection / mode ----------
 
@@ -131,7 +149,7 @@ export const TextBox: React.FC<ITextBoxProps> = ({
   // Click outside → deselect
   useEffect(() => {
     if (!isSelected) return;
-    const onOutside = (e: MouseEvent) => {
+    const onOutside = (e: PointerEvent) => {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
         setIsSelected(false);
         setMode('idle');
@@ -144,8 +162,8 @@ export const TextBox: React.FC<ITextBoxProps> = ({
         } as Partial<ITextAnnotation>);
       }
     };
-    document.addEventListener('mousedown', onOutside);
-    return () => document.removeEventListener('mousedown', onOutside);
+    document.addEventListener('pointerdown', onOutside);
+    return () => document.removeEventListener('pointerdown', onOutside);
   }, [isSelected, id, scaledFontSize, localSize, updateAnnotation]);
 
   // ---------- drag callbacks ----------

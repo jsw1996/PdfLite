@@ -13,6 +13,10 @@ export const useAddText = (pageElement: HTMLDivElement | null, pageIndex: number
     (e: MouseEvent) => {
       if (selectedTool !== 'text') return;
       if (!pageElement) return;
+      // Ignore clicks that conclude a text-selection drag — otherwise selecting
+      // page text while the text tool is active would drop an empty box and exit.
+      const selection = window.getSelection();
+      if (selection && !selection.isCollapsed && selection.toString().length > 0) return;
       const rect = pageElement.getBoundingClientRect();
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top - TEXT_ANNOTATION_DEFAULTS.FONT_SIZE / 2; // offset by half font size
