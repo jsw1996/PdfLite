@@ -2369,6 +2369,13 @@ export class PdfController implements IPdfController {
    * 6. Preserve readable text: when fragments merge, union their rectangles and
    *    append text. If the geometric gap looks like a word gap and neither side
    *    already has whitespace or punctuation, insert a single space.
+   * 7. Reorder merged runs into column-first reading order via a two-level
+   *    XY-cut (see orderByReadingColumns): split the page into vertical sections
+   *    at full-width horizontal whitespace, then order each section into columns
+   *    independently. The text layer renders these runs as absolutely-positioned
+   *    transparent spans, and native selection/copy walks them in DOM order, so
+   *    contiguous per-column output keeps a multi-column page selectable and
+   *    copyable in reading order.
    */
   private mergeAdjacentTextRects(rects: ITextRect[]): ITextRect[] {
     const cloneRect = (rect: ITextRect): ITextRect => ({
@@ -2639,7 +2646,183 @@ export class PdfController implements IPdfController {
       current.rect.height = bottom - top;
     };
 
-    const merged: { sourceIndex: number; rect: ITextRect }[] = [];
+    interface IMergedEntry {
+      sourceIndex: number;
+      rect: ITextRect;
+    }
+
+    // Reorder merged runs into column-first reading order. The text layer is
+    // rendered as absolutely-positioned transparent spans; native selection
+    // (and copy) walks them in DOM order. If columns interleave row-by-row,
+    // a drag inside one column spills into the next. Grouping each column's
+    // runs contiguously fixes both selection and copy ordering.
+    const sortByReadingOrder = (items: IMergedEntry[]): IMergedEntry[] =>
+      [...items].sort(
+        (a, b) =>
+          a.rect.rect.top - b.rect.rect.top ||
+          a.rect.rect.left - b.rect.rect.left ||
+          a.sourceIndex - b.sourceIndex,
+      );
+
+    // Order one vertical section (which has no full-width horizontal whitespace
+    // through it) into column reading order. A real inter-column gutter is an
+    // empty vertical corridor spanning most of the SECTION height — measuring
+    // against the section, not the whole page, is what rejects the ragged
+    // sub-gaps inside a code listing or short-line column that a global
+    // threshold would mistake for extra gutters.
+    const orderSectionByColumns = (section: IMergedEntry[]): IMergedEntry[] => {
+      if (section.length <= 1) return section;
+
+      let minLeft = Infinity;
+      let maxRight = -Infinity;
+      let minTop = Infinity;
+      let maxBottom = -Infinity;
+      for (const e of section) {
+        const { left, top, width, height } = e.rect.rect;
+        if (left < minLeft) minLeft = left;
+        if (left + width > maxRight) maxRight = left + width;
+        if (top < minTop) minTop = top;
+        if (top + height > maxBottom) maxBottom = top + height;
+      }
+      const contentWidth = maxRight - minLeft;
+      const contentHeight = maxBottom - minTop;
+      if (!(contentWidth > 0) || !(contentHeight > 0)) return sortByReadingOrder(section);
+
+      const sampleCount = 256;
+      const step = contentWidth / sampleCount;
+      const minGutterWidth = contentWidth * 0.02;
+      const minEmptyFraction = 0.6;
+
+      const sampleIntervals: { top: number; bottom: number }[][] = Array.from(
+        { length: sampleCount },
+        () => [],
+      );
+      for (const e of section) {
+        const { left, top, width, height } = e.rect.rect;
+        let startIdx = Math.floor((left - minLeft) / step);
+        let endIdx = Math.ceil((left + width - minLeft) / step);
+        if (startIdx < 0) startIdx = 0;
+        if (endIdx > sampleCount) endIdx = sampleCount;
+        const interval = { top, bottom: top + height };
+        for (let i = startIdx; i < endIdx; i++) sampleIntervals[i].push(interval);
+      }
+
+      const maxEmptyRun = (
+        intervals: { top: number; bottom: number }[],
+      ): { gap: number; yStart: number; yEnd: number } => {
+        if (intervals.length === 0) return { gap: contentHeight, yStart: minTop, yEnd: maxBottom };
+        const sorted = [...intervals].sort((a, b) => a.top - b.top);
+        let cursor = minTop;
+        let gap = 0;
+        let yStart = minTop;
+        let yEnd = minTop;
+        for (const iv of sorted) {
+          if (iv.top - cursor > gap) {
+            gap = iv.top - cursor;
+            yStart = cursor;
+            yEnd = iv.top;
+          }
+          if (iv.bottom > cursor) cursor = iv.bottom;
+        }
+        if (maxBottom - cursor > gap) {
+          gap = maxBottom - cursor;
+          yStart = cursor;
+          yEnd = maxBottom;
+        }
+        return { gap, yStart, yEnd };
+      };
+
+      const hasTextOnBothSides = (x: number, yStart: number, yEnd: number): boolean => {
+        let left = false;
+        let right = false;
+        for (const e of section) {
+          const top = e.rect.rect.top;
+          const bottom = top + e.rect.rect.height;
+          if (bottom <= yStart || top >= yEnd) continue;
+          const l = e.rect.rect.left;
+          const r = l + e.rect.rect.width;
+          if (r <= x) left = true;
+          else if (l >= x) right = true;
+          if (left && right) return true;
+        }
+        return false;
+      };
+
+      const isGutterSample = new Array<boolean>(sampleCount);
+      for (let i = 0; i < sampleCount; i++) {
+        const run = maxEmptyRun(sampleIntervals[i]);
+        const x = minLeft + (i + 0.5) * step;
+        isGutterSample[i] =
+          run.gap / contentHeight >= minEmptyFraction &&
+          hasTextOnBothSides(x, run.yStart, run.yEnd);
+      }
+
+      const boundaries: number[] = [];
+      let runStart = -1;
+      for (let i = 0; i < sampleCount; i++) {
+        if (isGutterSample[i] && runStart < 0) {
+          runStart = i;
+        } else if (!isGutterSample[i] && runStart >= 0) {
+          const runWidth = (i - runStart) * step;
+          if (runStart > 0 && runWidth >= minGutterWidth) {
+            boundaries.push(minLeft + ((runStart + i) / 2) * step);
+          }
+          runStart = -1;
+        }
+      }
+
+      if (boundaries.length === 0) return sortByReadingOrder(section);
+
+      const bandOf = (rect: ITextRect): number => {
+        const center = rect.rect.left + rect.rect.width / 2;
+        let band = 0;
+        while (band < boundaries.length && center >= boundaries[band]) band++;
+        return band;
+      };
+
+      return [...section].sort(
+        (a, b) =>
+          bandOf(a.rect) - bandOf(b.rect) ||
+          a.rect.rect.top - b.rect.rect.top ||
+          a.rect.rect.left - b.rect.rect.left ||
+          a.sourceIndex - b.sourceIndex,
+      );
+    };
+
+    // Two-level XY-cut. Level 1: split the page into vertical sections at
+    // full-width horizontal whitespace — a y-band crossed by no text at all.
+    // Full-width blocks (title, spanning figure/caption/table) thus land in
+    // their own sections, in true vertical order — top, middle, OR bottom.
+    // Level 2: order each section into columns independently. Concatenating
+    // sections top-to-bottom yields correct reading (and selection) order.
+    const orderByReadingColumns = (entries: IMergedEntry[]): IMergedEntry[] => {
+      if (entries.length <= 1) return entries;
+
+      const lineHeight = Math.max(1, median(entries.map((e) => e.rect.rect.height)));
+      const sectionGap = lineHeight * 1.2;
+
+      const byTop = [...entries].sort((a, b) => a.rect.rect.top - b.rect.rect.top);
+      const sections: IMergedEntry[][] = [];
+      let current: IMergedEntry[] = [];
+      let runningBottom = -Infinity;
+      for (const e of byTop) {
+        const top = e.rect.rect.top;
+        const bottom = top + e.rect.rect.height;
+        if (current.length > 0 && top - runningBottom > sectionGap) {
+          sections.push(current);
+          current = [];
+        }
+        current.push(e);
+        if (bottom > runningBottom) runningBottom = bottom;
+      }
+      if (current.length > 0) sections.push(current);
+
+      const ordered: IMergedEntry[] = [];
+      for (const section of sections) ordered.push(...orderSectionByColumns(section));
+      return ordered;
+    };
+
+    const merged: IMergedEntry[] = [];
 
     for (const line of [...lines].sort(
       (a, b) => a.minTop - b.minTop || a.minLeft - b.minLeft || a.centerY - b.centerY,
@@ -2662,12 +2845,15 @@ export class PdfController implements IPdfController {
       merged.push({ sourceIndex: currentSourceIndex, rect: current });
     }
 
+    const ordered = orderByReadingColumns(merged);
+
+    // Degenerate (non-finite geometry) rects can't be column-assigned; keep
+    // them after the ordered runs in their original source order.
     if (unmergeableRects.length > 0) {
-      merged.push(...unmergeableRects);
-      merged.sort((a, b) => a.sourceIndex - b.sourceIndex);
+      ordered.push(...unmergeableRects);
     }
 
-    return merged.map((item) => item.rect);
+    return ordered.map((item) => item.rect);
   }
 
   public listNativeAnnotations(pageIndex: number, opts: { scale: number }): INativeAnnotation[] {
