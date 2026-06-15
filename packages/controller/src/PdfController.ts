@@ -3796,6 +3796,37 @@ export class PdfController implements IPdfController {
    * - Canvas coordinate system has origin at top-left, Y increases downward
    * - Text is drawn directly on the page, not as an annotation with appearance stream
    */
+  /**
+   * Load a font from embedded font-file bytes (e.g. a subsetted CJK TTF/OTF)
+   * so that added text using non-Latin scripts renders in any viewer without
+   * relying on system-font substitution. The returned handle must be passed to
+   * addTextAnnotation via `embeddedFontPtr` and released with closeFont() once
+   * all pages have been committed. Returns 0 on failure.
+   */
+  public loadEmbeddedFont(bytes: Uint8Array): number {
+    const { pdfium, docPtr } = this.requireDoc();
+    const size = bytes.length;
+    if (size === 0) return 0;
+    const ptr = pdfium._malloc(size);
+    try {
+      pdfium.HEAPU8.set(bytes, ptr);
+      // font_type 2 = TrueType/OpenType; cid = 1 for composite (CID) fonts,
+      // required for fonts with > 255 glyphs such as CJK.
+      return pdfium._FPDFText_LoadFont_W(docPtr, ptr, size, 2, 1);
+    } finally {
+      // PDFium copies the font program into the document, so the temporary
+      // buffer can be freed immediately.
+      pdfium._free(ptr);
+    }
+  }
+
+  /** Release a font handle previously returned by loadEmbeddedFont(). */
+  public closeFont(fontPtr: number): void {
+    if (!fontPtr) return;
+    const { pdfium } = this.requireDoc();
+    pdfium._FPDFFont_Close_W(fontPtr);
+  }
+
   public addTextAnnotation(
     pageIndex: number,
     opts: {
@@ -3804,6 +3835,14 @@ export class PdfController implements IPdfController {
       lines: string[];
       fontSize?: number;
       fontColor?: { r: number; g: number; b: number };
+      bold?: boolean;
+      italic?: boolean;
+      /**
+       * Handle from loadEmbeddedFont(). When supplied, the text is drawn with
+       * the embedded font (required for CJK/non-Latin); otherwise the standard
+       * Helvetica is used. The caller owns the handle and must closeFont() it.
+       */
+      embeddedFontPtr?: number;
     },
   ): void {
     const { scale, canvasRect, lines } = opts;
@@ -3812,6 +3851,19 @@ export class PdfController implements IPdfController {
     const { docPtr } = this.requireDoc();
     const fontSize = opts.fontSize ?? 12;
     const fontColor = opts.fontColor ?? { r: 0, g: 0, b: 0 };
+
+    // Bold/italic are applied as "faux" styling baked into the content stream
+    // rather than via the base-14 bold/oblique font variants. Non-embedded
+    // base-14 bold/oblique fonts depend on the viewer's font substitution,
+    // which the headless WASM build does not reliably provide (the weight was
+    // lost on reopen). Faux styling survives any viewer:
+    //   - italic: a horizontal shear in the text matrix slants the glyphs.
+    //   - bold: render the glyphs in FILL_STROKE mode so each one is outlined
+    //     in its own color, thickening the stems on a SINGLE object (no
+    //     duplicate/shadow text).
+    const shear = opts.italic ? 0.21 : 0; // ~12° slant
+    const FILL = 0;
+    const FILL_STROKE = 2;
 
     // Normalize color to 0-255 range
     const r255 = fontColor.r > 1 ? Math.round(fontColor.r) : Math.round(fontColor.r * 255);
@@ -3850,14 +3902,22 @@ export class PdfController implements IPdfController {
       let font = 0;
       const textObjs: number[] = [];
 
-      try {
-        // Load standard Helvetica font
-        const fontNamePtr = this.allocUtf8('Helvetica');
-        ptrsToFree.push(fontNamePtr);
-        font = pdfium._FPDFText_LoadStandardFont_W(docPtr, fontNamePtr);
+      // An embedded font (e.g. subsetted CJK) is owned by the caller and reused
+      // across pages, so it must NOT be closed here. A standard font is loaded
+      // per call and closed in the finally block.
+      const useEmbedded = opts.embeddedFontPtr != null && opts.embeddedFontPtr !== 0;
 
-        if (!font) {
-          throw new Error('Failed to load Helvetica font');
+      try {
+        if (useEmbedded) {
+          font = opts.embeddedFontPtr!;
+        } else {
+          // Standard Helvetica (Latin-only); bold/italic are faked (see above).
+          const fontNamePtr = this.allocUtf8('Helvetica');
+          ptrsToFree.push(fontNamePtr);
+          font = pdfium._FPDFText_LoadStandardFont_W(docPtr, fontNamePtr);
+          if (!font) {
+            throw new Error('Failed to load Helvetica font');
+          }
         }
 
         // Line height matching the textarea's lineHeight: 1.4
@@ -3867,6 +3927,15 @@ export class PdfController implements IPdfController {
           const lineText = lines[i];
           if (!lineText) continue; // skip empty lines but still advance Y
 
+          // Position the text in absolute page coordinates.
+          // First line baseline: pdfTop - fontSize * 1.1 (accounts for half-leading)
+          // Subsequent lines move DOWN in PDF coords (subtract lineHeight)
+          const textX = pdfLeft;
+          const textY = pdfTop - fontSize * 1.1 - i * lineHeight;
+
+          const textPtr = this.allocUtf16(lineText);
+          ptrsToFree.push(textPtr);
+
           // Create a text page object for this line
           const textObj = pdfium._FPDFPageObj_CreateTextObj_W(docPtr, font, fontSize);
           if (!textObj) {
@@ -3874,22 +3943,22 @@ export class PdfController implements IPdfController {
           }
           textObjs.push(textObj);
 
-          // Set the text content
-          const textPtr = this.allocUtf16(lineText);
-          ptrsToFree.push(textPtr);
           pdfium._FPDFText_SetText_W(textObj, textPtr);
-
-          // Set fill color (0-255 range)
           pdfium._FPDFPageObj_SetFillColor_W(textObj, r255, g255, b255, 255);
 
-          // Position the text in absolute page coordinates.
-          // First line baseline: pdfTop - fontSize * 1.1 (accounts for half-leading)
-          // Subsequent lines move DOWN in PDF coords (subtract lineHeight)
-          const textX = pdfLeft;
-          const textY = pdfTop - fontSize * 1.1 - i * lineHeight;
+          // Faux bold: outline each glyph in its own color via FILL_STROKE with
+          // a stroke width proportional to the font size, so the weight is
+          // consistent at any zoom/resolution.
+          if (opts.bold) {
+            pdfium._FPDFTextObj_SetTextRenderMode_W(textObj, FILL_STROKE);
+            pdfium._FPDFPageObj_SetStrokeColor_W(textObj, r255, g255, b255, 255);
+            pdfium._FPDFPageObj_SetStrokeWidth_W(textObj, fontSize * 0.03);
+          } else {
+            pdfium._FPDFTextObj_SetTextRenderMode_W(textObj, FILL);
+          }
 
-          // Transform to position (translation matrix)
-          pdfium._FPDFPageObj_Transform_W(textObj, 1, 0, 0, 1, textX, textY);
+          // Matrix [a b c d e f]: c = shear (faux italic), e/f = baseline origin.
+          pdfium._FPDFPageObj_Transform_W(textObj, 1, 0, shear, 1, textX, textY);
 
           // Insert the text object into the page content stream
           pdfium._FPDFPage_InsertObject_W(pagePtr, textObj);
@@ -3906,7 +3975,7 @@ export class PdfController implements IPdfController {
         for (const obj of textObjs) {
           pdfium._FPDFPageObj_Destroy_W(obj);
         }
-        if (font) pdfium._FPDFFont_Close_W(font);
+        if (font && !useEmbedded) pdfium._FPDFFont_Close_W(font);
         for (const ptr of ptrsToFree) {
           pdfium._free(ptr);
         }

@@ -84,6 +84,8 @@ export function useRenderAnnotation({
         position: a.position,
         fontSize: a.fontSize,
         fontColor: a.fontColor,
+        fontWeight: a.fontWeight,
+        fontStyle: a.fontStyle,
         dimensions: a.dimensions,
         containerSize,
       }),

@@ -671,6 +671,33 @@ export interface IPDFiumModule {
    */
   _FPDFText_LoadStandardFont_W(document: number, fontNamePtr: number): number;
   /**
+   * Load a font from embedded font-file bytes (e.g. a subsetted TrueType/OTF).
+   * The font program is embedded into the document on save, so the text renders
+   * without depending on system fonts (required for CJK and other non-Latin text).
+   * @param document Document pointer
+   * @param dataPtr Pointer to the font file bytes in WASM memory
+   * @param size Number of bytes
+   * @param fontType 1 = Type1, 2 = TrueType
+   * @param cid 1 for composite (CID-keyed) fonts — REQUIRED for fonts with > 255
+   *   glyphs such as CJK; 0 otherwise
+   * @returns Font handle, or 0 on failure
+   */
+  _FPDFText_LoadFont_W(
+    document: number,
+    dataPtr: number,
+    size: number,
+    fontType: number,
+    cid: number,
+  ): number;
+  /**
+   * Set the stroke width (in points) for a page object. Used with the
+   * FILL_STROKE text render mode to synthesize a bold weight.
+   * @param pageObject Page object handle
+   * @param width Stroke width in points
+   * @returns 1 on success, 0 on failure
+   */
+  _FPDFPageObj_SetStrokeWidth_W(pageObject: number, width: number): number;
+  /**
    * Create a new text object using the specified font
    * @param document Document pointer
    * @param font Font handle from LoadStandardFont
