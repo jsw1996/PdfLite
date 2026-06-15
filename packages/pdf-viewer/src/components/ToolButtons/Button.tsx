@@ -18,7 +18,7 @@ export const ToolButton: React.FC<ToolButtonProps> = (props: ToolButtonProps) =>
     'hover:bg-primary/10 hover:text-primary-emphasis',
     // Active state - green fill + ink icon + defining edge so it pops on light chrome
     props.isActive &&
-      'bg-primary text-primary-foreground! border border-primary-border shadow-md shadow-primary/25',
+      'bg-primary text-primary-foreground! border border-primary-border shadow-md shadow-primary/25 hover:bg-primary dark:hover:bg-primary',
     // Disabled state
     props.isEnabled === false && 'opacity-50 cursor-not-allowed',
   );
