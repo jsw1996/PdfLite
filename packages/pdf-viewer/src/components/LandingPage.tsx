@@ -98,10 +98,10 @@ export const LandingPage: React.FC<ILandingPageProps> = ({ onFileSelect }) => {
         <nav className="flex items-center justify-between px-6 md:px-8 py-5 max-w-7xl mx-auto w-full">
           <div className="flex items-center gap-3 group cursor-pointer">
             <div className="relative">
-              <div className="w-10 h-10 bg-gradient-to-br from-primary to-accent rounded-xl flex items-center justify-center text-white font-bold text-lg shadow-lg shadow-primary/25 transition-transform duration-200 group-hover:scale-105">
+              <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center text-primary-foreground font-bold text-lg shadow-lg shadow-primary/25 transition-transform duration-200 group-hover:scale-105">
                 L
               </div>
-              <div className="absolute -inset-1 bg-gradient-to-br from-primary to-accent rounded-xl opacity-0 group-hover:opacity-20 blur transition-opacity duration-200" />
+              <div className="absolute -inset-1 bg-primary rounded-xl opacity-0 group-hover:opacity-20 blur transition-opacity duration-200" />
             </div>
             <span className="text-xl font-bold text-foreground tracking-tight">Lumina</span>
           </div>
@@ -113,18 +113,18 @@ export const LandingPage: React.FC<ILandingPageProps> = ({ onFileSelect }) => {
         {/* Hero Content */}
         <main className="flex-1 flex flex-col items-center justify-center px-4 py-8 md:py-12 text-center max-w-5xl mx-auto w-full">
           {/* Badge */}
-          <div className="inline-flex items-center gap-2 px-4 py-2 bg-primary/10 dark:bg-primary/20 rounded-full mb-8 border border-primary/20">
-            <Sparkles className="w-4 h-4 text-primary" />
-            <span className="text-sm font-medium text-primary">AI-Powered PDF Experience</span>
+          <div className="inline-flex items-center gap-2 px-4 py-2 bg-accent dark:bg-primary/15 rounded-full mb-8 border border-primary/20">
+            <Sparkles className="w-4 h-4 text-primary-emphasis" />
+            <span className="text-sm font-medium text-primary-emphasis">
+              AI-Powered PDF Experience
+            </span>
           </div>
 
           <div className="space-y-6 mb-12">
-            <h1 className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-extrabold text-foreground tracking-tight leading-[1.1]">
+            <h1 className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-extrabold text-foreground tracking-tight leading-[1.1] text-balance">
               Documents that
               <br />
-              <span className="text-transparent bg-clip-text bg-gradient-to-r from-primary via-accent to-primary bg-[length:200%_auto] animate-[gradient_3s_linear_infinite]">
-                come alive.
-              </span>
+              <span className="text-primary-emphasis">come alive.</span>
             </h1>
             <p className="text-lg md:text-xl text-muted-foreground max-w-2xl mx-auto leading-relaxed">
               A blazing-fast, beautifully crafted PDF viewer.
@@ -148,7 +148,7 @@ export const LandingPage: React.FC<ILandingPageProps> = ({ onFileSelect }) => {
             {/* Glow effect */}
             <div
               className={`
-                absolute -inset-1 rounded-3xl bg-gradient-to-r from-primary via-accent to-primary opacity-0 blur-xl transition-opacity duration-300
+                absolute -inset-1 rounded-3xl bg-primary opacity-0 blur-xl transition-opacity duration-300
                 ${isDragging ? 'opacity-40' : 'group-hover:opacity-20'}
               `}
             />
@@ -174,7 +174,7 @@ export const LandingPage: React.FC<ILandingPageProps> = ({ onFileSelect }) => {
                 <div
                   className={`
                     w-20 h-20 rounded-2xl flex items-center justify-center transition-all duration-300
-                    ${isDragging ? 'bg-primary text-white scale-110' : 'bg-secondary text-muted-foreground group-hover:bg-primary/10 group-hover:text-primary'}
+                    ${isDragging ? 'bg-primary text-primary-foreground scale-110' : 'bg-secondary text-muted-foreground group-hover:bg-accent group-hover:text-primary-emphasis'}
                   `}
                 >
                   <Upload className="w-9 h-9" strokeWidth={1.5} />
@@ -198,10 +198,10 @@ export const LandingPage: React.FC<ILandingPageProps> = ({ onFileSelect }) => {
             ].map((feature) => (
               <div
                 key={feature.title}
-                className="flex flex-col items-center gap-3 p-5 rounded-2xl bg-card/50 dark:bg-card/30 backdrop-blur-sm border border-border/50 hover:border-primary/30 hover:bg-card/80 transition-all duration-200 cursor-pointer"
+                className="flex flex-col items-center gap-3 p-5 rounded-2xl bg-card/50 dark:bg-card/30 backdrop-blur-sm border border-border/50 hover:border-primary/40 hover:bg-card/80 transition-all duration-200 cursor-pointer"
               >
-                <div className="w-11 h-11 rounded-xl bg-primary/10 flex items-center justify-center">
-                  <feature.icon className="w-5 h-5 text-primary" />
+                <div className="w-11 h-11 rounded-xl bg-accent flex items-center justify-center">
+                  <feature.icon className="w-5 h-5 text-primary-emphasis" />
                 </div>
                 <div className="text-center">
                   <h4 className="font-semibold text-foreground text-sm">{feature.title}</h4>
@@ -212,14 +212,6 @@ export const LandingPage: React.FC<ILandingPageProps> = ({ onFileSelect }) => {
           </div>
         </main>
       </div>
-
-      {/* CSS for gradient animation */}
-      <style>{`
-        @keyframes gradient {
-          0% { background-position: 0% center; }
-          100% { background-position: 200% center; }
-        }
-      `}</style>
     </div>
   );
 };

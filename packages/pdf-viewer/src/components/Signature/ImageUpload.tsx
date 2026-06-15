@@ -130,9 +130,9 @@ export const ImageUpload: React.FC<IImageUploadProps> = ({ onSignatureReady }) =
           onChange={(e) => {
             handleFileChange(e);
           }}
-          className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+          className="block w-full text-sm text-muted-foreground file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-accent file:text-accent-foreground hover:file:bg-primary/15"
         />
-        {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
+        {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
       </div>
       {previewUrl && (
         <div className="border-2 border-gray-300 rounded-lg overflow-hidden bg-white p-4">

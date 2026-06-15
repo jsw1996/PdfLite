@@ -82,7 +82,7 @@ export const OpenPasswordDialog: React.FC<IOpenPasswordDialogProps> = ({
             autoComplete="current-password"
             disabled={isProcessing}
           />
-          {displayError && <p className="text-sm text-red-500">{displayError}</p>}
+          {displayError && <p className="text-sm text-destructive">{displayError}</p>}
         </div>
 
         <DialogFooter>

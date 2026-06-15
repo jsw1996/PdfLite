@@ -5,111 +5,150 @@
 @source "../**/*.{ts,tsx}";
 @custom-variant dark (&:is(.dark *));
 
-/* Modern Tech Theme - Indigo/Violet with Glassmorphism */
+/* Graphite + Spring Green — monochrome graphite/paper neutrals carry the whole surface
+ * (the document is the hero, chrome stays out of the way); ONE bright spring-green accent
+ * is the brand spark, reserved for primary actions, current selection, and active/focus
+ * states — never decoration (product-register / Restrained, accent ≤10% of surface).
+ * The accent is tuned per mode: bright spring-green on paper (oklch 0.78 0.17 145), indigo
+ * on graphite (oklch 0.63 0.11 281.89). Both read ONLY as a fill, always with a dark ink
+ * label; accent TEXT/ICONS use the lighter --primary-emphasis. (--primary-border
+ * is available for an optional defining edge on fills; it is transparent in light by choice.)
+ * Neutrals keep a whisper of cool chroma (hue 250, ≤0.006) so grays read "graphite",
+ * not dead-flat. Semantic status (error/success/warning/info) stays distinct and is
+ * always paired with an icon/label so meaning never rests on hue alone.
+ * All pairs verified ≥ WCAG AA. */
 :root {
-  /* Core Brand Colors - Indigo Primary + Emerald Accent */
-  --background: oklch(0.985 0.008 270);
-  --foreground: oklch(0.2 0.02 270);
+  /* Paper (light) — near-black ink on near-white */
+  --background: oklch(0.985 0.002 250);
+  --foreground: oklch(0.18 0.004 250);
 
-  /* Cards & Surfaces */
+  /* Cards & surfaces */
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.2 0.02 270);
+  --card-foreground: oklch(0.18 0.004 250);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.2 0.02 270);
+  --popover-foreground: oklch(0.18 0.004 250);
 
-  /* Primary - Indigo (modern tech color) */
-  --primary: oklch(0.55 0.2 270);
-  --primary-foreground: oklch(1 0 0);
+  /* Primary — the spring-green brand accent at full strength (same value in both modes).
+   * A bright, luminous color: low contrast against white, so it reads only as a
+   * FILL and always takes a dark ink label (white is illegible on it). */
+  --primary: oklch(0.78 0.17 145);
+  --primary-foreground: oklch(0.18 0.004 250);
+  /* Emphasis — deep green for accent TEXT/ICONS on light surfaces (bright green text on
+   * white is ~1.8:1, illegible). Fills use --primary, text uses --primary-emphasis. */
+  --primary-emphasis: oklch(0.5 0.15 145);
+  /* Border — none on light: the green fill stands on its own (no hairline edge). */
+  --primary-border: transparent;
 
-  /* Secondary - Soft violet tinted surface */
-  --secondary: oklch(0.96 0.015 270);
-  --secondary-foreground: oklch(0.3 0.03 270);
+  /* Secondary — panel/toolbar surface, one step off the content surface */
+  --secondary: oklch(0.96 0.003 250);
+  --secondary-foreground: oklch(0.28 0.004 250);
 
   /* Muted elements */
-  --muted: oklch(0.95 0.01 270);
-  --muted-foreground: oklch(0.5 0.02 270);
+  --muted: oklch(0.955 0.003 250);
+  --muted-foreground: oklch(0.45 0.005 250);
 
-  /* Accent - Emerald for CTAs and success states */
-  --accent: oklch(0.7 0.17 160);
-  --accent-foreground: oklch(1 0 0);
+  /* Accent — green-tinted interactive/hover surface (shadcn `accent` role) */
+  --accent: oklch(0.94 0.06 143);
+  --accent-foreground: oklch(0.42 0.13 145);
 
-  /* Status colors */
-  --destructive: oklch(0.6 0.22 25);
+  /* Status — the only color in the system; color-blind-safe, never the sole signal */
+  --destructive: oklch(0.55 0.2 28);
   --destructive-foreground: oklch(1 0 0);
+  --success: oklch(0.52 0.11 162);
+  --success-foreground: oklch(1 0 0);
+  --warning: oklch(0.5 0.13 55);
+  --warning-foreground: oklch(1 0 0);
+  --info: oklch(0.5 0.14 255);
+  --info-foreground: oklch(1 0 0);
 
-  /* Borders & Inputs */
-  --border: oklch(0.9 0.01 270);
-  --input: oklch(0.95 0.008 270);
-  --ring: oklch(0.55 0.2 270);
+  /* Borders & inputs */
+  --border: oklch(0.88 0.004 250);
+  --input: oklch(0.91 0.004 250);
+  --ring: oklch(0.58 0.16 145);
 
-  /* Chart colors - Modern tech palette */
-  --chart-1: oklch(0.55 0.2 270);
-  --chart-2: oklch(0.7 0.17 160);
-  --chart-3: oklch(0.65 0.18 200);
-  --chart-4: oklch(0.7 0.15 320);
-  --chart-5: oklch(0.6 0.2 290);
+  /* Chart colors — graphite ramp (mono); status hues only if a chart needs categories */
+  --chart-1: oklch(0.3 0.005 250);
+  --chart-2: oklch(0.45 0.005 250);
+  --chart-3: oklch(0.6 0.005 250);
+  --chart-4: oklch(0.72 0.005 250);
+  --chart-5: oklch(0.82 0.004 250);
 
-  /* Radius - Modern rounded feel */
+  /* Radius */
   --radius: 0.75rem;
 
-  /* Sidebar - Glassmorphic with violet tint */
-  --sidebar: oklch(0.98 0.01 270 / 0.9);
-  --sidebar-foreground: oklch(0.2 0.02 270);
-  --sidebar-primary: oklch(0.55 0.2 270);
-  --sidebar-primary-foreground: oklch(1 0 0);
-  --sidebar-accent: oklch(0.95 0.015 270);
-  --sidebar-accent-foreground: oklch(0.3 0.03 270);
-  --sidebar-border: oklch(0.92 0.01 270);
-  --sidebar-ring: oklch(0.55 0.2 270);
+  /* Sidebar — shares the paper panel surface */
+  --sidebar: oklch(0.96 0.003 250);
+  --sidebar-foreground: oklch(0.18 0.004 250);
+  --sidebar-primary: oklch(0.78 0.17 145);
+  --sidebar-primary-foreground: oklch(0.18 0.004 250);
+  --sidebar-accent: oklch(0.94 0.06 143);
+  --sidebar-accent-foreground: oklch(0.42 0.13 145);
+  --sidebar-border: oklch(0.88 0.004 250);
+  --sidebar-ring: oklch(0.58 0.16 145);
+
+  /* Soft green halo for the rare hero moment (used sparingly) */
+  --glow-primary: oklch(0.78 0.17 145 / 0.3);
 }
 
 .dark {
-  /* Dark mode - Deep slate with indigo accents */
-  --background: oklch(0.13 0.015 270);
-  --foreground: oklch(0.95 0.01 270);
+  /* Graphite (dark, signature) — deep graphite workspace; depth from surface
+   * lightness, not shadow. The white page floats on --background; panels/chrome
+   * sit one step lighter. */
+  --background: oklch(0.18 0.004 250);
+  --foreground: oklch(0.96 0.003 250);
 
-  --card: oklch(0.16 0.015 270);
-  --card-foreground: oklch(0.95 0.01 270);
-  --popover: oklch(0.16 0.015 270);
-  --popover-foreground: oklch(0.95 0.01 270);
+  --card: oklch(0.225 0.005 250);
+  --card-foreground: oklch(0.96 0.003 250);
+  --popover: oklch(0.225 0.005 250);
+  --popover-foreground: oklch(0.96 0.003 250);
 
-  /* Primary - Brighter indigo in dark mode */
-  --primary: oklch(0.65 0.2 270);
-  --primary-foreground: oklch(0.13 0.015 270);
+  /* Primary — indigo on graphite, graphite-ink label */
+  --primary: oklch(0.63 0.11 281.89);
+  --primary-foreground: oklch(0.18 0.004 250);
+  --primary-emphasis: oklch(0.74 0.12 282);
+  /* Border — same green on graphite (the fill already pops on dark; edge is invisible) */
+  --primary-border: oklch(0.63 0.11 281.89);
 
-  --secondary: oklch(0.2 0.015 270);
-  --secondary-foreground: oklch(0.9 0.01 270);
+  --secondary: oklch(0.255 0.005 250);
+  --secondary-foreground: oklch(0.92 0.003 250);
 
-  --muted: oklch(0.22 0.015 270);
-  --muted-foreground: oklch(0.6 0.02 270);
+  --muted: oklch(0.255 0.005 250);
+  --muted-foreground: oklch(0.7 0.005 250);
 
-  /* Accent - Emerald stays vibrant */
-  --accent: oklch(0.75 0.17 160);
-  --accent-foreground: oklch(0.13 0.015 270);
+  --accent: oklch(0.3 0.045 282);
+  --accent-foreground: oklch(0.78 0.1 282);
 
-  --destructive: oklch(0.5 0.2 25);
-  --destructive-foreground: oklch(0.9 0.15 25);
+  --destructive: oklch(0.62 0.19 25);
+  --destructive-foreground: oklch(1 0 0);
+  --success: oklch(0.78 0.13 162);
+  --success-foreground: oklch(0.18 0.004 250);
+  --warning: oklch(0.82 0.13 75);
+  --warning-foreground: oklch(0.18 0.004 250);
+  --info: oklch(0.72 0.12 255);
+  --info-foreground: oklch(0.18 0.004 250);
 
-  --border: oklch(0.38 0.02 270);
-  --input: oklch(0.22 0.015 270);
-  --ring: oklch(0.65 0.2 270);
+  --border: oklch(0.32 0.006 250);
+  --input: oklch(0.28 0.006 250);
+  --ring: oklch(0.63 0.11 281.89);
 
-  /* Chart colors - Brighter for dark mode */
-  --chart-1: oklch(0.65 0.2 270);
-  --chart-2: oklch(0.75 0.17 160);
-  --chart-3: oklch(0.7 0.18 200);
-  --chart-4: oklch(0.75 0.15 320);
-  --chart-5: oklch(0.7 0.2 290);
+  /* Chart colors — graphite ramp inverted for dark */
+  --chart-1: oklch(0.92 0.003 250);
+  --chart-2: oklch(0.78 0.004 250);
+  --chart-3: oklch(0.64 0.005 250);
+  --chart-4: oklch(0.5 0.005 250);
+  --chart-5: oklch(0.38 0.005 250);
 
-  /* Sidebar - Dark glassmorphic */
-  --sidebar: oklch(0.16 0.015 270 / 0.95);
-  --sidebar-foreground: oklch(0.95 0.01 270);
-  --sidebar-primary: oklch(0.65 0.2 270);
-  --sidebar-primary-foreground: oklch(0.13 0.015 270);
-  --sidebar-accent: oklch(0.22 0.015 270);
-  --sidebar-accent-foreground: oklch(0.95 0.01 270);
-  --sidebar-border: oklch(0.38 0.02 270);
-  --sidebar-ring: oklch(0.65 0.2 270);
+  /* Sidebar — shares the graphite panel surface */
+  --sidebar: oklch(0.225 0.005 250);
+  --sidebar-foreground: oklch(0.96 0.003 250);
+  --sidebar-primary: oklch(0.63 0.11 281.89);
+  --sidebar-primary-foreground: oklch(0.18 0.004 250);
+  --sidebar-accent: oklch(0.3 0.045 282);
+  --sidebar-accent-foreground: oklch(0.78 0.1 282);
+  --sidebar-border: oklch(0.32 0.006 250);
+  --sidebar-ring: oklch(0.63 0.11 281.89);
+
+  --glow-primary: oklch(0.63 0.11 281.89 / 0.45);
 }
 
 @theme inline {
@@ -121,6 +160,8 @@
   --color-popover-foreground: var(--popover-foreground);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
+  --color-primary-emphasis: var(--primary-emphasis);
+  --color-primary-border: var(--primary-border);
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
@@ -129,6 +170,12 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -166,11 +213,11 @@
   .custom-scrollbar {
     /* Firefox */
     scrollbar-width: thin;
-    scrollbar-color: oklch(0.7 0.05 270 / 0.4) transparent;
+    scrollbar-color: oklch(0.6 0.005 250 / 0.4) transparent;
   }
 
   .dark .custom-scrollbar {
-    scrollbar-color: oklch(0.5 0.08 270 / 0.5) transparent;
+    scrollbar-color: oklch(0.5 0.006 250 / 0.5) transparent;
   }
 
   /* WebKit browsers (Chrome, Safari, Edge) */
@@ -184,35 +231,35 @@
   }
 
   .custom-scrollbar::-webkit-scrollbar-thumb {
-    background: oklch(0.7 0.05 270 / 0.4);
+    background: oklch(0.6 0.005 250 / 0.4);
     border-radius: 4px;
     border: 2px solid transparent;
     background-clip: padding-box;
   }
 
   .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-    background: oklch(0.6 0.1 270 / 0.6);
+    background: oklch(0.5 0.005 250 / 0.6);
     background-clip: padding-box;
   }
 
   .custom-scrollbar::-webkit-scrollbar-thumb:active {
-    background: oklch(0.55 0.15 270 / 0.7);
+    background: oklch(0.4 0.005 250 / 0.75);
     background-clip: padding-box;
   }
 
   /* Dark mode WebKit scrollbar */
   .dark .custom-scrollbar::-webkit-scrollbar-thumb {
-    background: oklch(0.5 0.08 270 / 0.5);
+    background: oklch(0.5 0.006 250 / 0.5);
     background-clip: padding-box;
   }
 
   .dark .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-    background: oklch(0.55 0.12 270 / 0.65);
+    background: oklch(0.62 0.006 250 / 0.65);
     background-clip: padding-box;
   }
 
   .dark .custom-scrollbar::-webkit-scrollbar-thumb:active {
-    background: oklch(0.6 0.15 270 / 0.75);
+    background: oklch(0.75 0.005 250 / 0.8);
     background-clip: padding-box;
   }
 }
@@ -220,29 +267,38 @@
 /* Glassmorphism utility classes */
 @layer utilities {
   .glass {
-    @apply bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl border border-white/20 dark:border-white/10;
+    @apply border bg-card/80 backdrop-blur-xl;
+    border-color: oklch(1 0 0 / 0.4);
+  }
+  .dark .glass {
+    border-color: oklch(1 0 0 / 0.08);
   }
 
   .glass-hover {
-    @apply transition-all duration-200 hover:bg-white/90 dark:hover:bg-slate-900/90 hover:shadow-lg;
+    @apply transition-all duration-200 hover:bg-card/90 hover:shadow-lg;
   }
 
-  /* Modern tech gradient backgrounds */
+  /* Soft ink halo — for the rare primary / selection hero moment (neutral, no hue) */
+  .glow-primary {
+    box-shadow: 0 8px 40px -8px var(--glow-primary);
+  }
+
+  /* Graphite/paper ambient wash (barely-there; the document stays the hero) */
   .gradient-playful {
     background: linear-gradient(
-      135deg,
-      oklch(0.98 0.015 270) 0%,
-      oklch(0.97 0.02 290) 50%,
-      oklch(0.98 0.01 250) 100%
+      150deg,
+      oklch(0.985 0.002 250) 0%,
+      oklch(0.965 0.004 250) 55%,
+      oklch(0.99 0.002 250) 100%
     );
   }
 
   .dark .gradient-playful {
     background: linear-gradient(
-      135deg,
-      oklch(0.14 0.02 270) 0%,
-      oklch(0.12 0.025 290) 50%,
-      oklch(0.15 0.015 250) 100%
+      150deg,
+      oklch(0.18 0.004 250) 0%,
+      oklch(0.225 0.006 250) 55%,
+      oklch(0.195 0.005 250) 100%
     );
   }
 }

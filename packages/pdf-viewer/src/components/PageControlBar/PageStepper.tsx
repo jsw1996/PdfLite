@@ -61,7 +61,7 @@ export const PageStepper: React.FC<IPageStepperProps> = ({ pageCount, onJumpToPa
         variant="ghost"
         onClick={onPrev}
         disabled={!canPrev}
-        className="w-8 h-8 rounded-lg hover:bg-primary/10 hover:text-primary transition-colors duration-200 disabled:opacity-40"
+        className="w-8 h-8 rounded-lg hover:bg-primary/10 hover:text-primary-emphasis transition-colors duration-200 disabled:opacity-40"
       >
         <ChevronLeft className="w-4 h-4" />
       </TooltipButton>
@@ -84,7 +84,7 @@ export const PageStepper: React.FC<IPageStepperProps> = ({ pageCount, onJumpToPa
         variant="ghost"
         onClick={onNext}
         disabled={!canNext}
-        className="w-8 h-8 rounded-lg hover:bg-primary/10 hover:text-primary transition-colors duration-200 disabled:opacity-40"
+        className="w-8 h-8 rounded-lg hover:bg-primary/10 hover:text-primary-emphasis transition-colors duration-200 disabled:opacity-40"
       >
         <ChevronRight className="w-4 h-4" />
       </TooltipButton>

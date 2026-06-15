@@ -23,7 +23,7 @@ export const ZoomControl: React.FC = () => {
         variant="ghost"
         onClick={handleZoomOut}
         title="Zoom Out"
-        className="w-8 h-8 rounded-lg hover:bg-primary/10 hover:text-primary transition-colors duration-200"
+        className="w-8 h-8 rounded-lg hover:bg-primary/10 hover:text-primary-emphasis transition-colors duration-200"
       >
         <ZoomOut className="w-4 h-4" />
       </TooltipButton>
@@ -34,7 +34,7 @@ export const ZoomControl: React.FC = () => {
         variant="ghost"
         onClick={handleZoomIn}
         title="Zoom In"
-        className="w-8 h-8 rounded-lg hover:bg-primary/10 hover:text-primary transition-colors duration-200"
+        className="w-8 h-8 rounded-lg hover:bg-primary/10 hover:text-primary-emphasis transition-colors duration-200"
       >
         <ZoomIn className="w-4 h-4" />
       </TooltipButton>

@@ -212,7 +212,7 @@ export const SearchBar = () => {
             <Button
               variant="ghost"
               size="icon"
-              className="w-6 h-6 rounded-lg hover:bg-primary/10 hover:text-primary transition-colors duration-200"
+              className="w-6 h-6 rounded-lg hover:bg-primary/10 hover:text-primary-emphasis transition-colors duration-200"
               onClick={goToPrevMatch}
               disabled={matches.length === 0}
             >
@@ -221,7 +221,7 @@ export const SearchBar = () => {
             <Button
               variant="ghost"
               size="icon"
-              className="w-6 h-6 rounded-lg hover:bg-primary/10 hover:text-primary transition-colors duration-200"
+              className="w-6 h-6 rounded-lg hover:bg-primary/10 hover:text-primary-emphasis transition-colors duration-200"
               onClick={goToNextMatch}
               disabled={matches.length === 0}
             >

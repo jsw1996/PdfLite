@@ -34,8 +34,8 @@ const PdfEditorContent: React.FC<{
     if (loadError) {
       return (
         <div className="flex flex-col items-center justify-center h-full text-center p-8">
-          <div className="text-red-600 font-semibold mb-2">Error loading PDF</div>
-          <div className="text-slate-600 text-sm">{loadError}</div>
+          <div className="text-destructive font-semibold mb-2">Error loading PDF</div>
+          <div className="text-muted-foreground text-sm">{loadError}</div>
         </div>
       );
     }

@@ -23,6 +23,7 @@ export default defineConfig([
       '**/.pnpm-store',
       'packages/pdfium-wasm/wasm/**',
       'packages/pdfium-wasm/build/**',
+      '.claude/**',
     ],
   },
   {

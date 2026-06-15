@@ -14,10 +14,11 @@ export const ToolButton: React.FC<ToolButtonProps> = (props: ToolButtonProps) =>
   const className = cn(
     // Base styles
     'text-muted-foreground relative overflow-hidden rounded-lg transition-all duration-200',
-    // Hover state - vibrant primary color
-    'hover:bg-primary/10 hover:text-primary',
-    // Active state - filled with primary
-    props.isActive && 'bg-primary text-primary-foreground! shadow-md shadow-primary/25',
+    // Hover state - deep-green accent text (bright green is illegible as text on light)
+    'hover:bg-primary/10 hover:text-primary-emphasis',
+    // Active state - green fill + ink icon + defining edge so it pops on light chrome
+    props.isActive &&
+      'bg-primary text-primary-foreground! border border-primary-border shadow-md shadow-primary/25',
     // Disabled state
     props.isEnabled === false && 'opacity-50 cursor-not-allowed',
   );

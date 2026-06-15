@@ -65,10 +65,10 @@ export const PagePreview = React.memo(({ page }: IPagePreviewProps) => {
         ref={containerRef}
         data-slot="page-preview-canvas-container"
         className={`
-          relative w-full mx-auto bg-white dark:bg-slate-800 rounded-md
+          relative w-full mx-auto bg-white dark:bg-card rounded-md
           overflow-hidden
           shadow-md transition-all duration-200
-          ${isActive ? 'shadow-primary/20 ring-2 ring-primary' : 'shadow-slate-200/50 dark:shadow-slate-900/50 group-hover:shadow-lg'}
+          ${isActive ? 'shadow-primary/20 ring-2 ring-primary' : 'shadow-black/5 dark:shadow-black/30 group-hover:shadow-lg'}
         `}
         style={{
           aspectRatio: `${pageWidth} / ${pageHeight}`,
@@ -92,7 +92,7 @@ export const PagePreview = React.memo(({ page }: IPagePreviewProps) => {
         data-slot="page-preview-page-number"
         className={`
           text-xs font-medium transition-colors duration-200
-          ${isActive ? 'text-primary' : 'text-muted-foreground group-hover:text-foreground'}
+          ${isActive ? 'text-primary-emphasis' : 'text-muted-foreground group-hover:text-foreground'}
         `}
       >
         {displayPageNumber}

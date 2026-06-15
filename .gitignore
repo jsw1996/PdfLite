@@ -20,3 +20,10 @@ npm-debug.log*
 
 # OpenCode
 .opencode/
+
+# Claude Code
+.claude/
+
+# Impeccable / product brief
+PRODUCT.md
+.impeccable/

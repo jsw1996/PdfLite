@@ -80,8 +80,8 @@ export const SignatureDialog: React.FC<ISignatureDialogProps> = ({
               onClick={() => setActiveTab('handwriting')}
               className={`px-4 py-2 font-medium text-sm border-b-2 transition-colors ${
                 activeTab === 'handwriting'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
+                  ? 'border-primary text-primary-emphasis'
+                  : 'border-transparent text-muted-foreground hover:text-foreground'
               }`}
             >
               Handwriting
@@ -91,8 +91,8 @@ export const SignatureDialog: React.FC<ISignatureDialogProps> = ({
               onClick={() => setActiveTab('upload')}
               className={`px-4 py-2 font-medium text-sm border-b-2 transition-colors ${
                 activeTab === 'upload'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
+                  ? 'border-primary text-primary-emphasis'
+                  : 'border-transparent text-muted-foreground hover:text-foreground'
               }`}
             >
               Upload Image

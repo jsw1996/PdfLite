@@ -94,7 +94,7 @@ export const PasswordProtectionDialog: React.FC<IPasswordProtectionDialogProps> 
               type="checkbox"
               checked={enablePassword}
               onChange={(e) => setEnablePassword(e.target.checked)}
-              className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              className="h-4 w-4 rounded border-input accent-primary focus:ring-ring"
             />
             <span className="text-sm font-medium">Add password protection</span>
           </label>
@@ -140,7 +140,7 @@ export const PasswordProtectionDialog: React.FC<IPasswordProtectionDialogProps> 
                       type="checkbox"
                       checked={permissions.printing}
                       onChange={() => togglePermission('printing')}
-                      className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                      className="h-4 w-4 rounded border-input accent-primary focus:ring-ring"
                     />
                     <span>Allow printing</span>
                   </label>
@@ -149,7 +149,7 @@ export const PasswordProtectionDialog: React.FC<IPasswordProtectionDialogProps> 
                       type="checkbox"
                       checked={permissions.copying}
                       onChange={() => togglePermission('copying')}
-                      className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                      className="h-4 w-4 rounded border-input accent-primary focus:ring-ring"
                     />
                     <span>Allow copying text</span>
                   </label>
@@ -158,7 +158,7 @@ export const PasswordProtectionDialog: React.FC<IPasswordProtectionDialogProps> 
                       type="checkbox"
                       checked={permissions.modifying}
                       onChange={() => togglePermission('modifying')}
-                      className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                      className="h-4 w-4 rounded border-input accent-primary focus:ring-ring"
                     />
                     <span>Allow modifications</span>
                   </label>
@@ -166,7 +166,7 @@ export const PasswordProtectionDialog: React.FC<IPasswordProtectionDialogProps> 
               </div>
 
               {/* Error Message */}
-              {error && <p className="text-sm text-red-500">{error}</p>}
+              {error && <p className="text-sm text-destructive">{error}</p>}
             </div>
           )}
         </div>

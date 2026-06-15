@@ -43,7 +43,7 @@ export function OutlinePanel({ outline, onGoToPage }: IOutlinePanelProps) {
   }, [outline]);
 
   if (!outline.length) {
-    return <div className="px-3 py-4 text-sm text-slate-500">No outline.</div>;
+    return <div className="px-3 py-4 text-sm text-muted-foreground">No outline.</div>;
   }
 
   const allExpanded = allKeys.length > 0 && allKeys.every((key) => expanded.has(key));
