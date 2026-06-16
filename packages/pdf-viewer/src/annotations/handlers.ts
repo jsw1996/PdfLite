@@ -156,11 +156,13 @@ function commitHighlightAnnotation(
   controller: PdfController,
   annotation: IHighlightAnnotation,
 ): void {
+  const rgb = parseRgbColor(annotation.color);
   // Commit each rect as a separate highlight annotation
   for (const rect of annotation.rects) {
     controller.addHighlightAnnotation(annotation.pageIndex, {
       scale: 1,
       canvasRect: rect,
+      color: rgb ? { r: rgb.r, g: rgb.g, b: rgb.b } : undefined,
     });
   }
 }

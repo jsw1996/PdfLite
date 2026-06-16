@@ -4,7 +4,6 @@ import {
   type IHighlightAnnotation,
   type IRect,
   generateAnnotationId,
-  ANNOTATION_COLORS,
   ANNOTATION_TIMING,
 } from '../annotations';
 
@@ -14,9 +13,15 @@ export interface IUseSelectionHighlightOptions {
 }
 
 export function useSelectionHighlight({ pageIndex, pdfCanvas }: IUseSelectionHighlightOptions) {
-  const { selectedTool, setSelectedTool, addAnnotation } = useAnnotation();
+  const { selectedTool, setSelectedTool, addAnnotation, highlightColor } = useAnnotation();
   const prevToolRef = useRef<typeof selectedTool>(null);
   const highlightTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Read the live color through a ref so applyCurrentSelectionAsHighlight stays
+  // stable (it's wired into pointer/keyup handlers) yet always uses the latest pick.
+  const highlightColorRef = useRef(highlightColor);
+  useEffect(() => {
+    highlightColorRef.current = highlightColor;
+  }, [highlightColor]);
 
   const applyCurrentSelectionAsHighlight = useCallback((): boolean => {
     if (!pdfCanvas) return false;
@@ -74,7 +79,7 @@ export function useSelectionHighlight({ pageIndex, pdfCanvas }: IUseSelectionHig
         source: 'overlay',
         pageIndex,
         rects,
-        color: ANNOTATION_COLORS.HIGHLIGHT,
+        color: highlightColorRef.current,
         createdAt: now,
       };
       addAnnotation(annotation);

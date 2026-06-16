@@ -209,6 +209,8 @@ export interface IPdfController {
     opts: {
       scale: number;
       canvasRect: { left: number; top: number; width: number; height: number };
+      /** Fill color (0-255). Defaults to yellow when omitted. */
+      color?: { r: number; g: number; b: number };
     },
   ): void;
   addLinkAnnotation(
@@ -3645,9 +3647,11 @@ export class PdfController implements IPdfController {
     opts: {
       scale: number;
       canvasRect: { left: number; top: number; width: number; height: number };
+      /** Fill color (0-255). Defaults to yellow when omitted. */
+      color?: { r: number; g: number; b: number };
     },
   ): void {
-    const { scale, canvasRect } = opts;
+    const { scale, canvasRect, color } = opts;
     if (canvasRect.width <= 0 || canvasRect.height <= 0) return;
 
     this.withPage(pageIndex, (pdfium, pagePtr) => {
@@ -3708,8 +3712,11 @@ export class PdfController implements IPdfController {
         const okQuad = pdfium._FPDFAnnot_AppendAttachmentPoints_W(annot, quadPtr);
         if (!okQuad) throw new Error('Failed to set HIGHLIGHT QuadPoints');
 
-        // Set highlight color (yellow: RGB 248, 196, 72)
-        pdfium._FPDFAnnot_SetColor_W(annot, FPDFANNOT_COLORTYPE.COLOR, 248, 196, 72, 255);
+        // Set highlight color (defaults to yellow: RGB 248, 196, 72)
+        const r = color?.r ?? 248;
+        const g = color?.g ?? 196;
+        const b = color?.b ?? 72;
+        pdfium._FPDFAnnot_SetColor_W(annot, FPDFANNOT_COLORTYPE.COLOR, r, g, b, 255);
       } finally {
         pdfium._free(rectPtr);
         pdfium._free(quadPtr);

@@ -8,6 +8,8 @@ import {
   type IDrawAnnotation,
   type IHighlightAnnotation,
   ANNOTATION_COLORS,
+  isDrawAnnotation,
+  hitTestDrawAnnotations,
 } from '../../annotations';
 import { TextLayer } from '../TextLayer/TextLayer';
 import { usePdfState } from '@/providers/PdfStateContextProvider';
@@ -32,7 +34,44 @@ export const ViewerPage: React.FC<IViewerPageProps> = ({ pageIndex, registerPage
   const [pdfCanvas, setPdfCanvas] = useState<HTMLCanvasElement | null>(null);
   const [containerEl, setContainerEl] = useState<HTMLDivElement | null>(null);
   const { controller, goToPage } = usePdfController();
-  const { setNativeAnnotationsForPage } = useAnnotation();
+  const {
+    setNativeAnnotationsForPage,
+    selectedTool,
+    isEditMode,
+    getAnnotationsForPage,
+    setSelectedDrawId,
+  } = useAnnotation();
+
+  // Select tool (no annotation tool, not editing) lets the user click a stroke
+  // to select it. Hit-testing happens here, in the page's capture phase, so a
+  // miss falls through to links/forms/text/text-boxes instead of being eaten by
+  // a full-page canvas overlay.
+  const isSelectMode = selectedTool === null && !isEditMode;
+  const handleSelectPointerDown = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (!isSelectMode || !pdfCanvas) return;
+      // Let DOM annotations (text boxes) handle their own selection.
+      if ((e.target as HTMLElement).closest('.text-annotation-box')) return;
+
+      const rect = pdfCanvas.getBoundingClientRect();
+      const point = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+      // Only overlay strokes are selectable — native (committed/original) ink is
+      // not removable, so selecting it would be a dead end.
+      const strokes = getAnnotationsForPage(pageIndex)
+        .filter(isDrawAnnotation)
+        .filter((a) => a.source === 'overlay');
+      const hitId = hitTestDrawAnnotations(point, strokes);
+      if (hitId) {
+        // Suppress the default text-caret placement, but let the event keep
+        // propagating so an open text box can deselect via its outside-click.
+        e.preventDefault();
+        setSelectedDrawId(hitId);
+      } else {
+        setSelectedDrawId(null);
+      }
+    },
+    [isSelectMode, pdfCanvas, getAnnotationsForPage, pageIndex, setSelectedDrawId],
+  );
 
   const onCanvasReady = useCallback((c: HTMLCanvasElement) => {
     setPdfCanvas(c);
@@ -120,6 +159,7 @@ export const ViewerPage: React.FC<IViewerPageProps> = ({ pageIndex, registerPage
       data-slot={`viewer-page-container-${pageIndex}`}
       data-page-index={pageIndex}
       className="relative z-0 w-fit mx-auto"
+      onPointerDownCapture={handleSelectPointerDown}
       onMouseUpCapture={handleHighlightOnInteraction}
       onKeyUpCapture={handleHighlightOnInteraction}
     >
