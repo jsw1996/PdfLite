@@ -8,8 +8,8 @@ import {
   isTextAnnotation,
   isSignatureAnnotation,
   renderAnnotation,
-  ANNOTATION_COLORS,
-  ANNOTATION_STROKE_WIDTH,
+  drawAnnotationBounds,
+  DRAW_TOOL_DEFAULTS,
 } from '../annotations';
 import { TextBox } from '../components/AnnotationLayer/TextBox';
 import { SignatureBox } from '../components/AnnotationLayer/SignatureBox';
@@ -31,6 +31,12 @@ export interface IUseRenderAnnotationOptions {
   selectedTool: AnnotationType | null;
   /** Live in-progress stroke (ref); read at draw time so it doesn't drive re-renders. */
   currentPathRef: RefObject<IPoint[]>;
+  /** Stroke color for the draw tool live preview (CSS color string) */
+  drawColor?: string;
+  /** Stroke width for the draw tool live preview (logical px at scale=1) */
+  drawStrokeWidth?: number;
+  /** Id of the selected draw stroke, to render a selection box around it */
+  selectedDrawId?: string | null;
 }
 
 /**
@@ -58,6 +64,25 @@ function drawStrokePreview(
   ctx.restore();
 }
 
+/** Draw a dashed selection box around a stroke's bounds. */
+function drawSelectionBox(
+  ctx: CanvasRenderingContext2D,
+  bounds: { left: number; top: number; width: number; height: number },
+) {
+  const pad = 3;
+  ctx.save();
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = 'rgba(162, 0, 255, 0.9)';
+  ctx.setLineDash([4, 3]);
+  ctx.strokeRect(
+    bounds.left - pad,
+    bounds.top - pad,
+    bounds.width + pad * 2,
+    bounds.height + pad * 2,
+  );
+  ctx.restore();
+}
+
 export function useRenderAnnotation({
   highlightCanvasRef,
   drawCanvasRef,
@@ -65,6 +90,9 @@ export function useRenderAnnotation({
   annotations,
   selectedTool,
   currentPathRef,
+  drawColor = DRAW_TOOL_DEFAULTS.COLOR,
+  drawStrokeWidth = DRAW_TOOL_DEFAULTS.STROKE_WIDTH,
+  selectedDrawId = null,
 }: IUseRenderAnnotationOptions): {
   textAnnotations: React.ReactElement[];
   signatureAnnotations: React.ReactElement[];
@@ -136,19 +164,36 @@ export function useRenderAnnotation({
       // Text annotations are rendered as React components, not on canvas
     }
 
+    // Outline the selected draw stroke (if it lives on this page).
+    if (selectedDrawId) {
+      const selected = annotations.find((a) => a.id === selectedDrawId);
+      if (selected && isDrawAnnotation(selected)) {
+        drawSelectionBox(dctx, drawAnnotationBounds(selected));
+      }
+    }
+
     // Draw current path preview (live drawing). Read the live ref so a redraw
     // triggered for other reasons (annotation/metrics change) re-paints the
     // in-progress stroke; per-segment drawing during a stroke is handled in useInk.
     const currentPath = currentPathRef.current;
     if (selectedTool && currentPath.length > 0) {
       if (selectedTool === 'draw') {
-        // Use the draw color (black) for the live preview so the stroke does
-        // not change color when it's committed to a stored draw annotation.
-        const strokeWidth = ANNOTATION_STROKE_WIDTH.DRAW;
-        drawStrokePreview(dctx, currentPath, ANNOTATION_COLORS.DRAW, strokeWidth);
+        // Match the live preview to the active draw style so the stroke does
+        // not change appearance when it's committed to a stored draw annotation.
+        drawStrokePreview(dctx, currentPath, drawColor, drawStrokeWidth);
       }
     }
-  }, [annotations, currentPathRef, highlightCanvasRef, drawCanvasRef, metrics, selectedTool]);
+  }, [
+    annotations,
+    currentPathRef,
+    highlightCanvasRef,
+    drawCanvasRef,
+    metrics,
+    selectedTool,
+    drawColor,
+    drawStrokeWidth,
+    selectedDrawId,
+  ]);
 
   useEffect(() => {
     redraw();

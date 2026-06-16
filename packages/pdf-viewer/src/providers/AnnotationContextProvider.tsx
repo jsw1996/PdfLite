@@ -13,6 +13,8 @@ import {
   normalizeAnnotation,
   denormalizeAnnotation,
   commitAnnotation,
+  DRAW_TOOL_DEFAULTS,
+  HIGHLIGHT_TOOL_DEFAULTS,
 } from '../annotations';
 import { usePdfState } from './PdfStateContextProvider';
 import { usePdfController } from './PdfControllerContextProvider';
@@ -30,6 +32,22 @@ export interface IAnnotationContextValue {
   selectedTool: AnnotationType | null;
   /** Set the current annotation tool */
   setSelectedTool: (tool: AnnotationType | null) => void;
+  /** Stroke color for the draw (pen) tool (CSS color string) */
+  drawColor: string;
+  /** Set the draw tool stroke color */
+  setDrawColor: (color: string) => void;
+  /** Stroke width for the draw (pen) tool (logical px at scale=1) */
+  drawStrokeWidth: number;
+  /** Set the draw tool stroke width */
+  setDrawStrokeWidth: (width: number) => void;
+  /** Id of the currently selected draw stroke (canvas annotation), or null */
+  selectedDrawId: string | null;
+  /** Select a draw stroke by id (null clears the selection) */
+  setSelectedDrawId: (id: string | null) => void;
+  /** Fill color for the highlight tool (CSS color string) */
+  highlightColor: string;
+  /** Set the highlight tool color */
+  setHighlightColor: (color: string) => void;
   /** Whether inline text-editing mode is active */
   isEditMode: boolean;
   /** Toggle inline text-editing mode */
@@ -84,6 +102,10 @@ export function useAnnotation(): IAnnotationContextValue {
 
 export function AnnotationContextProvider({ children }: { children: React.ReactNode }) {
   const [selectedTool, _setSelectedTool] = useState<AnnotationType | null>(null);
+  const [drawColor, setDrawColor] = useState<string>(DRAW_TOOL_DEFAULTS.COLOR);
+  const [drawStrokeWidth, setDrawStrokeWidth] = useState<number>(DRAW_TOOL_DEFAULTS.STROKE_WIDTH);
+  const [selectedDrawId, setSelectedDrawId] = useState<string | null>(null);
+  const [highlightColor, setHighlightColor] = useState<string>(HIGHLIGHT_TOOL_DEFAULTS.COLOR);
   const [isEditMode, _setIsEditMode] = useState(false);
   const [annotationStack, setAnnotationStack] = useState<IAnnotation[]>([]);
   const [renderVersion, setRenderVersion] = useState(0);
@@ -107,6 +129,8 @@ export function AnnotationContextProvider({ children }: { children: React.ReactN
   const setSelectedTool = useCallback((tool: AnnotationType | null) => {
     _setSelectedTool(tool);
     if (tool) _setIsEditMode(false);
+    // A draw selection only makes sense while the draw tool is active.
+    if (tool !== 'draw') setSelectedDrawId(null);
   }, []);
 
   const setIsEditMode = useCallback(
@@ -200,6 +224,41 @@ export function AnnotationContextProvider({ children }: { children: React.ReactN
     },
     [history],
   );
+
+  // Drop a stale selection if the stroke is gone (e.g. removed via undo/redo).
+  // Queued via microtask so the clear lands after this render rather than
+  // synchronously inside the effect (which the cascading-render lint rule rejects).
+  useEffect(() => {
+    if (selectedDrawId && !annotationStack.some((a) => a.id === selectedDrawId)) {
+      queueMicrotask(() => setSelectedDrawId(null));
+    }
+  }, [annotationStack, selectedDrawId]);
+
+  // Delete / Escape handling for a selected draw stroke. Mirrors the text box
+  // behavior but lives here because strokes are canvas-rendered (no DOM node of
+  // their own to receive key events). Ignored while typing into a field so it
+  // never hijacks the caret.
+  useEffect(() => {
+    if (!selectedDrawId) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target) {
+        const tag = target.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable) {
+          return;
+        }
+      }
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        e.preventDefault();
+        removeAnnotation(selectedDrawId, true);
+        setSelectedDrawId(null);
+      } else if (e.key === 'Escape') {
+        setSelectedDrawId(null);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [selectedDrawId, removeAnnotation]);
 
   const addAnnotation = useCallback(
     (annotation: IAnnotation) => {
@@ -332,6 +391,14 @@ export function AnnotationContextProvider({ children }: { children: React.ReactN
     () => ({
       selectedTool,
       setSelectedTool,
+      drawColor,
+      setDrawColor,
+      drawStrokeWidth,
+      setDrawStrokeWidth,
+      selectedDrawId,
+      setSelectedDrawId,
+      highlightColor,
+      setHighlightColor,
       isEditMode,
       setIsEditMode,
       addAnnotation,
@@ -354,6 +421,10 @@ export function AnnotationContextProvider({ children }: { children: React.ReactN
       consumeNewAnnotation,
       selectedTool,
       setSelectedTool,
+      drawColor,
+      drawStrokeWidth,
+      selectedDrawId,
+      highlightColor,
       isEditMode,
       setIsEditMode,
       setNativeAnnotationsForPage,

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Bold, Italic, Minus, Plus, Trash2 } from 'lucide-react';
 import { cn } from '@pdfviewer/ui/lib/utils';
 import { TEXT_ANNOTATION_DEFAULTS, TEXT_COLOR_PRESETS } from '../../annotations';
+import { colorKey, hexToRgbString, rgbStringToHex } from '../../utils/color';
 
 export interface ITextStyleToolbarProps {
   /** Current font size in logical points (scale-independent) */
@@ -17,30 +18,6 @@ export interface ITextStyleToolbarProps {
   onDelete: () => void;
   /** Render above or below the text box, depending on available room */
   placement: 'above' | 'below';
-}
-
-/** Normalize any CSS rgb()/hex string to a compact `r,g,b` key for comparison. */
-function colorKey(color: string): string {
-  const m = /rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i.exec(color);
-  if (m) return `${+m[1]},${+m[2]},${+m[3]}`;
-  const hex = /^#([0-9a-f]{6})$/i.exec(color);
-  if (hex) {
-    const n = parseInt(hex[1], 16);
-    return `${(n >> 16) & 255},${(n >> 8) & 255},${n & 255}`;
-  }
-  return color;
-}
-
-function rgbStringToHex(color: string): string {
-  const m = /rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i.exec(color);
-  if (!m) return '#000000';
-  const toHex = (v: string) => Math.min(255, +v).toString(16).padStart(2, '0');
-  return `#${toHex(m[1])}${toHex(m[2])}${toHex(m[3])}`;
-}
-
-function hexToRgbString(hex: string): string {
-  const n = parseInt(hex.replace('#', ''), 16);
-  return `rgb(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255})`;
 }
 
 const iconBtn =

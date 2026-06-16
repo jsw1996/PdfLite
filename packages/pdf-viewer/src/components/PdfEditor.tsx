@@ -7,6 +7,7 @@ import { Viewer } from './Viewer/Viewer';
 import { SidebarInset } from '@pdfviewer/ui/components/sidebar';
 import { AppSidebar } from './SideBar/SideBar';
 import { Header } from './Header/Header';
+import { StyleDock } from './Toolbar/StyleDock';
 import { PdfStateContextProvider } from '@/providers/PdfStateContextProvider';
 import { OpenPasswordDialog } from '@/components/PasswordDialog/OpenPasswordDialog';
 import { PdfPasswordError } from '@pdfviewer/controller';
@@ -50,7 +51,10 @@ const PdfEditorContent: React.FC<{
       <AppSidebar file={file} isFileLoaded={isFileLoaded} />
       <SidebarInset className="h-svh min-h-0 overflow-hidden">
         <Header fileName={file.name} centerButtons={buttons} rightButtons={rightButtons} />
-        <div className="flex-1 min-h-0">{renderContent()}</div>
+        <div className="relative flex-1 min-h-0">
+          {renderContent()}
+          <StyleDock />
+        </div>
       </SidebarInset>
     </>
   );

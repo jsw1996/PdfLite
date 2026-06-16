@@ -5,6 +5,7 @@ import { Separator } from '@pdfviewer/ui/components/separator';
 import { useCallback, useMemo } from 'react';
 import { useAnnotation } from '../../providers/AnnotationContextProvider';
 import { EditTextButtonId } from '../ToolButtons/EditTextButton';
+import { SelectButtonId } from '../ToolButtons/SelectButton';
 import { cn } from '@pdfviewer/ui/lib/utils';
 
 const ANNOTATION_TOOL_IDS: Record<string, AnnotationType> = {
@@ -26,6 +27,13 @@ export function ToolBar({ buttons, boardered }: IToobarProps) {
     (toolId: string | null) => {
       if (toolId === EditTextButtonId) {
         setIsEditMode(!isEditMode);
+        return;
+      }
+
+      // Select is the neutral cursor: clicking it deactivates every other tool.
+      if (toolId === SelectButtonId) {
+        setSelectedTool(null);
+        if (isEditMode) setIsEditMode(false);
         return;
       }
 
@@ -62,7 +70,9 @@ export function ToolBar({ buttons, boardered }: IToobarProps) {
         <div key={index} className="flex flex-row items-center">
           <ToolGroup
             buttons={groupButtons}
-            activeToolId={isEditMode ? EditTextButtonId : selectedTool}
+            // Fall back to Select so the cursor tool reads as active when no
+            // annotation tool or edit mode is engaged.
+            activeToolId={isEditMode ? EditTextButtonId : (selectedTool ?? SelectButtonId)}
             onActivate={handleActivate}
           />
           {index < buttonsByGroup.length - 1 && (

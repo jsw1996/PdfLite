@@ -6,8 +6,7 @@ import {
   type AnnotationType,
   generateAnnotationId,
   chaikinSmooth,
-  ANNOTATION_COLORS,
-  ANNOTATION_STROKE_WIDTH,
+  DRAW_TOOL_DEFAULTS,
 } from '../annotations';
 
 interface ICanvasMetrics {
@@ -24,6 +23,10 @@ export interface IUseInkOptions {
   metrics: ICanvasMetrics | null;
   selectedTool: AnnotationType | null;
   pageIndex: number;
+  /** Stroke color for the draw tool (CSS color string) */
+  drawColor?: string;
+  /** Stroke width for the draw tool (logical px at scale=1) */
+  drawStrokeWidth?: number;
   onAddAnnotation: (annotation: IAnnotation) => void;
   onCommitHighlight?: (args: { pageIndex: number; canvasPoints: IPoint[] }) => void;
 }
@@ -47,6 +50,8 @@ export function useInk({
   metrics,
   selectedTool,
   pageIndex,
+  drawColor = DRAW_TOOL_DEFAULTS.COLOR,
+  drawStrokeWidth = DRAW_TOOL_DEFAULTS.STROKE_WIDTH,
   onAddAnnotation,
 }: IUseInkOptions): IUseInkResult {
   const [isDrawing, setIsDrawing] = useState(false);
@@ -85,15 +90,15 @@ export function useInk({
       ctx.setTransform(sx, 0, 0, sy, 0, 0);
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
-      ctx.strokeStyle = ANNOTATION_COLORS.DRAW;
-      ctx.lineWidth = ANNOTATION_STROKE_WIDTH.DRAW;
+      ctx.strokeStyle = drawColor;
+      ctx.lineWidth = drawStrokeWidth;
       ctx.beginPath();
       ctx.moveTo(from.x, from.y);
       ctx.lineTo(to.x, to.y);
       ctx.stroke();
       ctx.restore();
     },
-    [canvasRef, metrics],
+    [canvasRef, metrics, drawColor, drawStrokeWidth],
   );
 
   const finish = useCallback(() => {
@@ -115,8 +120,8 @@ export function useInk({
         source: 'overlay',
         pageIndex,
         points: chaikinSmooth(path),
-        color: ANNOTATION_COLORS.DRAW,
-        strokeWidth: ANNOTATION_STROKE_WIDTH.DRAW,
+        color: drawColor,
+        strokeWidth: drawStrokeWidth,
         createdAt: Date.now(),
       };
       onAddAnnotation(annotation);
@@ -124,7 +129,7 @@ export function useInk({
 
     setIsDrawing(false);
     currentPathRef.current = [];
-  }, [isDrawing, onAddAnnotation, pageIndex, selectedTool]);
+  }, [drawColor, drawStrokeWidth, isDrawing, onAddAnnotation, pageIndex, selectedTool]);
 
   const onPointerDown = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>) => {

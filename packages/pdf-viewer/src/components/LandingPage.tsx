@@ -1,21 +1,35 @@
-import React, { useRef, useState } from 'react';
-import { Upload, Sparkles, FileText, Zap } from 'lucide-react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Moon, Sun, Upload, Lock } from 'lucide-react';
 
 interface ILandingPageProps {
   onFileSelect: (file: File) => void;
 }
 
 const MAX_PDF_BYTES = 512 * 1024 * 1024;
+const THEME_STORAGE_KEY = 'pdf-viewer-theme';
+
+type Theme = 'light' | 'dark';
+
+const CAPABILITIES = [
+  'View',
+  'Annotate',
+  'Highlight',
+  'Draw',
+  'Add text',
+  'Sign',
+  'Fill forms',
+  'Export',
+];
 
 function validatePdfFile(file: File): string | null {
   const isPdfType = file.type === 'application/pdf' || file.type === '';
   const hasPdfExt = file.name.toLowerCase().endsWith('.pdf');
-  if (!isPdfType || !hasPdfExt) return 'Please upload a valid PDF file.';
+  if (!isPdfType || !hasPdfExt) return 'That doesn’t look like a PDF. Try a .pdf file.';
   if (file.size > MAX_PDF_BYTES) {
     const mb = Math.round(MAX_PDF_BYTES / (1024 * 1024));
-    return `File is too large (max ${mb} MB).`;
+    return `That file is over the ${mb} MB limit.`;
   }
-  if (file.size === 0) return 'File is empty.';
+  if (file.size === 0) return 'That file is empty.';
   return null;
 }
 
@@ -40,31 +54,61 @@ async function hasPdfMagicBytes(file: File): Promise<boolean> {
   }
 }
 
+function getInitialTheme(): Theme {
+  if (typeof window === 'undefined') return 'light';
+  const stored = localStorage.getItem(THEME_STORAGE_KEY);
+  if (stored === 'light' || stored === 'dark') return stored;
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+
 export const LandingPage: React.FC<ILandingPageProps> = ({ onFileSelect }) => {
   const inputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [mounted, setMounted] = useState(false);
+  const [theme, setTheme] = useState<Theme>(getInitialTheme);
+
+  // Landing renders outside ThemeContextProvider, so it owns the document class
+  // here (using the same storage key, so the choice carries into the editor).
+  useEffect(() => {
+    const root = document.documentElement;
+    root.classList.toggle('dark', theme === 'dark');
+    localStorage.setItem(THEME_STORAGE_KEY, theme);
+  }, [theme]);
+
+  // Entrance: flip after first paint so the settle animation runs.
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setMounted(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(true);
   };
 
-  const handleDragLeave = () => {
+  const handleDragLeave = (e: React.DragEvent) => {
+    // Ignore drag-leave bubbling from children; only clear when leaving the zone.
+    if (e.currentTarget.contains(e.relatedTarget as Node)) return;
     setIsDragging(false);
   };
 
-  const acceptFile = async (file: File) => {
-    const error = validatePdfFile(file);
-    if (error) {
-      alert(error);
-      return;
-    }
-    if (!(await hasPdfMagicBytes(file))) {
-      alert('This file does not appear to be a valid PDF.');
-      return;
-    }
-    onFileSelect(file);
-  };
+  const acceptFile = useCallback(
+    async (file: File) => {
+      const validationError = validatePdfFile(file);
+      if (validationError) {
+        setError(validationError);
+        return;
+      }
+      if (!(await hasPdfMagicBytes(file))) {
+        setError('This file isn’t a readable PDF. It may be corrupted.');
+        return;
+      }
+      setError(null);
+      onFileSelect(file);
+    },
+    [onFileSelect],
+  );
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
@@ -80,138 +124,241 @@ export const LandingPage: React.FC<ILandingPageProps> = ({ onFileSelect }) => {
     e.target.value = '';
   };
 
+  const openPicker = () => inputRef.current?.click();
+
+  const handleZoneKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      openPicker();
+    }
+  };
+
+  const reveal = 'transition-all duration-700 ease-[cubic-bezier(0.16,1,0.3,1)]';
+  const gridLine = theme === 'dark' ? 'oklch(0.7 0.01 250 / 0.10)' : 'oklch(0.55 0.01 250 / 0.08)';
+
   return (
-    <div className="min-h-screen bg-background relative overflow-hidden">
-      {/* Playful gradient background */}
-      <div className="absolute inset-0 gradient-playful" />
+    <div className="text-foreground bg-background relative flex min-h-screen flex-col overflow-hidden">
+      {/* Drafting-mat grid — a precise instrument, not a gradient blob */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0"
+        style={{
+          backgroundImage: `linear-gradient(${gridLine} 1px, transparent 1px), linear-gradient(90deg, ${gridLine} 1px, transparent 1px)`,
+          backgroundSize: '34px 34px',
+          maskImage: 'radial-gradient(115% 95% at 70% 18%, black 35%, transparent 100%)',
+          WebkitMaskImage: 'radial-gradient(115% 95% at 70% 18%, black 35%, transparent 100%)',
+        }}
+      />
 
-      {/* Animated background shapes */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute -top-40 -right-40 w-96 h-96 bg-primary/10 rounded-full blur-3xl animate-pulse" />
-        <div className="absolute -bottom-40 -left-40 w-96 h-96 bg-accent/10 rounded-full blur-3xl animate-pulse [animation-delay:1s]" />
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-primary/5 rounded-full blur-3xl" />
-      </div>
-
-      {/* Content */}
-      <div className="relative z-10 flex flex-col min-h-screen">
-        {/* Navigation */}
-        <nav className="flex items-center justify-between px-6 md:px-8 py-5 max-w-7xl mx-auto w-full">
-          <div className="flex items-center gap-3 group cursor-pointer">
-            <div className="relative">
-              <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center text-primary-foreground font-bold text-lg shadow-lg shadow-primary/25 transition-transform duration-200 group-hover:scale-105">
-                L
-              </div>
-              <div className="absolute -inset-1 bg-primary rounded-xl opacity-0 group-hover:opacity-20 blur transition-opacity duration-200" />
-            </div>
-            <span className="text-xl font-bold text-foreground tracking-tight">Lumina</span>
+      {/* Header */}
+      <header className="relative z-10 mx-auto flex w-full max-w-6xl items-center justify-between px-6 py-6 md:px-10">
+        <div className="flex items-center gap-2.5">
+          <div className="bg-primary text-primary-foreground grid h-8 w-8 place-items-center rounded-[0.55rem] font-bold shadow-sm">
+            {/* page-corner mark */}
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden>
+              <path
+                d="M3.5 1.5h6L13 5v9.5a.9.9 0 0 1-.9.9H3.5a.9.9 0 0 1-.9-.9V2.4a.9.9 0 0 1 .9-.9Z"
+                stroke="currentColor"
+                strokeWidth="1.4"
+                strokeLinejoin="round"
+              />
+              <path
+                d="M9.2 1.7v3.4h3.4"
+                stroke="currentColor"
+                strokeWidth="1.4"
+                strokeLinejoin="round"
+              />
+            </svg>
           </div>
-          <button className="px-4 py-2 text-sm font-medium text-muted-foreground hover:text-foreground bg-secondary/50 hover:bg-secondary rounded-xl transition-all duration-200 cursor-pointer">
-            Sign In
-          </button>
-        </nav>
+          <span className="text-[1.05rem] font-semibold tracking-tight">Pdflare</span>
+        </div>
 
-        {/* Hero Content */}
-        <main className="flex-1 flex flex-col items-center justify-center px-4 py-8 md:py-12 text-center max-w-5xl mx-auto w-full">
-          {/* Badge */}
-          <div className="inline-flex items-center gap-2 px-4 py-2 bg-accent dark:bg-primary/15 rounded-full mb-8 border border-primary/20">
-            <Sparkles className="w-4 h-4 text-primary-emphasis" />
-            <span className="text-sm font-medium text-primary-emphasis">
-              AI-Powered PDF Experience
+        <div className="flex items-center gap-4">
+          <span className="text-muted-foreground hidden font-mono text-xs sm:inline">
+            v1.0 · runs locally
+          </span>
+          <button
+            type="button"
+            onClick={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
+            aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+            className="border-border text-muted-foreground hover:text-foreground hover:bg-secondary focus-visible:ring-ring grid h-9 w-9 place-items-center rounded-lg border transition-colors focus-visible:ring-2 focus-visible:outline-none"
+          >
+            {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+          </button>
+        </div>
+      </header>
+
+      {/* Main */}
+      <main className="relative z-10 mx-auto flex w-full max-w-6xl flex-1 flex-col items-center gap-12 px-6 py-8 md:px-10 lg:grid lg:grid-cols-[1fr_minmax(340px,420px)] lg:items-center lg:gap-16">
+        {/* Left — the statement */}
+        <div className="max-w-xl text-center lg:text-left">
+          <h1
+            className={`text-foreground text-4xl font-semibold tracking-[-0.03em] text-balance sm:text-5xl lg:text-[3.5rem] lg:leading-[1.04] ${reveal} motion-reduce:translate-y-0 motion-reduce:opacity-100 ${
+              mounted ? 'translate-y-0 opacity-100' : 'translate-y-3 opacity-0'
+            }`}
+          >
+            Your PDFs,
+            <br />
+            handled right here.
+          </h1>
+
+          <p
+            className={`text-muted-foreground mx-auto mt-6 max-w-md text-base leading-relaxed text-pretty lg:mx-0 lg:text-lg ${reveal} delay-100 motion-reduce:translate-y-0 motion-reduce:opacity-100 ${
+              mounted ? 'translate-y-0 opacity-100' : 'translate-y-3 opacity-0'
+            }`}
+          >
+            A fast, precise workspace for reading, annotating, and signing PDFs — running entirely
+            in your browser.
+          </p>
+
+          {/* Capability line — plainly stated, mono voice */}
+          <ul
+            className={`text-muted-foreground mt-7 flex flex-wrap justify-center gap-x-3 gap-y-1.5 font-mono text-[0.78rem] lg:justify-start ${reveal} delay-200 motion-reduce:translate-y-0 motion-reduce:opacity-100 ${
+              mounted ? 'translate-y-0 opacity-100' : 'translate-y-3 opacity-0'
+            }`}
+          >
+            {CAPABILITIES.map((cap, i) => (
+              <li key={cap} className="flex items-center gap-3">
+                <span className="whitespace-nowrap">{cap}</span>
+                {i < CAPABILITIES.length - 1 && (
+                  <span aria-hidden className="text-border select-none">
+                    ·
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+
+          {/* Privacy — the real differentiator vs. cloud PDF tools */}
+          <div
+            className={`text-secondary-foreground mt-8 inline-flex items-center gap-2.5 ${reveal} delay-300 motion-reduce:translate-y-0 motion-reduce:opacity-100 ${
+              mounted ? 'translate-y-0 opacity-100' : 'translate-y-3 opacity-0'
+            }`}
+          >
+            <span className="bg-accent text-primary-emphasis grid h-7 w-7 place-items-center rounded-full">
+              <Lock className="h-3.5 w-3.5" strokeWidth={2.2} />
+            </span>
+            <span className="text-sm font-medium">
+              Files never leave your device.{' '}
+              <span className="text-muted-foreground font-normal">Nothing uploads.</span>
             </span>
           </div>
+        </div>
 
-          <div className="space-y-6 mb-12">
-            <h1 className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-extrabold text-foreground tracking-tight leading-[1.1] text-balance">
-              Documents that
-              <br />
-              <span className="text-primary-emphasis">come alive.</span>
-            </h1>
-            <p className="text-lg md:text-xl text-muted-foreground max-w-2xl mx-auto leading-relaxed">
-              A blazing-fast, beautifully crafted PDF viewer.
-              <br className="hidden sm:block" />
-              Drop your file and experience the difference.
-            </p>
-          </div>
+        {/* Right — the paper sheet IS the drop zone */}
+        <div
+          role="button"
+          tabIndex={0}
+          aria-label="Open a PDF — drop a file here or press Enter to browse"
+          onClick={openPicker}
+          onKeyDown={handleZoneKeyDown}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+          className={`group focus-visible:ring-ring relative mx-auto w-full max-w-[360px] cursor-pointer rounded-[0.4rem] focus-visible:ring-2 focus-visible:ring-offset-4 focus-visible:ring-offset-background focus-visible:outline-none ${reveal} motion-reduce:translate-y-0 motion-reduce:rotate-0 motion-reduce:opacity-100 ${
+            mounted
+              ? 'translate-y-0 rotate-[1.4deg] opacity-100'
+              : 'translate-y-6 rotate-[-2deg] opacity-0'
+          } ${isDragging ? '!rotate-0 -translate-y-1.5 scale-[1.015]' : 'hover:rotate-0 hover:-translate-y-1'}`}
+        >
+          <input
+            type="file"
+            ref={inputRef}
+            onChange={handleInputChange}
+            accept="application/pdf"
+            className="hidden"
+          />
 
-          {/* Upload Zone */}
+          {/* The sheet */}
           <div
-            className={`
-              w-full max-w-xl relative group cursor-pointer
-              transition-all duration-300
-              ${isDragging ? 'scale-[1.02]' : 'hover:scale-[1.01]'}
-            `}
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-            onDrop={handleDrop}
-            onClick={() => inputRef.current?.click()}
+            className={`relative aspect-[51/66] overflow-hidden rounded-[0.4rem] border transition-[box-shadow,border-color,background-color] duration-300 ${
+              isDragging ? 'border-primary' : 'border-border/70 group-hover:border-border'
+            }`}
+            style={{
+              background: theme === 'dark' ? 'oklch(0.93 0.003 250)' : 'oklch(0.995 0 0)',
+              boxShadow: isDragging
+                ? '0 28px 60px -18px var(--glow-primary), 0 10px 24px -12px rgba(0,0,0,0.28)'
+                : '0 22px 50px -20px rgba(0,0,0,0.32), 0 6px 14px -10px rgba(0,0,0,0.18)',
+            }}
           >
-            {/* Glow effect */}
+            {/* Faux document content — reads as "a page" without competing */}
             <div
-              className={`
-                absolute -inset-1 rounded-3xl bg-primary opacity-0 blur-xl transition-opacity duration-300
-                ${isDragging ? 'opacity-40' : 'group-hover:opacity-20'}
-              `}
+              aria-hidden
+              className={`absolute inset-0 px-7 pt-8 transition-opacity duration-300 ${
+                isDragging ? 'opacity-20' : 'opacity-100'
+              }`}
+              style={{ color: 'oklch(0.18 0.004 250)' }}
+            >
+              <div className="space-y-2.5">
+                <div className="h-2 w-1/2 rounded-full bg-current opacity-[0.16]" />
+                <div className="mt-5 h-1.5 w-full rounded-full bg-current opacity-[0.09]" />
+                <div className="h-1.5 w-[92%] rounded-full bg-current opacity-[0.09]" />
+                {/* the brand spark: one highlighted line */}
+                <div className="bg-primary h-1.5 w-[78%] rounded-full opacity-90" />
+                <div className="h-1.5 w-[88%] rounded-full bg-current opacity-[0.09]" />
+                <div className="h-1.5 w-[60%] rounded-full bg-current opacity-[0.09]" />
+              </div>
+            </div>
+
+            {/* Folded top-right corner */}
+            <div
+              aria-hidden
+              className="absolute right-0 top-0"
+              style={{
+                width: '36px',
+                height: '36px',
+                background:
+                  theme === 'dark'
+                    ? 'linear-gradient(225deg, oklch(0.82 0.004 250) 0 50%, transparent 50%)'
+                    : 'linear-gradient(225deg, oklch(0.9 0.004 250) 0 50%, transparent 50%)',
+                clipPath: 'polygon(100% 0, 0 0, 100% 100%)',
+                boxShadow: '-2px 2px 4px -2px rgba(0,0,0,0.18)',
+              }}
             />
 
-            {/* Card */}
-            <div
-              className={`
-                relative bg-card/80 dark:bg-card/60 backdrop-blur-xl rounded-2xl p-8 md:p-10 
-                border-2 border-dashed transition-all duration-300
-                shadow-xl shadow-primary/5
-                ${isDragging ? 'border-primary bg-primary/5 dark:bg-primary/10' : 'border-border hover:border-primary/50'}
-              `}
-            >
-              <input
-                type="file"
-                ref={inputRef}
-                onChange={handleInputChange}
-                accept="application/pdf"
-                className="hidden"
-              />
-
-              <div className="flex flex-col items-center space-y-5">
-                <div
-                  className={`
-                    w-20 h-20 rounded-2xl flex items-center justify-center transition-all duration-300
-                    ${isDragging ? 'bg-primary text-primary-foreground scale-110' : 'bg-secondary text-muted-foreground group-hover:bg-accent group-hover:text-primary-emphasis'}
-                  `}
+            {/* Drop affordance — the clear focal block */}
+            <div className="absolute inset-x-0 bottom-0 flex flex-col items-center gap-3 px-6 pb-9 text-center">
+              <div
+                className={`grid h-14 w-14 place-items-center rounded-2xl transition-all duration-300 ${
+                  isDragging
+                    ? 'bg-primary text-primary-foreground scale-110'
+                    : 'bg-secondary text-secondary-foreground group-hover:bg-accent group-hover:text-primary-emphasis'
+                }`}
+              >
+                <Upload className="h-6 w-6" strokeWidth={1.75} />
+              </div>
+              <div>
+                <p
+                  className="text-[0.95rem] font-semibold"
+                  style={{ color: 'oklch(0.18 0.004 250)' }}
                 >
-                  <Upload className="w-9 h-9" strokeWidth={1.5} />
-                </div>
-                <div className="space-y-2">
-                  <h3 className="text-xl font-semibold text-foreground">
-                    {isDragging ? 'Release to upload' : 'Drop your PDF here'}
-                  </h3>
-                  <p className="text-muted-foreground text-sm">or click to browse your files</p>
-                </div>
+                  {isDragging ? 'Release to open' : 'Drop your PDF here'}
+                </p>
+                <p
+                  className="mt-0.5 font-mono text-[0.72rem]"
+                  style={{ color: 'oklch(0.45 0.005 250)' }}
+                >
+                  {isDragging ? 'one file' : 'or click to browse · PDF up to 512 MB'}
+                </p>
               </div>
             </div>
           </div>
 
-          {/* Features */}
-          <div className="mt-16 grid grid-cols-1 sm:grid-cols-3 gap-6 max-w-3xl mx-auto w-full">
-            {[
-              { icon: Zap, title: 'Lightning Fast', desc: 'WebAssembly powered' },
-              { icon: FileText, title: 'Full Featured', desc: 'Annotate & highlight' },
-              { icon: Sparkles, title: 'Beautiful UI', desc: 'Modern & intuitive' },
-            ].map((feature) => (
-              <div
-                key={feature.title}
-                className="flex flex-col items-center gap-3 p-5 rounded-2xl bg-card/50 dark:bg-card/30 backdrop-blur-sm border border-border/50 hover:border-primary/40 hover:bg-card/80 transition-all duration-200 cursor-pointer"
-              >
-                <div className="w-11 h-11 rounded-xl bg-accent flex items-center justify-center">
-                  <feature.icon className="w-5 h-5 text-primary-emphasis" />
-                </div>
-                <div className="text-center">
-                  <h4 className="font-semibold text-foreground text-sm">{feature.title}</h4>
-                  <p className="text-muted-foreground text-xs mt-0.5">{feature.desc}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </main>
-      </div>
+          {/* Error — inline, never an alert() */}
+          {error && (
+            <p
+              role="alert"
+              className="text-destructive absolute -bottom-9 inset-x-0 text-center text-sm font-medium"
+            >
+              {error}
+            </p>
+          )}
+        </div>
+      </main>
+
+      <footer className="text-muted-foreground relative z-10 mx-auto w-full max-w-6xl px-6 py-6 text-center font-mono text-[0.7rem] md:px-10 lg:text-left">
+        Rendered with PDFium · WebAssembly · no server in the loop
+      </footer>
     </div>
   );
 };

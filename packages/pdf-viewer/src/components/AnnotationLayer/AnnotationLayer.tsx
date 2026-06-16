@@ -53,7 +53,14 @@ export const AnnotationLayer: React.FC<IAnnotationLayerProps> = ({
   containerEl,
   onCommitHighlight,
 }) => {
-  const { selectedTool, addAnnotation, getAnnotationsForPage } = useAnnotation();
+  const {
+    selectedTool,
+    drawColor,
+    drawStrokeWidth,
+    selectedDrawId,
+    addAnnotation,
+    getAnnotationsForPage,
+  } = useAnnotation();
   const annotations = getAnnotationsForPage(pageIndex);
 
   const highlightCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -123,6 +130,8 @@ export const AnnotationLayer: React.FC<IAnnotationLayerProps> = ({
     metrics,
     selectedTool: canInteract ? selectedTool : null,
     pageIndex,
+    drawColor,
+    drawStrokeWidth,
     onAddAnnotation: addAnnotation,
     onCommitHighlight,
   });
@@ -134,6 +143,9 @@ export const AnnotationLayer: React.FC<IAnnotationLayerProps> = ({
     annotations,
     selectedTool,
     currentPathRef,
+    drawColor,
+    drawStrokeWidth,
+    selectedDrawId,
   });
 
   if (!metrics) return null;
