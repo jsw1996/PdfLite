@@ -22,7 +22,10 @@ function App() {
     <ErrorBoundary>
       <ThemeContextProvider>
         <PdfControllerContextProvider>
-          <SidebarProvider style={{ '--sidebar-width': '20rem' } as CSSProperties}>
+          <SidebarProvider
+            defaultOpen={false}
+            style={{ '--sidebar-width': '20rem' } as CSSProperties}
+          >
             <PdfEditor file={file!} />
           </SidebarProvider>
         </PdfControllerContextProvider>
