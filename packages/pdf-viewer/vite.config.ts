@@ -46,5 +46,11 @@ export default defineConfig({
     host: '127.0.0.1',
     port: 5173,
     strictPort: false,
+    watch: {
+      // pnpm symlinks workspace packages (e.g. @pdfviewer/ui) under node_modules, which
+      // Vite's watcher ignores by default — so edits to ui source like globals.css never
+      // trigger HMR. Un-ignore our workspace scope so those files are watched.
+      ignored: ['!**/node_modules/@pdfviewer/**'],
+    },
   },
 });

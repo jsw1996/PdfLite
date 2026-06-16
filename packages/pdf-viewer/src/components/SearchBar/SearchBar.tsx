@@ -184,7 +184,7 @@ export const SearchBar = () => {
 
   return (
     <div className="w-full max-w-xs space-y-2">
-      <div className="relative">
+      <div className="relative w-full">
         <Input
           onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
             if (e.key === 'Enter' && e.shiftKey) {

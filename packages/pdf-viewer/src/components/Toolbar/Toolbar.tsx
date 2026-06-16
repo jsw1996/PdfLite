@@ -43,9 +43,7 @@ export function ToolBar({ buttons, boardered }: IToobarProps) {
 
   const classNames = cn(
     'flex flex-row p-1.5 space-x-1 transition-all duration-200',
-    boardered
-      ? 'bg-secondary/60 dark:bg-muted backdrop-blur-sm border border-border/50 dark:border-foreground/25 rounded-xl shadow-sm dark:shadow-md'
-      : 'bg-transparent',
+    boardered ? 'bg-transparent' : 'bg-transparent',
   );
 
   const buttonsByGroup = useMemo(() => {
