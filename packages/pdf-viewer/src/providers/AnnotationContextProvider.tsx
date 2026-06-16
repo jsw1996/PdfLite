@@ -359,13 +359,8 @@ export function AnnotationContextProvider({ children }: { children: React.ReactN
   );
 
   const commitAnnotations = useCallback(() => {
-    // Check if any flattened annotations exist (text/signature)
-    const hasFlattenedAnnotations = annotationStack.some(
-      (a) => a.source === 'overlay' && (a.type === 'text' || a.type === 'signature'),
-    );
-
     // Commit all overlay annotations to PDFium using handlers.
-    commitAnnotationsToPdfium();
+    const committedAny = commitAnnotationsToPdfium();
     // After commit:
     // - Text and signature annotations are flattened into page content (not real annotations),
     //   so they must be REMOVED from the stack (PDFium won't list them as annotations)
@@ -377,11 +372,15 @@ export function AnnotationContextProvider({ children }: { children: React.ReactN
         .map((a) => ({ ...a, source: 'native' as const })),
     );
 
-    // Increment render version to trigger canvas re-render for flattened content
-    if (hasFlattenedAnnotations) {
+    // Re-render the page bitmap so the just-committed annotations become visible.
+    // This is required because the overlay no longer draws annotations once they
+    // become 'native' (PDFium owns their rendering): flattened text/signature
+    // content AND ink/highlight that transitioned to native are now displayed
+    // solely by the freshly re-rendered bitmap.
+    if (committedAny) {
       setRenderVersion((v) => v + 1);
     }
-  }, [annotationStack, commitAnnotationsToPdfium]);
+  }, [commitAnnotationsToPdfium]);
 
   const bumpRenderVersion = useCallback(() => {
     setRenderVersion((v) => v + 1);

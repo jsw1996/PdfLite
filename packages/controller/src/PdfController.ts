@@ -70,6 +70,12 @@ export interface INativeAnnotation {
   uri?: string;
   /** For LINK annotations: internal destination page index (0-based) */
   destPageIndex?: number;
+  /** For TEXT (sticky note) annotations: the note body text */
+  contents?: string;
+  /** For TEXT (sticky note) annotations: author / title (the "T" entry) */
+  author?: string;
+  /** For TEXT (sticky note) annotations: icon name (e.g. 'Note', 'Comment') */
+  iconName?: string;
 }
 
 export interface IRenderOptions {
@@ -2898,6 +2904,14 @@ export class PdfController implements IPdfController {
               continue;
             }
 
+            // Skip Popup annotations: they are invisible companion objects for
+            // markup annotations (notably the Text/sticky-note popup box) and
+            // must not be drawn as shapes. The note's content is surfaced by the
+            // StickyNoteLayer via its Text annotation instead.
+            if (subtype === FPDF_ANNOTATION_SUBTYPE.POPUP) {
+              continue;
+            }
+
             // color
             pdfium.setValue(rPtr, 0, 'i32');
             pdfium.setValue(gPtr, 0, 'i32');
@@ -3047,29 +3061,61 @@ export class PdfController implements IPdfController {
               continue;
             }
 
-            // fallback: 尝试用 rect 作为一个 polygon
-            const gotRect = pdfium._FPDFAnnot_GetRect_W(annot, rectPtr);
-            if (gotRect) {
-              const f = pdfium.HEAPF32.subarray(rectPtr / 4, rectPtr / 4 + 4);
-              const left = f[0];
-              const bottom = f[1];
-              const right = f[2];
-              const top = f[3];
+            if (subtype === FPDF_ANNOTATION_SUBTYPE.TEXT) {
+              // Sticky note: extract the body text, author and icon name from
+              // the annotation dictionary. The visual note icon is NOT drawn by
+              // PDFium's bitmap pass (Text annotations rarely carry an /AP
+              // stream), so the UI renders its own icon + popup from this data.
+              const keyContents = this.allocUtf8('Contents');
+              const keyT = this.allocUtf8('T');
+              const keyName = this.allocUtf8('Name');
+              let contents = '';
+              let author = '';
+              let iconName = '';
+              try {
+                contents = this.readFormFieldString((buf, len) =>
+                  pdfium._FPDFAnnot_GetStringValue_W(annot, keyContents, buf, len),
+                );
+                author = this.readFormFieldString((buf, len) =>
+                  pdfium._FPDFAnnot_GetStringValue_W(annot, keyT, buf, len),
+                );
+                iconName = this.readFormFieldString((buf, len) =>
+                  pdfium._FPDFAnnot_GetStringValue_W(annot, keyName, buf, len),
+                );
+              } finally {
+                pdfium._free(keyContents);
+                pdfium._free(keyT);
+                pdfium._free(keyName);
+              }
+
+              const gotTextRect = pdfium._FPDFAnnot_GetRect_W(annot, rectPtr);
+              if (!gotTextRect) continue;
+              const tf = pdfium.HEAPF32.subarray(rectPtr / 4, rectPtr / 4 + 4);
               const poly: IPoint[] = [
-                this.pageToCanvasPoint(pagePtr, pageW, pageH, scale, left, top),
-                this.pageToCanvasPoint(pagePtr, pageW, pageH, scale, right, top),
-                this.pageToCanvasPoint(pagePtr, pageW, pageH, scale, right, bottom),
-                this.pageToCanvasPoint(pagePtr, pageW, pageH, scale, left, bottom),
+                this.pageToCanvasPoint(pagePtr, pageW, pageH, scale, tf[0], tf[3]),
+                this.pageToCanvasPoint(pagePtr, pageW, pageH, scale, tf[2], tf[3]),
+                this.pageToCanvasPoint(pagePtr, pageW, pageH, scale, tf[2], tf[1]),
+                this.pageToCanvasPoint(pagePtr, pageW, pageH, scale, tf[0], tf[1]),
               ];
               out.push({
-                id: `native-${pageIndex}-rect-${i}`,
+                id: `native-${pageIndex}-text-${i}`,
                 subtype,
                 shape: 'polygon',
                 points: poly,
                 color,
                 strokeWidth: 0,
+                contents,
+                author: author || undefined,
+                iconName: iconName || undefined,
               });
+              continue;
             }
+
+            // No generic fallback: any other subtype (underline, strikeout,
+            // squiggly, square, circle, free-text, stamp, caret, …) already has
+            // its visual appearance painted into the page bitmap by PDFium's
+            // FPDF_ANNOT render pass. Emitting its bounding rect here would draw
+            // a spurious black box on top of the real markup, so we skip it.
           } finally {
             pdfium._FPDFPage_CloseAnnot_W(annot);
           }
@@ -3626,6 +3672,35 @@ export class PdfController implements IPdfController {
           if (strokeIndex < 0) throw new Error('Failed to add ink stroke');
         } finally {
           pdfium._free(bufPtr);
+        }
+
+        // FPDFAnnot_AddInkStroke does NOT update the annotation's /Rect (it stays
+        // [0,0,0,0]). PDFium-based viewers (Chrome, this app) clip an ink
+        // annotation's generated appearance to its /Rect, so an empty rect
+        // renders nothing — while Edge's Foxit engine derives bounds from the
+        // /InkList and renders regardless. Set the /Rect to the ink bounding box,
+        // padded by the stroke half-width so round caps/joins aren't clipped.
+        const strokeWidthPage = borderWidth ?? 14 / scale;
+        let minX = Infinity;
+        let minY = Infinity;
+        let maxX = -Infinity;
+        let maxY = -Infinity;
+        for (const p of ptsPage) {
+          if (p.x < minX) minX = p.x;
+          if (p.y < minY) minY = p.y;
+          if (p.x > maxX) maxX = p.x;
+          if (p.y > maxY) maxY = p.y;
+        }
+        const pad = strokeWidthPage / 2 + 1;
+        const rectPtr = pdfium._malloc(4 * 4); // FS_RECTF: left, bottom, right, top
+        try {
+          pdfium.HEAPF32[rectPtr / 4 + 0] = minX - pad;
+          pdfium.HEAPF32[rectPtr / 4 + 1] = minY - pad;
+          pdfium.HEAPF32[rectPtr / 4 + 2] = maxX + pad;
+          pdfium.HEAPF32[rectPtr / 4 + 3] = maxY + pad;
+          pdfium._FPDFAnnot_SetRect_W(annot, rectPtr);
+        } finally {
+          pdfium._free(rectPtr);
         }
 
         // No FPDFPage_GenerateContent needed here: this is an annotation (not a
