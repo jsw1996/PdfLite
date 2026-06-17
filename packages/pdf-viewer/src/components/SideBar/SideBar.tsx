@@ -57,7 +57,7 @@ export function AppSidebar({ file, isFileLoaded }: IAppSidebarProps) {
 
   const itemContent = useCallback(
     (index: number) => (
-      <div className="px-3 pb-0.5 pt-0.5">
+      <div className="px-1.5 pb-0.5 pt-0.5">
         <PagePreview page={index} />
       </div>
     ),
