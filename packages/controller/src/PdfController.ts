@@ -324,12 +324,14 @@ export class PdfController implements IPdfController {
    */
   private editPageReplaceOnly = new Set<number>();
   /**
-   * EXPERIMENTAL A/B toggle. When true, getPageTextContent uses the logical
-   * character-stream extraction (FPDFText_GetText / GetCharBox — the pdf.js
-   * model) instead of the geometry-first FPDFText_GetRect + mergeAdjacentTextRects
-   * path. Only affects unedited pages; edited pages still route through the
-   * page-object path because FPDFText_* is corrupted after GenerateContent.
-   * Flip at runtime and re-render to compare. See getPageTextContentViaGetText.
+   * Master enable for the logical character-stream extraction path
+   * (FPDFText_GetText / GetCharBox — the pdf.js model). When enabled,
+   * getPageTextContent routes ONLY rotated pages (intrinsic /Rotate) through it;
+   * upright pages use the geometry-first FPDFText_GetRect + mergeAdjacentTextRects
+   * path, whose column heuristic relies on display-space rect geometry. Only
+   * affects unedited pages; edited pages still route through the page-object path
+   * because FPDFText_* is corrupted after GenerateContent. Set false to disable
+   * the logical path entirely. See getPageTextContentViaGetText / isPageRotated.
    */
   public useLogicalTextExtraction = true;
   /**
@@ -341,6 +343,14 @@ export class PdfController implements IPdfController {
    * Cleared in closeCurrentDocument() when a new document is loaded.
    */
   private pageDimensionCache = new Map<number, IPageDimension>();
+  /**
+   * Cache of per-page rotation state (true = intrinsic /Rotate is non-zero),
+   * keyed by page index. Rotation is immutable for a loaded document, so the
+   * probe (a pair of DeviceToPage calls) runs once per page. Used by
+   * getPageTextContent to route rotated pages through the logical extraction
+   * path. Cleared in closeCurrentDocument().
+   */
+  private pageRotationCache = new Map<number, boolean>();
   private static toImagePdfium(pdfium: IPDFiumModule): IPDFiumModule & {
     _FPDFImageObj_SetBitmap_W: (
       pagesPtr: number,
@@ -668,6 +678,76 @@ export class PdfController implements IPdfController {
     }
   }
 
+  /**
+   * Detect whether a page has a non-zero intrinsic rotation (/Rotate of 90, 180
+   * or 270). PDFium exposes no rotation getter in this build, but FPDF_DeviceToPage
+   * applies the page's display matrix — which encodes rotation — so we probe it:
+   * map the device X axis (left edge → right edge) back into page space. On an
+   * upright page (rotation 0) that vector points along page +X; any rotation
+   * tilts or flips it. Two DeviceToPage calls, no WASM rebuild required.
+   */
+  private isPageRotated(pagePtr: number, deviceWidth: number, deviceHeight: number): boolean {
+    const { pdfium } = this.requireDoc();
+    const pageXPtr = pdfium._malloc(8); // double
+    const pageYPtr = pdfium._malloc(8); // double
+    const probe = (deviceX: number): IPoint => {
+      pdfium._PDFium_DeviceToPage(
+        pagePtr,
+        0,
+        0,
+        deviceWidth,
+        deviceHeight,
+        0, // rotate = 0 (the page's own /Rotate is still applied)
+        deviceX,
+        0,
+        pageXPtr,
+        pageYPtr,
+      );
+      return {
+        x: pdfium.getValue(pageXPtr, 'double'),
+        y: pdfium.getValue(pageYPtr, 'double'),
+      };
+    };
+    try {
+      const origin = probe(0);
+      const alongDeviceX = probe(deviceWidth);
+      const dx = alongDeviceX.x - origin.x;
+      const dy = alongDeviceX.y - origin.y;
+      // Upright iff device +X maps to a predominantly positive page-X step.
+      const upright = Math.abs(dx) >= Math.abs(dy) && dx > 0;
+      return !upright;
+    } finally {
+      pdfium._free(pageXPtr);
+      pdfium._free(pageYPtr);
+    }
+  }
+
+  /**
+   * Cached rotation lookup by page index. Loads the page (reusing the edit-mode
+   * handle when present) only on a cache miss; rotation never changes for a
+   * loaded document.
+   */
+  private isPageRotatedByIndex(pageIndex: number): boolean {
+    const cached = this.pageRotationCache.get(pageIndex);
+    if (cached !== undefined) return cached;
+
+    const { pdfium, docPtr } = this.requireDoc();
+    const cachedEditPage = this.editPageCache.get(pageIndex);
+    const pagePtr = cachedEditPage ?? pdfium._PDFium_LoadPage(docPtr, pageIndex);
+    if (!pagePtr) return false;
+    try {
+      const deviceWidth = Math.max(1, Math.round(pdfium._PDFium_GetPageWidth(pagePtr)));
+      const deviceHeight = Math.max(1, Math.round(pdfium._PDFium_GetPageHeight(pagePtr)));
+      const rotated = this.isPageRotated(pagePtr, deviceWidth, deviceHeight);
+      this.pageRotationCache.set(pageIndex, rotated);
+      return rotated;
+    } finally {
+      if (!cachedEditPage) {
+        pdfium._PDFium_ClosePage(pagePtr);
+      }
+    }
+  }
+
   // single-flight pattern to ensure only one instance of the PDFium module is created
   public ensureInitialized(): Promise<void> {
     if (this.pdfiumModule) return Promise.resolve();
@@ -715,6 +795,7 @@ export class PdfController implements IPdfController {
     this.editPageReplaceOnly.clear();
     this.generatedPages.clear();
     this.pageDimensionCache.clear();
+    this.pageRotationCache.clear();
     this.closeFormFillEnvironment();
     if (this.docPtr) {
       this.pdfiumModule._PDFium_CloseDocument(this.docPtr);
@@ -1129,9 +1210,12 @@ export class PdfController implements IPdfController {
       return this.getPageTextContentFromObjects(pageIndex);
     }
 
-    // EXPERIMENTAL: logical character-stream path (A/B toggle). Edited pages
-    // already returned above, so this only ever runs on unedited pages.
-    if (this.useLogicalTextExtraction) {
+    // Rotated pages (intrinsic /Rotate) use the logical character-stream path:
+    // it walks PDFium's reading order, and the geometry path's column heuristic
+    // is unreliable on rotated geometry. Upright pages fall through to the
+    // geometry-first path below. Edited pages already returned above, so this
+    // only ever runs on unedited pages.
+    if (this.useLogicalTextExtraction && this.isPageRotatedByIndex(pageIndex)) {
       return this.getPageTextContentViaGetText(pageIndex);
     }
 
@@ -1379,6 +1463,51 @@ export class PdfController implements IPdfController {
       const fillBPtr = pdfium._malloc(4);
       const fillAPtr = pdfium._malloc(4);
       const flagsPtr = pdfium._malloc(4);
+      const devXPtr = pdfium._malloc(4);
+      const devYPtr = pdfium._malloc(4);
+
+      // Page→device linear basis (PDFium_PageToDevice applies the page's own
+      // /Rotate). vX/vY are the device-space vectors for one page-space X/Y unit,
+      // so we can map any page-space delta into device space with plain
+      // arithmetic — no per-character WASM calls. Used to measure the text's
+      // actual reading direction in device space below.
+      const probeDevice = (px: number, py: number): IPoint => {
+        pdfium._PDFium_PageToDevice(
+          pagePtr,
+          0,
+          0,
+          deviceWidth,
+          deviceHeight,
+          0,
+          px,
+          py,
+          devXPtr,
+          devYPtr,
+        );
+        return { x: pdfium.getValue(devXPtr, 'i32'), y: pdfium.getValue(devYPtr, 'i32') };
+      };
+      const probeSpan = 100;
+      const probeOrigin = probeDevice(0, 0);
+      const probeX = probeDevice(probeSpan, 0);
+      const probeY = probeDevice(0, probeSpan);
+      const vX = {
+        x: (probeX.x - probeOrigin.x) / probeSpan,
+        y: (probeX.y - probeOrigin.y) / probeSpan,
+      };
+      const vY = {
+        x: (probeY.x - probeOrigin.x) / probeSpan,
+        y: (probeY.y - probeOrigin.y) / probeSpan,
+      };
+
+      // Accumulated device-space advance of consecutive same-line characters.
+      // Its dominant axis + sign reveals how the rendered text reads (LTR,
+      // top-to-bottom, …) independent of the page's /Rotate, which alone can't
+      // tell an upright landscape page (sideways-authored + /Rotate) apart from
+      // a genuinely sideways one.
+      let sumDevDx = 0;
+      let sumDevDy = 0;
+      let prevCenterX: number | null = null;
+      let prevCenterY: number | null = null;
 
       const textRects: ITextRect[] = [];
 
@@ -1475,6 +1604,8 @@ export class PdfController implements IPdfController {
           // Hard line breaks PDFium inserts between visual lines.
           if (u === 0x0a) {
             flushLine();
+            prevCenterX = null;
+            prevCenterY = null;
             continue;
           }
           if (u === 0x0d) {
@@ -1505,6 +1636,8 @@ export class PdfController implements IPdfController {
             const fs = line.fontSize || Math.abs(ct - cb) || 12;
             if (Math.abs(cb - line.baselineY) > fs * 0.6) {
               flushLine();
+              prevCenterX = null;
+              prevCenterY = null;
             }
           }
 
@@ -1536,6 +1669,18 @@ export class PdfController implements IPdfController {
             if (line.sampleCharIndex < 0 && ch.trim()) {
               line.sampleCharIndex = i;
             }
+
+            // Track device-space advance between consecutive same-line glyphs.
+            const centerX = (cl + cr) / 2;
+            const centerY = (cb + ct) / 2;
+            if (prevCenterX !== null && prevCenterY !== null) {
+              const pdx = centerX - prevCenterX;
+              const pdy = centerY - prevCenterY;
+              sumDevDx += pdx * vX.x + pdy * vY.x;
+              sumDevDy += pdx * vX.y + pdy * vY.y;
+            }
+            prevCenterX = centerX;
+            prevCenterY = centerY;
           }
         }
         flushLine();
@@ -1549,14 +1694,35 @@ export class PdfController implements IPdfController {
         pdfium._free(fillBPtr);
         pdfium._free(fillAPtr);
         pdfium._free(flagsPtr);
+        pdfium._free(devXPtr);
+        pdfium._free(devYPtr);
         pdfium._PDFium_ClosePageText(textPagePtr);
       }
 
-      // Run the same merge pass as the other paths. On clean line-level output
-      // this is largely a no-op (adjacent rects sit on different baselines), but
-      // it coalesces any same-line fragments — e.g. when PDFium splits a line
-      // into multiple char runs — keeping behaviour consistent across paths.
-      const mergedRects = this.mergeAdjacentTextRects(textRects);
+      // Resolve how the rendered text actually reads in device space from the
+      // accumulated glyph advance, then hand that to the merge. A page's /Rotate
+      // alone is ambiguous: a sideways-authored landscape page (/Rotate 90 that
+      // reads upright) and a genuinely sideways page can share the same /Rotate.
+      // The advance direction disambiguates them. Codes match mergeAdjacentText-
+      // Rects: 0 = LTR (no transform), 1 = reads upward, 2 = RTL, 3 = downward.
+      let rotation: 0 | 1 | 2 | 3 = 0;
+      if (Math.abs(sumDevDx) >= Math.abs(sumDevDy)) {
+        rotation = sumDevDx >= 0 ? 0 : 2;
+      } else {
+        rotation = sumDevDy >= 0 ? 1 : 3;
+      }
+
+      // Coalesce same-line fragments — e.g. when PDFium splits one visual line
+      // into multiple char runs. For text that renders sideways/upside-down the
+      // device rects don't run left-to-right, so the merge transforms rects into
+      // upright reading space, runs the shared horizontal-merge pipeline, then
+      // maps the result back to device space. Upright text (rotation 0) flows
+      // through unchanged.
+      const mergedRects = this.mergeAdjacentTextRects(textRects, {
+        rotation,
+        deviceWidth,
+        deviceHeight,
+      });
 
       return { pageIndex, pageWidth, pageHeight, textRects: mergedRects };
     } finally {
@@ -2393,7 +2559,28 @@ export class PdfController implements IPdfController {
    *    contiguous per-column output keeps a multi-column page selectable and
    *    copyable in reading order.
    */
-  private mergeAdjacentTextRects(rects: ITextRect[]): ITextRect[] {
+  /**
+   * Coalesce adjacent same-line text fragments into line-level runs, then
+   * reorder them into column-first reading order via orderByReadingColumns
+   * (an XY-cut).
+   *
+   * The whole pipeline assumes horizontal, left-to-right visual lines. For an
+   * intrinsically-rotated page the logical extraction path passes the page's
+   * quarter-turn `rotation` code (1/2/3) plus its device size; the incoming
+   * device rects then run vertically or upside-down. Rather than maintain a
+   * second sequential merge, we rotate every rect into an upright "reading
+   * space", run the unchanged horizontal pipeline there, and rotate the merged
+   * runs back to device space. Rotation 0 (the default) is the identity, so the
+   * geometry-first callers are unaffected.
+   */
+  private mergeAdjacentTextRects(
+    rects: ITextRect[],
+    opts: { rotation?: 0 | 1 | 2 | 3; deviceWidth?: number; deviceHeight?: number } = {},
+  ): ITextRect[] {
+    const rotation = opts.rotation ?? 0;
+    const deviceW = opts.deviceWidth ?? 0;
+    const deviceH = opts.deviceHeight ?? 0;
+
     const cloneRect = (rect: ITextRect): ITextRect => ({
       ...rect,
       rect: { ...rect.rect },
@@ -2403,7 +2590,65 @@ export class PdfController implements IPdfController {
       },
     });
 
+    // Map one rect between device space and upright reading space for a
+    // quarter-turn page rotation. Each 90°-multiple transform is exact, so we
+    // map two opposite corners and re-derive the axis-aligned box.
+    const rotateRect = (rect: ITextRect['rect'], inverse: boolean): ITextRect['rect'] => {
+      if (rotation === 0) return { ...rect };
+      const x1 = rect.left;
+      const y1 = rect.top;
+      const x2 = rect.left + rect.width;
+      const y2 = rect.top + rect.height;
+      const map = (x: number, y: number): IPoint => {
+        if (!inverse) {
+          // device -> reading
+          switch (rotation) {
+            case 1:
+              return { x: y, y: deviceW - x };
+            case 2:
+              return { x: deviceW - x, y: deviceH - y };
+            case 3:
+              return { x: deviceH - y, y: x };
+            default:
+              return { x, y };
+          }
+        }
+        // reading -> device
+        switch (rotation) {
+          case 1:
+            return { x: deviceW - y, y: x };
+          case 2:
+            return { x: deviceW - x, y: deviceH - y };
+          case 3:
+            return { x: y, y: deviceH - x };
+          default:
+            return { x, y };
+        }
+      };
+      const p1 = map(x1, y1);
+      const p2 = map(x2, y2);
+      return {
+        left: Math.min(p1.x, p2.x),
+        top: Math.min(p1.y, p2.y),
+        width: Math.abs(p2.x - p1.x),
+        height: Math.abs(p2.y - p1.y),
+      };
+    };
+
+    const toReadingRect = (r: ITextRect): ITextRect => ({
+      ...cloneRect(r),
+      rect: rotateRect(r.rect, false),
+    });
+
+    // Map a finished result list from reading space back to device space.
+    const toDeviceResult = (list: ITextRect[]): ITextRect[] =>
+      rotation === 0 ? list : list.map((r) => ({ ...r, rect: rotateRect(r.rect, true) }));
+
     if (rects.length <= 1) return rects.map(cloneRect);
+
+    // Everything below runs in reading space; for rotation 0 `working` is the
+    // original device-space array, so behaviour is identical to before.
+    const working = rotation === 0 ? rects : rects.map(toReadingRect);
 
     interface IMergeItem {
       sourceIndex: number;
@@ -2510,16 +2755,18 @@ export class PdfController implements IPdfController {
     const visualItems: IMergeItem[] = [];
     const unmergeableRects: { sourceIndex: number; rect: ITextRect }[] = [];
 
-    for (let i = 0; i < rects.length; i++) {
-      const item = toMergeItem(rects[i], i);
+    for (let i = 0; i < working.length; i++) {
+      const item = toMergeItem(working[i], i);
       if (item) {
         visualItems.push(item);
       } else {
-        unmergeableRects.push({ sourceIndex: i, rect: cloneRect(rects[i]) });
+        unmergeableRects.push({ sourceIndex: i, rect: cloneRect(working[i]) });
       }
     }
 
-    if (visualItems.length === 0) return unmergeableRects.map((item) => item.rect);
+    if (visualItems.length === 0) {
+      return toDeviceResult(unmergeableRects.map((item) => item.rect));
+    }
 
     const sortedByRow = [...visualItems].sort(
       (a, b) => a.centerY - b.centerY || a.left - b.left || a.sourceIndex - b.sourceIndex,
@@ -2582,7 +2829,7 @@ export class PdfController implements IPdfController {
           totalHeight: item.height,
           maxHeight: item.height,
           medianHeight: item.height,
-          mergeGapLimit: Math.max(2, item.height),
+          mergeGapLimit: Math.max(2, item.height * 1.5),
         });
       }
     }
@@ -2838,6 +3085,8 @@ export class PdfController implements IPdfController {
       return ordered;
     };
 
+    // Coalesce each line's fragments left-to-right (in reading space), then lay
+    // the lines out top-to-bottom for the column reordering below.
     const merged: IMergedEntry[] = [];
 
     for (const line of [...lines].sort(
@@ -2861,15 +3110,16 @@ export class PdfController implements IPdfController {
       merged.push({ sourceIndex: currentSourceIndex, rect: current });
     }
 
+    // Column-first reading order, then append degenerate (non-finite geometry)
+    // rects, which can't be column-assigned, after the ordered runs. Finally map
+    // everything back to device space (a no-op for upright pages).
     const ordered = orderByReadingColumns(merged);
 
-    // Degenerate (non-finite geometry) rects can't be column-assigned; keep
-    // them after the ordered runs in their original source order.
     if (unmergeableRects.length > 0) {
       ordered.push(...unmergeableRects);
     }
 
-    return ordered.map((item) => item.rect);
+    return toDeviceResult(ordered.map((item) => item.rect));
   }
 
   public listNativeAnnotations(pageIndex: number, opts: { scale: number }): INativeAnnotation[] {
