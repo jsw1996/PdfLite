@@ -18,6 +18,22 @@ export const SearchBar = () => {
   // Tracks the pending highlight-retry timer so a new navigation cancels any
   // in-flight retry chain from a previous index (avoids overlapping draws).
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Page-space (scale = 1) bounding box of the currently drawn match. Lets a
+  // zoom-only reposition update the existing highlight's geometry in place,
+  // without re-running the navigation/scroll path.
+  const currentMatchBoxRef = useRef<{
+    minLeft: number;
+    minTop: number;
+    maxRight: number;
+    maxBottom: number;
+  } | null>(null);
+  // Scale read through a ref so drawHighlight stays referentially stable across
+  // zoom. If drawHighlight depended on `scale`, the navigation effect would
+  // re-fire on every zoom tick and re-scroll the page (the leftward shift).
+  const scaleRef = useRef(scale);
+  useEffect(() => {
+    scaleRef.current = scale;
+  }, [scale]);
 
   // Debounce the search value
   useEffect(() => {
@@ -98,12 +114,18 @@ export const SearchBar = () => {
           maxBottom = Math.max(maxBottom, match.rects[i].top + match.rects[i].height);
         }
 
+        // Remember the page-space box so a later zoom can reposition this same
+        // highlight in place (see the scale-reposition effect) instead of
+        // re-running navigation, which would re-scroll the page sideways.
+        currentMatchBoxRef.current = { minLeft, minTop, maxRight, maxBottom };
+
         // Rects are in page-space (scale = 1); scale to the current zoom level.
+        const currentScale = scaleRef.current;
         const rect = {
-          left: minLeft * scale,
-          top: minTop * scale,
-          width: (maxRight - minLeft) * scale,
-          height: (maxBottom - minTop) * scale,
+          left: minLeft * currentScale,
+          top: minTop * currentScale,
+          width: (maxRight - minLeft) * currentScale,
+          height: (maxBottom - minTop) * currentScale,
         };
 
         // Try to find the text layer (waits for page to render)
@@ -126,11 +148,16 @@ export const SearchBar = () => {
           pageContainer.appendChild(highlightDiv);
           highlightRef.current = highlightDiv;
 
-          // Scroll highlight into view
+          // Scroll highlight into view. Use inline:'nearest' (not 'center') so
+          // the viewer's horizontal scroll is only nudged when the match is
+          // actually off-screen horizontally. inline:'center' would re-center
+          // every match, yanking the whole page (canvas + text) sideways away
+          // from its mx-auto resting position whenever zoomed wider than the
+          // viewport — perceived as the text shifting left.
           highlightDiv.scrollIntoView({
             behavior: 'smooth',
             block: 'center',
-            inline: 'center',
+            inline: 'nearest',
           });
         } else if (retryCount < maxRetries) {
           // Text layer not ready yet, retry after delay
@@ -144,7 +171,7 @@ export const SearchBar = () => {
       // Wait for page to scroll and render, then highlight
       highlightTimerRef.current = setTimeout(() => performHighlight(), 100);
     },
-    [matches, goToPage, scale],
+    [matches, goToPage],
   );
 
   // Cleanup highlight on unmount or when value is cleared
@@ -177,10 +204,26 @@ export const SearchBar = () => {
     };
   }, [escapedSearchBoxId]);
 
-  // Draw highlight when index changes or when matches change
+  // Draw + scroll when the match index changes or a new search lands. Crucially
+  // this does NOT depend on `scale`: zoom must not re-run the navigation/scroll
+  // path (that re-scrolling is what shifted the page sideways).
   useEffect(() => {
     drawHighlight(safeIndex);
-  }, [safeIndex, drawHighlight, scale]);
+  }, [safeIndex, drawHighlight]);
+
+  // Zoom only: reposition the existing highlight in place. No scrollIntoView /
+  // goToPage, so changing zoom never drags the page horizontally. The highlight
+  // div lives inside the page-space text layer (origin at top-left), so scaling
+  // its page-space box by the new zoom keeps it aligned with the canvas.
+  useEffect(() => {
+    const div = highlightRef.current;
+    const box = currentMatchBoxRef.current;
+    if (!div || !box) return;
+    div.style.left = `${box.minLeft * scale}px`;
+    div.style.top = `${box.minTop * scale}px`;
+    div.style.width = `${(box.maxRight - box.minLeft) * scale}px`;
+    div.style.height = `${(box.maxBottom - box.minTop) * scale}px`;
+  }, [scale]);
 
   return (
     <div className="w-full max-w-xs space-y-2">
