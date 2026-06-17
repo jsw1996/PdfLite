@@ -156,6 +156,13 @@ export function useRenderAnnotation({
 
     // Render annotations using handlers
     for (const annotation of annotations) {
+      // Native annotations are already painted into the page bitmap by PDFium
+      // (the FPDF_ANNOT render flag). Re-drawing them on the overlay would
+      // double-render them — visibly thickening/darkening ink strokes and
+      // highlights, with edge fringing where the overlay's straight polyline
+      // diverges from PDFium's appearance. The overlay canvases exist only for
+      // uncommitted (source === 'overlay') annotations.
+      if (annotation.source === 'native') continue;
       if (isHighlightAnnotation(annotation)) {
         renderAnnotation(hctx, annotation);
       } else if (isDrawAnnotation(annotation)) {

@@ -14,13 +14,13 @@ import {
 import { TextLayer } from '../TextLayer/TextLayer';
 import { usePdfState } from '@/providers/PdfStateContextProvider';
 import { LinkLayer } from '../LinkLayer/LinkLayer';
+import { StickyNoteLayer } from '../StickyNoteLayer/StickyNoteLayer';
 import { FormLayer } from '../FormLayer/FormLayer';
 import { useSelectionHighlight } from '../../hooks/useSelectionHighlight';
 import { useAddText } from '@/hooks/useAddText';
 import { useAddSignature } from '@/hooks/useAddSignature';
 import { SignatureDialog } from '../Signature/SignatureDialog';
 
-const FPDF_ANNOTATION_SUBTYPE_LINK = 2;
 const FPDF_ANNOTATION_SUBTYPE_HIGHLIGHT = 9;
 const FPDF_ANNOTATION_SUBTYPE_INK = 15;
 
@@ -89,50 +89,57 @@ export const ViewerPage: React.FC<IViewerPageProps> = ({ pageIndex, registerPage
   const refreshNativeAnnots = useCallback(() => {
     const native = controller.listNativeAnnotations(pageIndex, { scale: 1 });
 
-    // Convert native annotations to our new type system
-    const converted: IAnnotation[] = native
-      .filter((a) => a.subtype !== FPDF_ANNOTATION_SUBTYPE_LINK)
-      .map((a): IAnnotation => {
-        const isHighlight =
-          a.subtype === FPDF_ANNOTATION_SUBTYPE_HIGHLIGHT ||
-          a.subtype === FPDF_ANNOTATION_SUBTYPE_INK;
+    // Convert native annotations to our overlay type system. Only the two
+    // subtypes the overlay actually owns are drawn here:
+    //   - HIGHLIGHT -> highlight rect
+    //   - INK       -> draw stroke
+    // Links and sticky notes have dedicated layers, and every other subtype is
+    // already painted into the page bitmap by PDFium. There is intentionally no
+    // generic fallback, so an unhandled subtype is dropped rather than drawn as
+    // a stray black box.
+    const converted: IAnnotation[] = native.flatMap((a): IAnnotation[] => {
+      if (
+        a.subtype === FPDF_ANNOTATION_SUBTYPE_HIGHLIGHT &&
+        a.shape === 'polygon' &&
+        a.points.length >= 4
+      ) {
+        const xs = a.points.map((p) => p.x);
+        const ys = a.points.map((p) => p.y);
+        const highlight: IHighlightAnnotation = {
+          id: a.id,
+          type: 'highlight',
+          source: 'native',
+          pageIndex,
+          rects: [
+            {
+              left: Math.min(...xs),
+              top: Math.min(...ys),
+              width: Math.max(...xs) - Math.min(...xs),
+              height: Math.max(...ys) - Math.min(...ys),
+            },
+          ],
+          color: ANNOTATION_COLORS.HIGHLIGHT,
+          createdAt: Date.now(),
+        };
+        return [highlight];
+      }
 
-        if (isHighlight && a.shape === 'polygon' && a.points.length >= 4) {
-          // Convert polygon points to rect for highlight annotations
-          const xs = a.points.map((p) => p.x);
-          const ys = a.points.map((p) => p.y);
-          const highlight: IHighlightAnnotation = {
-            id: a.id,
-            type: 'highlight',
-            source: 'native',
-            pageIndex,
-            rects: [
-              {
-                left: Math.min(...xs),
-                top: Math.min(...ys),
-                width: Math.max(...xs) - Math.min(...xs),
-                height: Math.max(...ys) - Math.min(...ys),
-              },
-            ],
-            color: ANNOTATION_COLORS.HIGHLIGHT,
-            createdAt: Date.now(),
-          };
-          return highlight;
-        } else {
-          // Draw annotation (ink strokes)
-          const draw: IDrawAnnotation = {
-            id: a.id,
-            type: 'draw',
-            source: 'native',
-            pageIndex,
-            points: a.points,
-            color: `rgba(${a.color.r}, ${a.color.g}, ${a.color.b}, ${Math.min(1, Math.max(0, a.color.a / 255))})`,
-            strokeWidth: a.strokeWidth,
-            createdAt: Date.now(),
-          };
-          return draw;
-        }
-      });
+      if (a.subtype === FPDF_ANNOTATION_SUBTYPE_INK) {
+        const draw: IDrawAnnotation = {
+          id: a.id,
+          type: 'draw',
+          source: 'native',
+          pageIndex,
+          points: a.points,
+          color: `rgba(${a.color.r}, ${a.color.g}, ${a.color.b}, ${Math.min(1, Math.max(0, a.color.a / 255))})`,
+          strokeWidth: a.strokeWidth,
+          createdAt: Date.now(),
+        };
+        return [draw];
+      }
+
+      return [];
+    });
     setNativeAnnotationsForPage(pageIndex, converted);
   }, [controller, pageIndex, setNativeAnnotationsForPage]);
 
@@ -176,6 +183,7 @@ export const ViewerPage: React.FC<IViewerPageProps> = ({ pageIndex, registerPage
         onOpenExternal={(uri) => window.open(uri, '_blank', 'noopener,noreferrer')}
         onGoToPage={(p) => goToPage(p, { scrollIntoView: true, scrollIntoPreview: true })}
       />
+      <StickyNoteLayer pageIndex={pageIndex} pdfCanvas={pdfCanvas} containerEl={containerEl} />
       <FormLayer pageIndex={pageIndex} pdfCanvas={pdfCanvas} containerEl={containerEl} />
       <AnnotationLayer
         pageIndex={pageIndex}
