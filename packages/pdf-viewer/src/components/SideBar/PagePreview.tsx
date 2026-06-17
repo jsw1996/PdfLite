@@ -56,7 +56,7 @@ export const PagePreview = React.memo(({ page }: IPagePreviewProps) => {
       tabIndex={0}
       aria-label={`Go to page ${displayPageNumber}`}
       className={`
-        w-[70%] m-auto cursor-pointer group flex flex-col items-center gap-2 rounded-xl p-2.5
+        w-[86%] m-auto cursor-pointer group flex flex-col items-center gap-2 rounded-xl p-2
         transition-all duration-200
         ${isActive ? 'bg-primary/10 ring-2 ring-primary/30' : 'hover:bg-secondary/80'}
       `}

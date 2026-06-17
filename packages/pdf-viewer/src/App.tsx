@@ -24,7 +24,7 @@ function App() {
         <PdfControllerContextProvider>
           <SidebarProvider
             defaultOpen={false}
-            style={{ '--sidebar-width': '20rem' } as CSSProperties}
+            style={{ '--sidebar-width': '16rem' } as CSSProperties}
           >
             <PdfEditor file={file!} />
           </SidebarProvider>
