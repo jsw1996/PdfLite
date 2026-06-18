@@ -11,11 +11,9 @@ export {
   type IAnnotation,
   type IDrawAnnotation,
   type IHighlightAnnotation,
-  type ITextAnnotation,
   type ISignatureAnnotation,
   isDrawAnnotation,
   isHighlightAnnotation,
-  isTextAnnotation,
   isSignatureAnnotation,
   generateAnnotationId,
 } from './types';
@@ -33,8 +31,6 @@ export {
   DRAW_STROKE_WIDTH_PRESETS,
   HIGHLIGHT_TOOL_DEFAULTS,
   HIGHLIGHT_COLOR_PRESETS,
-  TEXT_ANNOTATION_DEFAULTS,
-  TEXT_COLOR_PRESETS,
   ANNOTATION_TIMING,
 } from './constants';
 
@@ -42,10 +38,8 @@ export {
 export {
   type ICanvasMetrics,
   type IAnnotationHandler,
-  type ICommitContext,
   drawHandler,
   highlightHandler,
-  textHandler,
   getHandler,
   normalizeAnnotation,
   denormalizeAnnotation,

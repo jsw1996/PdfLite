@@ -3,7 +3,7 @@
  * Each annotation type has its own specific properties.
  */
 
-export type AnnotationType = 'draw' | 'highlight' | 'text' | 'signature';
+export type AnnotationType = 'draw' | 'highlight' | 'signature';
 export type AnnotationSource = 'native' | 'overlay';
 
 export interface IPoint {
@@ -48,23 +48,6 @@ export interface IHighlightAnnotation extends IBaseAnnotation {
 }
 
 /**
- * Text annotation (FreeText in PDF terms)
- */
-export interface ITextAnnotation extends IBaseAnnotation {
-  type: 'text';
-  position: IPoint;
-  content: string;
-  fontSize: number;
-  fontColor: string;
-  /** Font weight (defaults to 'normal' when omitted) */
-  fontWeight?: 'normal' | 'bold';
-  /** Font style (defaults to 'normal' when omitted) */
-  fontStyle?: 'normal' | 'italic';
-  /** Computed dimensions from text content, updated when text changes */
-  dimensions?: { width: number; height: number };
-}
-
-/**
  * Signature annotation (image/stamp)
  */
 export interface ISignatureAnnotation extends IBaseAnnotation {
@@ -81,11 +64,7 @@ export interface ISignatureAnnotation extends IBaseAnnotation {
 /**
  * Discriminated union of all annotation types
  */
-export type IAnnotation =
-  | IDrawAnnotation
-  | IHighlightAnnotation
-  | ITextAnnotation
-  | ISignatureAnnotation;
+export type IAnnotation = IDrawAnnotation | IHighlightAnnotation | ISignatureAnnotation;
 
 /**
  * Type guard for draw annotations
@@ -99,13 +78,6 @@ export function isDrawAnnotation(a: IAnnotation): a is IDrawAnnotation {
  */
 export function isHighlightAnnotation(a: IAnnotation): a is IHighlightAnnotation {
   return a.type === 'highlight';
-}
-
-/**
- * Type guard for text annotations
- */
-export function isTextAnnotation(a: IAnnotation): a is ITextAnnotation {
-  return a.type === 'text';
 }
 
 /**
