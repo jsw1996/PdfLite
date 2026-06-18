@@ -102,6 +102,8 @@ export interface ITextRect {
     width: number;
     height: number;
   };
+  /** Text run orientation in device space. Defaults to 0 for horizontal left-to-right text. */
+  orientation?: 0 | 90 | 180 | 270;
   /** Font information */
   font: {
     family: string;
@@ -324,17 +326,6 @@ export class PdfController implements IPdfController {
    */
   private editPageReplaceOnly = new Set<number>();
   /**
-   * Master enable for the logical character-stream extraction path
-   * (FPDFText_GetText / GetCharBox — the pdf.js model). When enabled,
-   * getPageTextContent routes ONLY rotated pages (intrinsic /Rotate) through it;
-   * upright pages use the geometry-first FPDFText_GetRect + mergeAdjacentTextRects
-   * path, whose column heuristic relies on display-space rect geometry. Only
-   * affects unedited pages; edited pages still route through the page-object path
-   * because FPDFText_* is corrupted after GenerateContent. Set false to disable
-   * the logical path entirely. See getPageTextContentViaGetText / isPageRotated.
-   */
-  public useLogicalTextExtraction = true;
-  /**
    * Cache of page media-box dimensions, keyed by page index. Page dimensions are
    * immutable for the lifetime of a loaded document, so they can be cached to
    * avoid a synchronous LoadPage/ClosePage round-trip on every call.
@@ -343,14 +334,6 @@ export class PdfController implements IPdfController {
    * Cleared in closeCurrentDocument() when a new document is loaded.
    */
   private pageDimensionCache = new Map<number, IPageDimension>();
-  /**
-   * Cache of per-page rotation state (true = intrinsic /Rotate is non-zero),
-   * keyed by page index. Rotation is immutable for a loaded document, so the
-   * probe (a pair of DeviceToPage calls) runs once per page. Used by
-   * getPageTextContent to route rotated pages through the logical extraction
-   * path. Cleared in closeCurrentDocument().
-   */
-  private pageRotationCache = new Map<number, boolean>();
   private static toImagePdfium(pdfium: IPDFiumModule): IPDFiumModule & {
     _FPDFImageObj_SetBitmap_W: (
       pagesPtr: number,
@@ -678,76 +661,6 @@ export class PdfController implements IPdfController {
     }
   }
 
-  /**
-   * Detect whether a page has a non-zero intrinsic rotation (/Rotate of 90, 180
-   * or 270). PDFium exposes no rotation getter in this build, but FPDF_DeviceToPage
-   * applies the page's display matrix — which encodes rotation — so we probe it:
-   * map the device X axis (left edge → right edge) back into page space. On an
-   * upright page (rotation 0) that vector points along page +X; any rotation
-   * tilts or flips it. Two DeviceToPage calls, no WASM rebuild required.
-   */
-  private isPageRotated(pagePtr: number, deviceWidth: number, deviceHeight: number): boolean {
-    const { pdfium } = this.requireDoc();
-    const pageXPtr = pdfium._malloc(8); // double
-    const pageYPtr = pdfium._malloc(8); // double
-    const probe = (deviceX: number): IPoint => {
-      pdfium._PDFium_DeviceToPage(
-        pagePtr,
-        0,
-        0,
-        deviceWidth,
-        deviceHeight,
-        0, // rotate = 0 (the page's own /Rotate is still applied)
-        deviceX,
-        0,
-        pageXPtr,
-        pageYPtr,
-      );
-      return {
-        x: pdfium.getValue(pageXPtr, 'double'),
-        y: pdfium.getValue(pageYPtr, 'double'),
-      };
-    };
-    try {
-      const origin = probe(0);
-      const alongDeviceX = probe(deviceWidth);
-      const dx = alongDeviceX.x - origin.x;
-      const dy = alongDeviceX.y - origin.y;
-      // Upright iff device +X maps to a predominantly positive page-X step.
-      const upright = Math.abs(dx) >= Math.abs(dy) && dx > 0;
-      return !upright;
-    } finally {
-      pdfium._free(pageXPtr);
-      pdfium._free(pageYPtr);
-    }
-  }
-
-  /**
-   * Cached rotation lookup by page index. Loads the page (reusing the edit-mode
-   * handle when present) only on a cache miss; rotation never changes for a
-   * loaded document.
-   */
-  private isPageRotatedByIndex(pageIndex: number): boolean {
-    const cached = this.pageRotationCache.get(pageIndex);
-    if (cached !== undefined) return cached;
-
-    const { pdfium, docPtr } = this.requireDoc();
-    const cachedEditPage = this.editPageCache.get(pageIndex);
-    const pagePtr = cachedEditPage ?? pdfium._PDFium_LoadPage(docPtr, pageIndex);
-    if (!pagePtr) return false;
-    try {
-      const deviceWidth = Math.max(1, Math.round(pdfium._PDFium_GetPageWidth(pagePtr)));
-      const deviceHeight = Math.max(1, Math.round(pdfium._PDFium_GetPageHeight(pagePtr)));
-      const rotated = this.isPageRotated(pagePtr, deviceWidth, deviceHeight);
-      this.pageRotationCache.set(pageIndex, rotated);
-      return rotated;
-    } finally {
-      if (!cachedEditPage) {
-        pdfium._PDFium_ClosePage(pagePtr);
-      }
-    }
-  }
-
   // single-flight pattern to ensure only one instance of the PDFium module is created
   public ensureInitialized(): Promise<void> {
     if (this.pdfiumModule) return Promise.resolve();
@@ -795,7 +708,6 @@ export class PdfController implements IPdfController {
     this.editPageReplaceOnly.clear();
     this.generatedPages.clear();
     this.pageDimensionCache.clear();
-    this.pageRotationCache.clear();
     this.closeFormFillEnvironment();
     if (this.docPtr) {
       this.pdfiumModule._PDFium_CloseDocument(this.docPtr);
@@ -1193,9 +1105,9 @@ export class PdfController implements IPdfController {
   }
 
   /**
-   * Get text content as layout-aware rectangles for a page.
-   * Uses FPDFText_CountRects / FPDFText_GetRect / FPDFText_GetBoundedText.
-   * Merges adjacent rects on the same line into larger spans.
+   * Get text content as layout-aware rectangles for a page. Unedited pages use PDFium's
+   * logical character stream so word spacing comes from the engine instead of the legacy
+   * geometry-first rect merger.
    */
   public getPageTextContent(pageIndex: number): IPageTextContent | null {
     if (!this.pdfiumModule || !this.docPtr) {
@@ -1210,224 +1122,20 @@ export class PdfController implements IPdfController {
       return this.getPageTextContentFromObjects(pageIndex);
     }
 
-    // Rotated pages (intrinsic /Rotate) use the logical character-stream path:
-    // it walks PDFium's reading order, and the geometry path's column heuristic
-    // is unreliable on rotated geometry. Upright pages fall through to the
-    // geometry-first path below. Edited pages already returned above, so this
-    // only ever runs on unedited pages.
-    if (this.useLogicalTextExtraction && this.isPageRotatedByIndex(pageIndex)) {
-      return this.getPageTextContentViaGetText(pageIndex);
-    }
-
-    const pdfium = this.pdfiumModule;
-
-    // Use cached edit-mode page pointer if available so text content
-    // reflects in-memory edits (FPDFText_SetText changes).
-    const cachedEditPage = this.editPageCache.get(pageIndex);
-    const pagePtr = cachedEditPage ?? pdfium._PDFium_LoadPage(this.docPtr, pageIndex);
-    if (!pagePtr) {
-      return null;
-    }
-
-    try {
-      const pageWidth = pdfium._PDFium_GetPageWidth(pagePtr);
-      const pageHeight = pdfium._PDFium_GetPageHeight(pagePtr);
-
-      const textPagePtr = pdfium._PDFium_LoadPageText(pagePtr);
-      if (!textPagePtr) {
-        return { pageIndex, pageWidth, pageHeight, textRects: [] };
-      }
-
-      try {
-        // Build rect list for entire page
-        const rectsCount = pdfium._PDFium_CountRects(textPagePtr, 0, -1);
-
-        const textRects: ITextRect[] = [];
-
-        // Allocate output pointers for rect coords (doubles)
-        const leftPtr = pdfium._malloc(8);
-        const topPtr = pdfium._malloc(8);
-        const rightPtr = pdfium._malloc(8);
-        const bottomPtr = pdfium._malloc(8);
-        const fillRPtr = pdfium._malloc(4);
-        const fillGPtr = pdfium._malloc(4);
-        const fillBPtr = pdfium._malloc(4);
-        const fillAPtr = pdfium._malloc(4);
-
-        // Use page dimensions as device size (1:1 mapping, no scaling here)
-        const deviceWidth = Math.round(pageWidth);
-        const deviceHeight = Math.round(pageHeight);
-
-        try {
-          for (let i = 0; i < rectsCount; i++) {
-            const ok = pdfium._PDFium_GetRect(textPagePtr, i, leftPtr, topPtr, rightPtr, bottomPtr);
-            if (!ok) {
-              continue;
-            }
-
-            const left = pdfium.getValue(leftPtr, 'double');
-            const top = pdfium.getValue(topPtr, 'double');
-            const right = pdfium.getValue(rightPtr, 'double');
-            const bottom = pdfium.getValue(bottomPtr, 'double');
-
-            // Convert page rect to device coordinates
-            const deviceRect = this.pageRectToDeviceRect(
-              pagePtr,
-              left,
-              top,
-              right,
-              bottom,
-              deviceWidth,
-              deviceHeight,
-            );
-
-            // Get the text content within this rect (using original page coords)
-            const utf16Length = pdfium._PDFium_GetBoundedText(
-              textPagePtr,
-              left,
-              top,
-              right,
-              bottom,
-              0,
-              0,
-            );
-
-            if (utf16Length <= 0) {
-              continue;
-            }
-
-            // Allocate buffer for UTF-16 text (+1 for null terminator, *2 for UTF-16)
-            const bytesCount = (utf16Length + 1) * 2;
-            const textBuffer = pdfium._malloc(bytesCount);
-
-            pdfium._PDFium_GetBoundedText(
-              textPagePtr,
-              left,
-              top,
-              right,
-              bottom,
-              textBuffer,
-              utf16Length,
-            );
-
-            // Decode UTF-16LE via TextDecoder — `String.fromCharCode(...u16)` blows the
-            // call-stack on long pages (engines cap argument lists in the tens of thousands).
-            const utf16Bytes = pdfium.HEAPU8.subarray(textBuffer, textBuffer + utf16Length * 2);
-            const content = PdfController.utf16Decoder.decode(utf16Bytes);
-            pdfium._free(textBuffer);
-
-            if (!content.trim()) {
-              continue;
-            }
-
-            // Get font info via char index at this position.
-            // Retry with a wider tolerance: PDFium sometimes returns a rect
-            // whose reported top-left corner doesn't exactly coincide with any
-            // glyph box (e.g. backtick-height glyphs in mixed CJK/mono layouts).
-            let charIndex = pdfium._PDFium_GetCharIndexAtPos(textPagePtr, left, top, 2, 2);
-            if (charIndex < 0) {
-              charIndex = pdfium._PDFium_GetCharIndexAtPos(textPagePtr, left, top, 10, 10);
-            }
-
-            let fontFamily = '';
-            let fontSize = Math.abs(top - bottom);
-            let fontColor = { r: 0, g: 0, b: 0, a: 255 };
-
-            if (charIndex >= 0) {
-              fontSize = pdfium._PDFium_GetFontSize(textPagePtr, charIndex);
-
-              const hasFillColor = pdfium._PDFium_GetFillColor(
-                textPagePtr,
-                charIndex,
-                fillRPtr,
-                fillGPtr,
-                fillBPtr,
-                fillAPtr,
-              );
-              if (hasFillColor) {
-                fontColor = {
-                  r: pdfium.getValue(fillRPtr, 'i32'),
-                  g: pdfium.getValue(fillGPtr, 'i32'),
-                  b: pdfium.getValue(fillBPtr, 'i32'),
-                  a: pdfium.getValue(fillAPtr, 'i32'),
-                };
-              }
-
-              // Get font name length first
-              const fontNameLength = pdfium._PDFium_GetFontInfo(textPagePtr, charIndex, 0, 0, 0);
-
-              if (fontNameLength > 0) {
-                const fontBufSize = fontNameLength + 1;
-                const fontNameBuffer = pdfium._malloc(fontBufSize);
-                const flagsPtr = pdfium._malloc(4);
-
-                pdfium._PDFium_GetFontInfo(
-                  textPagePtr,
-                  charIndex,
-                  fontNameBuffer,
-                  fontBufSize,
-                  flagsPtr,
-                );
-
-                const nameBytes = pdfium.HEAPU8.subarray(
-                  fontNameBuffer,
-                  fontNameBuffer + fontNameLength,
-                );
-                fontFamily = new TextDecoder().decode(nameBytes);
-                // Remove PDF font subset prefix (e.g., "ABCDEF+")
-                fontFamily = fontFamily.replace(/^[A-Z]{6}\+/, '');
-
-                pdfium._free(fontNameBuffer);
-                pdfium._free(flagsPtr);
-              }
-            }
-
-            textRects.push({
-              content,
-              rect: deviceRect,
-              font: {
-                family: fontFamily,
-                size: fontSize,
-                color: fontColor,
-              },
-            });
-          }
-        } finally {
-          pdfium._free(leftPtr);
-          pdfium._free(topPtr);
-          pdfium._free(rightPtr);
-          pdfium._free(bottomPtr);
-          pdfium._free(fillRPtr);
-          pdfium._free(fillGPtr);
-          pdfium._free(fillBPtr);
-          pdfium._free(fillAPtr);
-        }
-
-        // Merge adjacent rects on the same line with similar font properties
-        const mergedRects = this.mergeAdjacentTextRects(textRects);
-
-        return { pageIndex, pageWidth, pageHeight, textRects: mergedRects };
-      } finally {
-        pdfium._PDFium_ClosePageText(textPagePtr);
-      }
-    } finally {
-      if (!cachedEditPage) {
-        pdfium._PDFium_ClosePage(pagePtr);
-      }
-    }
+    return this.getPageTextContentViaGetText(pageIndex);
   }
 
   /**
-   * EXPERIMENTAL alternative to getPageTextContent's geometry-first extraction.
+   * Extract text content from PDFium's logical character stream.
    *
    * Walks the logical character stream (FPDFText_CountChars + per-char
    * FPDFText_GetUnicode / GetCharBox / GetFontSize) instead of enumerating
    * FPDFText_GetRect boxes and reading text out of each box. PDFium inserts word
    * spaces and line-break characters into this stream itself, so inter-word
    * spacing is preserved without geometric guessing — the pdf.js model. Each
-   * visual line (delimited by \r/\n chars, with a baseline-jump fallback)
-   * becomes a single ITextRect carrying engine-spaced text. No
-   * mergeAdjacentTextRects post-pass is required.
+   * visual line (delimited by \r/\n chars, with a baseline-jump fallback) becomes an
+   * ITextRect carrying engine-spaced text before the shared ordering pass coalesces
+   * same-line fragments and preserves column reading order.
    *
    * Unedited pages only — getPageTextContent routes edited pages through
    * getPageTextContentFromObjects because FPDFText_* is corrupted post-
@@ -1575,17 +1283,26 @@ export class PdfController implements IPdfController {
         line = null;
         if (!current.hasBox || current.text.trim().length === 0) return;
 
+        let pageTop = current.maxTop;
+        let pageBottom = current.minBottom;
+        if (!(pageTop > pageBottom)) {
+          const lineHeight = current.fontSize || Math.abs(current.maxTop - current.minBottom) || 12;
+          const baseline = current.baselineY ?? current.minBottom;
+          pageBottom = baseline;
+          pageTop = baseline + lineHeight;
+        }
+
         // Page coords: top = larger y, bottom = smaller y.
         const deviceRect = this.pageRectToDeviceRect(
           pagePtr,
           current.minLeft,
-          current.maxTop,
+          pageTop,
           current.maxRight,
-          current.minBottom,
+          pageBottom,
           deviceWidth,
           deviceHeight,
         );
-        const fallbackSize = Math.abs(current.maxTop - current.minBottom);
+        const fallbackSize = Math.abs(pageTop - pageBottom);
         const font = sampleFont(current.sampleCharIndex, current.fontSize || fallbackSize);
 
         textRects.push({
@@ -1629,12 +1346,26 @@ export class PdfController implements IPdfController {
           const cr = pdfium.getValue(rightPtr, 'double');
           const cb = pdfium.getValue(bottomPtr, 'double');
           const ct = pdfium.getValue(topPtr, 'double');
-          const validBox = hasBox && cr > cl;
+          const validBox =
+            hasBox &&
+            Number.isFinite(cl) &&
+            Number.isFinite(cr) &&
+            Number.isFinite(cb) &&
+            Number.isFinite(ct) &&
+            cr > cl;
 
-          // Baseline-jump fallback for PDFs where PDFium emits no explicit break.
+          // Geometry fallback for PDFs where PDFium emits no explicit line break.
           if (line && validBox && line.baselineY !== null) {
             const fs = line.fontSize || Math.abs(ct - cb) || 12;
-            if (Math.abs(cb - line.baselineY) > fs * 0.6) {
+            const centerX = (cl + cr) / 2;
+            const lineWidth = line.maxRight - line.minLeft;
+            const backtracksToLineStart =
+              prevCenterX !== null &&
+              lineWidth > fs * 3 &&
+              prevCenterX - centerX > Math.max(fs * 3, lineWidth * 0.45) &&
+              cl <= line.minLeft + fs * 2;
+
+            if (Math.abs(cb - line.baselineY) > fs * 0.6 || backtracksToLineStart) {
               flushLine();
               prevCenterX = null;
               prevCenterY = null;
@@ -1704,7 +1435,7 @@ export class PdfController implements IPdfController {
       // alone is ambiguous: a sideways-authored landscape page (/Rotate 90 that
       // reads upright) and a genuinely sideways page can share the same /Rotate.
       // The advance direction disambiguates them. Codes match mergeAdjacentText-
-      // Rects: 0 = LTR (no transform), 1 = reads upward, 2 = RTL, 3 = downward.
+      // Rects: 0 = LTR (no transform), 1 = downward, 2 = RTL, 3 = upward.
       let rotation: 0 | 1 | 2 | 3 = 0;
       if (Math.abs(sumDevDx) >= Math.abs(sumDevDy)) {
         rotation = sumDevDx >= 0 ? 0 : 2;
@@ -1724,7 +1455,17 @@ export class PdfController implements IPdfController {
         deviceHeight,
       });
 
-      return { pageIndex, pageWidth, pageHeight, textRects: mergedRects };
+      const orientation =
+        rotation === 1 ? 270 : rotation === 2 ? 180 : rotation === 3 ? 90 : undefined;
+
+      return {
+        pageIndex,
+        pageWidth,
+        pageHeight,
+        textRects: orientation
+          ? mergedRects.map((rect) => ({ ...rect, orientation }))
+          : mergedRects,
+      };
     } finally {
       if (!cachedEditPage) {
         pdfium._PDFium_ClosePage(pagePtr);
@@ -2558,20 +2299,14 @@ export class PdfController implements IPdfController {
    *    transparent spans, and native selection/copy walks them in DOM order, so
    *    contiguous per-column output keeps a multi-column page selectable and
    *    copyable in reading order.
-   */
-  /**
-   * Coalesce adjacent same-line text fragments into line-level runs, then
-   * reorder them into column-first reading order via orderByReadingColumns
-   * (an XY-cut).
    *
-   * The whole pipeline assumes horizontal, left-to-right visual lines. For an
-   * intrinsically-rotated page the logical extraction path passes the page's
-   * quarter-turn `rotation` code (1/2/3) plus its device size; the incoming
-   * device rects then run vertically or upside-down. Rather than maintain a
-   * second sequential merge, we rotate every rect into an upright "reading
-   * space", run the unchanged horizontal pipeline there, and rotate the merged
-   * runs back to device space. Rotation 0 (the default) is the identity, so the
-   * geometry-first callers are unaffected.
+   * The whole pipeline assumes horizontal, left-to-right visual lines. For text
+   * that renders sideways/upside-down, callers pass a quarter-turn `rotation`
+   * code plus device size; the incoming device rects are transformed into
+   * upright reading space, merged there, then mapped back to device space.
+   *
+   * @deprecated Legacy geometry-based text-layer merger. Prefer
+   * getPageTextContentViaGetText for unedited page text extraction.
    */
   private mergeAdjacentTextRects(
     rects: ITextRect[],
@@ -2780,7 +2515,7 @@ export class PdfController implements IPdfController {
 
     const lineCenterToleranceRatio = 0.55;
     const lineOverlapToleranceRatio = 0.55;
-    const mergeCenterToleranceRatio = 0.6;
+    const mergeCenterToleranceRatio = 0.8;
 
     const itemFitsLine = (item: IMergeItem, line: ILineBucket): boolean => {
       const averageHeight = line.totalHeight / line.items.length;
@@ -2843,13 +2578,13 @@ export class PdfController implements IPdfController {
 
       for (let i = 1; i < items.length; i++) {
         const gap = items[i].left - items[i - 1].right;
-        if (gap > 0 && gap <= lineHeight * 2.5) positiveGaps.push(gap);
+        if (gap > 0 && gap <= lineHeight * 3.5) positiveGaps.push(gap);
       }
 
       const medianGap = median(positiveGaps);
-      const adaptiveGap = medianGap > 0 ? medianGap * 3 : lineHeight * 0.9;
+      const adaptiveGap = medianGap > 0 ? medianGap * 4 : lineHeight * 1.25;
       line.medianHeight = lineHeight;
-      line.mergeGapLimit = Math.max(2, Math.min(lineHeight, adaptiveGap));
+      line.mergeGapLimit = Math.max(3, Math.min(lineHeight * 1.6, adaptiveGap));
 
       return items;
     };
@@ -2860,7 +2595,7 @@ export class PdfController implements IPdfController {
       gap: number,
       lineHeight: number,
     ): boolean => {
-      const wordGapThreshold = Math.max(1, lineHeight * 0.22);
+      const wordGapThreshold = Math.max(1, lineHeight * 0.18);
       return (
         gap > wordGapThreshold &&
         !/\s$/.test(current.content) &&
@@ -2883,8 +2618,9 @@ export class PdfController implements IPdfController {
       const currentCenterY = current.rect.top + current.rect.height / 2;
       const nextCenterY = next.rect.top + next.rect.height / 2;
       const centerTolerance = Math.max(
-        2,
-        Math.min(current.rect.height, next.rect.height) * mergeCenterToleranceRatio,
+        3,
+        Math.max(current.rect.height, next.rect.height, line.medianHeight) *
+          mergeCenterToleranceRatio,
       );
       if (Math.abs(currentCenterY - nextCenterY) > centerTolerance) return false;
 
@@ -2953,14 +2689,17 @@ export class PdfController implements IPdfController {
 
       const sampleCount = 256;
       const step = contentWidth / sampleCount;
-      const minGutterWidth = contentWidth * 0.02;
+      const minGutterWidth = Math.max(2, contentWidth * 0.008);
       const minEmptyFraction = 0.6;
+
+      const gutterCandidates = section.filter((e) => e.rect.rect.width <= contentWidth * 0.65);
+      const gutterItems = gutterCandidates.length >= 2 ? gutterCandidates : section;
 
       const sampleIntervals: { top: number; bottom: number }[][] = Array.from(
         { length: sampleCount },
         () => [],
       );
-      for (const e of section) {
+      for (const e of gutterItems) {
         const { left, top, width, height } = e.rect.rect;
         let startIdx = Math.floor((left - minLeft) / step);
         let endIdx = Math.ceil((left + width - minLeft) / step);
@@ -2998,7 +2737,7 @@ export class PdfController implements IPdfController {
       const hasTextOnBothSides = (x: number, yStart: number, yEnd: number): boolean => {
         let left = false;
         let right = false;
-        for (const e of section) {
+        for (const e of gutterItems) {
           const top = e.rect.rect.top;
           const bottom = top + e.rect.rect.height;
           if (bottom <= yStart || top >= yEnd) continue;
