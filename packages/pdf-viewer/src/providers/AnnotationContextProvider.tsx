@@ -20,13 +20,6 @@ import { usePdfState } from './PdfStateContextProvider';
 import { usePdfController } from './PdfControllerContextProvider';
 import { useEditHistory } from './EditHistoryContextProvider';
 
-export interface IEditSessionData {
-  /** Editor plain text saved across virtualized unmount/remount cycles. Key: `${pageIndex}:${paragraphIndex}` */
-  savedEditorText: Map<string, string>;
-  /** Original per-line CSS color strings saved before FPDFPage_GenerateContent corrupts them. Key: `${pageIndex}:${paragraphIndex}` */
-  savedLineColors: Map<string, string[]>;
-}
-
 export interface IAnnotationContextValue {
   /** Currently selected annotation tool */
   selectedTool: AnnotationType | null;
@@ -48,10 +41,6 @@ export interface IAnnotationContextValue {
   highlightColor: string;
   /** Set the highlight tool color */
   setHighlightColor: (color: string) => void;
-  /** Whether inline text-editing mode is active */
-  isEditMode: boolean;
-  /** Toggle inline text-editing mode */
-  setIsEditMode: (mode: boolean) => void;
   /** Add an annotation (will be normalized for scale-independent storage) */
   addAnnotation: (annotation: IAnnotation) => void;
   /** All annotations in the stack */
@@ -84,8 +73,6 @@ export interface IAnnotationContextValue {
   renderVersion: number;
   /** Force a canvas re-render after direct page-content edits */
   bumpRenderVersion: () => void;
-  /** Mutable session data for text-editing mode, scoped to the current document */
-  editSessionData: IEditSessionData;
 }
 
 const AnnotationContext = createContext<IAnnotationContextValue | null>(null);
@@ -106,7 +93,6 @@ export function AnnotationContextProvider({ children }: { children: React.ReactN
   const [drawStrokeWidth, setDrawStrokeWidth] = useState<number>(DRAW_TOOL_DEFAULTS.STROKE_WIDTH);
   const [selectedDrawId, setSelectedDrawId] = useState<string | null>(null);
   const [highlightColor, setHighlightColor] = useState<string>(HIGHLIGHT_TOOL_DEFAULTS.COLOR);
-  const [isEditMode, _setIsEditMode] = useState(false);
   const [annotationStack, setAnnotationStack] = useState<IAnnotation[]>([]);
   const [renderVersion, setRenderVersion] = useState(0);
   const scale = usePdfState().scale;
@@ -117,56 +103,11 @@ export function AnnotationContextProvider({ children }: { children: React.ReactN
     annotationStackRef.current = annotationStack;
   }, [annotationStack]);
 
-  // Mutable session data for text-editing mode. Created once via lazy
-  // initializer so mutations don't trigger React re-renders (we never call
-  // the setter). Using useState instead of useRef avoids "ref access during
-  // render" errors from the React Compiler.
-  const [editSessionData] = useState<IEditSessionData>(() => ({
-    savedEditorText: new Map(),
-    savedLineColors: new Map(),
-  }));
-
   const setSelectedTool = useCallback((tool: AnnotationType | null) => {
     _setSelectedTool(tool);
-    if (tool) _setIsEditMode(false);
     // A draw selection only makes sense while the draw tool is active.
     if (tool !== 'draw') setSelectedDrawId(null);
   }, []);
-
-  const setIsEditMode = useCallback(
-    (mode: boolean) => {
-      _setIsEditMode(mode);
-      if (mode) {
-        _setSelectedTool(null);
-      } else {
-        // Only clear transient editor text — preserve savedLineColors across
-        // sessions because FPDFPage_GenerateContent corrupts the content stream's
-        // color data, making FPDFText_GetFillColor unreliable for edited objects.
-        editSessionData.savedEditorText.clear();
-      }
-    },
-    [editSessionData],
-  );
-
-  // Document-level edit-mode teardown.
-  // Child TextLayer effects fire before parent effects, so by the time this
-  // runs every per-page commit has already landed. Owning the doc-wide
-  // teardown here prevents the race that occurred when each virtualized
-  // TextLayer called releaseEditPages/bumpRenderVersion in parallel.
-  // setRenderVersion is queued via microtask to avoid the cascading-render
-  // pattern the lint rule rejects (and to let the current commit phase finish
-  // releasing edit-page pointers before invalidating canvases).
-  const wasEditModeRef = useRef(false);
-  useEffect(() => {
-    if (isEditMode) {
-      wasEditModeRef.current = true;
-      return;
-    }
-    if (!wasEditModeRef.current) return;
-    wasEditModeRef.current = false;
-    controller.releaseEditPages();
-    queueMicrotask(() => setRenderVersion((v) => v + 1));
-  }, [isEditMode, controller]);
 
   const annotationsByPage = useMemo(() => {
     const map = new Map<number, IAnnotation[]>();
@@ -398,8 +339,6 @@ export function AnnotationContextProvider({ children }: { children: React.ReactN
       setSelectedDrawId,
       highlightColor,
       setHighlightColor,
-      isEditMode,
-      setIsEditMode,
       addAnnotation,
       getAnnotationsForPage,
       consumeNewAnnotation,
@@ -412,7 +351,6 @@ export function AnnotationContextProvider({ children }: { children: React.ReactN
       updateAnnotation,
       renderVersion,
       bumpRenderVersion,
-      editSessionData,
     }),
     [
       addAnnotation,
@@ -424,8 +362,6 @@ export function AnnotationContextProvider({ children }: { children: React.ReactN
       drawStrokeWidth,
       selectedDrawId,
       highlightColor,
-      isEditMode,
-      setIsEditMode,
       setNativeAnnotationsForPage,
       annotationStack,
       popAnnotation,
@@ -435,7 +371,6 @@ export function AnnotationContextProvider({ children }: { children: React.ReactN
       commitAnnotations,
       commitAnnotationsToPdfium,
       updateAnnotation,
-      editSessionData,
     ],
   );
 
