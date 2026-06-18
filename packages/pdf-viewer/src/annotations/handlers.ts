@@ -8,9 +8,11 @@ import type {
   IAnnotation,
   IDrawAnnotation,
   IHighlightAnnotation,
+  ITextAnnotation,
   ISignatureAnnotation,
   IRect,
 } from './types';
+import { TEXT_ANNOTATION_DEFAULTS } from './constants';
 
 /**
  * Canvas metrics for coordinate transformations
@@ -25,13 +27,24 @@ export interface ICanvasMetrics {
 }
 
 /**
+ * Optional context passed through to commit handlers.
+ */
+export interface ICommitContext {
+  /**
+   * Handle from PdfController.loadEmbeddedFont(), used so added text containing
+   * non-Latin (e.g. CJK) glyphs embeds a real font instead of base-14 Helvetica.
+   */
+  embeddedFontPtr?: number;
+}
+
+/**
  * Handler interface for annotation operations
  */
 export interface IAnnotationHandler<T extends IAnnotation> {
   /** Render the annotation to a canvas context */
   render(ctx: CanvasRenderingContext2D, annotation: T): void;
   /** Commit the annotation to PDFium */
-  commit(controller: PdfController, annotation: T): void;
+  commit(controller: PdfController, annotation: T, ctx?: ICommitContext): void;
   /** Normalize coordinates when scale changes (scale-independent storage) */
   normalize(annotation: T, scale: number): T;
   /** Denormalize coordinates for rendering at current scale */
@@ -192,6 +205,142 @@ export const highlightHandler: IAnnotationHandler<IHighlightAnnotation> = {
 };
 
 // =============================================================================
+// Text Annotation Handler
+// =============================================================================
+
+// Text annotations are rendered as DOM elements (TextBox), not on canvas
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function renderTextAnnotation(_ctx: CanvasRenderingContext2D, _annotation: ITextAnnotation): void {
+  // No-op: Text annotations are rendered as React components
+}
+
+/**
+ * Split text into visual lines based on available width, matching the
+ * word-break: break-all behavior used in the TextBox textarea.
+ */
+function wrapTextToLines(text: string, fontSize: number, maxWidth: number): string[] {
+  const paragraphs = text.split('\n');
+  const lines: string[] = [];
+
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return [text];
+  ctx.font = `${fontSize}px Helvetica, Arial, sans-serif`;
+
+  for (const paragraph of paragraphs) {
+    if (paragraph === '') {
+      lines.push('');
+      continue;
+    }
+
+    let currentLine = '';
+    for (const char of paragraph) {
+      const testLine = currentLine + char;
+      if (ctx.measureText(testLine).width > maxWidth && currentLine.length > 0) {
+        lines.push(currentLine);
+        currentLine = char;
+      } else {
+        currentLine = testLine;
+      }
+    }
+    if (currentLine) {
+      lines.push(currentLine);
+    }
+  }
+
+  return lines.length > 0 ? lines : [''];
+}
+
+/** Parse a CSS rgb()/hex color string into 0-255 RGB components. */
+function cssColorToRgb255(color: string): { r: number; g: number; b: number } | null {
+  const m = /rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i.exec(color);
+  if (m) return { r: +m[1], g: +m[2], b: +m[3] };
+  const hex = /^#([0-9a-f]{6})$/i.exec(color);
+  if (hex) {
+    const n = parseInt(hex[1], 16);
+    return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+  }
+  return null;
+}
+
+function commitTextAnnotation(
+  controller: PdfController,
+  annotation: ITextAnnotation,
+  ctx?: ICommitContext,
+): void {
+  const { position, content, fontSize, dimensions } = annotation;
+
+  // Skip empty boxes — nothing to flatten into the page.
+  if (!content.trim()) return;
+
+  // Use dimensions if available, otherwise estimate based on content
+  const width =
+    dimensions?.width ??
+    Math.max(content.length * fontSize * 0.6, TEXT_ANNOTATION_DEFAULTS.MIN_WIDTH);
+  const height = dimensions?.height ?? fontSize * 1.5;
+
+  // Wrap text into visual lines matching the textarea's word-break: break-all
+  const lines = wrapTextToLines(content, fontSize, width);
+
+  controller.addTextAnnotation(annotation.pageIndex, {
+    scale: 1,
+    canvasRect: {
+      left: position.x,
+      top: position.y,
+      width,
+      height,
+    },
+    lines,
+    fontSize,
+    fontColor: cssColorToRgb255(annotation.fontColor) ?? TEXT_ANNOTATION_DEFAULTS.FONT_COLOR_RGB,
+    bold: annotation.fontWeight === 'bold',
+    italic: annotation.fontStyle === 'italic',
+    embeddedFontPtr: ctx?.embeddedFontPtr,
+  });
+}
+
+function normalizeTextAnnotation(annotation: ITextAnnotation, scale: number): ITextAnnotation {
+  return {
+    ...annotation,
+    position: {
+      x: annotation.position.x / scale,
+      y: annotation.position.y / scale,
+    },
+    fontSize: annotation.fontSize / scale,
+    dimensions: annotation.dimensions
+      ? {
+          width: annotation.dimensions.width / scale,
+          height: annotation.dimensions.height / scale,
+        }
+      : undefined,
+  };
+}
+
+function denormalizeTextAnnotation(annotation: ITextAnnotation, scale: number): ITextAnnotation {
+  return {
+    ...annotation,
+    position: {
+      x: annotation.position.x * scale,
+      y: annotation.position.y * scale,
+    },
+    fontSize: annotation.fontSize * scale,
+    dimensions: annotation.dimensions
+      ? {
+          width: annotation.dimensions.width * scale,
+          height: annotation.dimensions.height * scale,
+        }
+      : undefined,
+  };
+}
+
+export const textHandler: IAnnotationHandler<ITextAnnotation> = {
+  render: renderTextAnnotation,
+  commit: commitTextAnnotation,
+  normalize: normalizeTextAnnotation,
+  denormalize: denormalizeTextAnnotation,
+};
+
+// =============================================================================
 // Signature Annotation Handler
 // =============================================================================
 
@@ -269,6 +418,7 @@ export const signatureHandler: IAnnotationHandler<ISignatureAnnotation> = {
  */
 export function getHandler(type: 'draw'): IAnnotationHandler<IDrawAnnotation>;
 export function getHandler(type: 'highlight'): IAnnotationHandler<IHighlightAnnotation>;
+export function getHandler(type: 'text'): IAnnotationHandler<ITextAnnotation>;
 export function getHandler(type: 'signature'): IAnnotationHandler<ISignatureAnnotation>;
 export function getHandler(type: IAnnotation['type']): IAnnotationHandler<IAnnotation>;
 export function getHandler(type: IAnnotation['type']): IAnnotationHandler<IAnnotation> {
@@ -277,6 +427,8 @@ export function getHandler(type: IAnnotation['type']): IAnnotationHandler<IAnnot
       return drawHandler as IAnnotationHandler<IAnnotation>;
     case 'highlight':
       return highlightHandler as IAnnotationHandler<IAnnotation>;
+    case 'text':
+      return textHandler as IAnnotationHandler<IAnnotation>;
     case 'signature':
       return signatureHandler as IAnnotationHandler<IAnnotation>;
   }
@@ -306,8 +458,12 @@ export function renderAnnotation(ctx: CanvasRenderingContext2D, annotation: IAnn
 /**
  * Commit any annotation based on its type
  */
-export function commitAnnotation(controller: PdfController, annotation: IAnnotation): void {
-  getHandler(annotation.type).commit(controller, annotation);
+export function commitAnnotation(
+  controller: PdfController,
+  annotation: IAnnotation,
+  ctx?: ICommitContext,
+): void {
+  getHandler(annotation.type).commit(controller, annotation, ctx);
 }
 
 /**

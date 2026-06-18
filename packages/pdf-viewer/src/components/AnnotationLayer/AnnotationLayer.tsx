@@ -136,7 +136,7 @@ export const AnnotationLayer: React.FC<IAnnotationLayerProps> = ({
     onCommitHighlight,
   });
 
-  const { signatureAnnotations } = useRenderAnnotation({
+  const { textAnnotations, signatureAnnotations } = useRenderAnnotation({
     highlightCanvasRef,
     drawCanvasRef,
     metrics,
@@ -152,6 +152,7 @@ export const AnnotationLayer: React.FC<IAnnotationLayerProps> = ({
 
   const annotationLayerClassName = cn(
     'absolute top-0 left-0 w-[stretch] h-[stretch]',
+    selectedTool === 'text' && 'cursor-text',
     selectedTool === 'draw' && 'cursor-crosshair',
   );
 
@@ -175,6 +176,7 @@ export const AnnotationLayer: React.FC<IAnnotationLayerProps> = ({
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerCancel}
       />
+      {textAnnotations}
       {signatureAnnotations}
     </div>
   );

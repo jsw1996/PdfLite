@@ -5,11 +5,13 @@ import {
   type AnnotationType,
   isDrawAnnotation,
   isHighlightAnnotation,
+  isTextAnnotation,
   isSignatureAnnotation,
   renderAnnotation,
   drawAnnotationBounds,
   DRAW_TOOL_DEFAULTS,
 } from '../annotations';
+import { TextBox } from '../components/AnnotationLayer/TextBox';
 import { SignatureBox } from '../components/AnnotationLayer/SignatureBox';
 
 interface ICanvasMetrics {
@@ -92,8 +94,32 @@ export function useRenderAnnotation({
   drawStrokeWidth = DRAW_TOOL_DEFAULTS.STROKE_WIDTH,
   selectedDrawId = null,
 }: IUseRenderAnnotationOptions): {
+  textAnnotations: React.ReactElement[];
   signatureAnnotations: React.ReactElement[];
 } {
+  // Derive text annotations from annotations using useMemo
+  const containerSize = useMemo(
+    () => (metrics ? { width: metrics.cssWidth, height: metrics.cssHeight } : undefined),
+    [metrics],
+  );
+
+  const textAnnotations = useMemo(() => {
+    return annotations.filter(isTextAnnotation).map((a) =>
+      React.createElement(TextBox, {
+        key: a.id,
+        id: a.id,
+        content: a.content,
+        position: a.position,
+        fontSize: a.fontSize,
+        fontColor: a.fontColor,
+        fontWeight: a.fontWeight,
+        fontStyle: a.fontStyle,
+        dimensions: a.dimensions,
+        containerSize,
+      }),
+    );
+  }, [annotations, containerSize]);
+
   // Derive signature annotations from annotations using useMemo
   const signatureAnnotations = useMemo(() => {
     return annotations.filter(isSignatureAnnotation).map((a) =>
@@ -142,6 +168,7 @@ export function useRenderAnnotation({
       } else if (isDrawAnnotation(annotation)) {
         renderAnnotation(dctx, annotation);
       }
+      // Text annotations are rendered as React components, not on canvas
     }
 
     // Outline the selected draw stroke (if it lives on this page).
@@ -179,5 +206,5 @@ export function useRenderAnnotation({
     redraw();
   }, [redraw]);
 
-  return { signatureAnnotations };
+  return { textAnnotations, signatureAnnotations };
 }

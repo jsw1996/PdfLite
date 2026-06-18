@@ -17,6 +17,7 @@ import { LinkLayer } from '../LinkLayer/LinkLayer';
 import { StickyNoteLayer } from '../StickyNoteLayer/StickyNoteLayer';
 import { FormLayer } from '../FormLayer/FormLayer';
 import { useSelectionHighlight } from '../../hooks/useSelectionHighlight';
+import { useAddText } from '@/hooks/useAddText';
 import { useAddSignature } from '@/hooks/useAddSignature';
 import { SignatureDialog } from '../Signature/SignatureDialog';
 
@@ -33,17 +34,24 @@ export const ViewerPage: React.FC<IViewerPageProps> = ({ pageIndex, registerPage
   const [pdfCanvas, setPdfCanvas] = useState<HTMLCanvasElement | null>(null);
   const [containerEl, setContainerEl] = useState<HTMLDivElement | null>(null);
   const { controller, goToPage } = usePdfController();
-  const { setNativeAnnotationsForPage, selectedTool, getAnnotationsForPage, setSelectedDrawId } =
-    useAnnotation();
+  const {
+    setNativeAnnotationsForPage,
+    selectedTool,
+    isEditMode,
+    getAnnotationsForPage,
+    setSelectedDrawId,
+  } = useAnnotation();
 
   // Select tool (no annotation tool, not editing) lets the user click a stroke
   // to select it. Hit-testing happens here, in the page's capture phase, so a
   // miss falls through to links/forms/text/text-boxes instead of being eaten by
   // a full-page canvas overlay.
-  const isSelectMode = selectedTool === null;
+  const isSelectMode = selectedTool === null && !isEditMode;
   const handleSelectPointerDown = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
       if (!isSelectMode || !pdfCanvas) return;
+      // Let DOM annotations (text boxes) handle their own selection.
+      if ((e.target as HTMLElement).closest('.text-annotation-box')) return;
 
       const rect = pdfCanvas.getBoundingClientRect();
       const point = { x: e.clientX - rect.left, y: e.clientY - rect.top };
@@ -72,6 +80,7 @@ export const ViewerPage: React.FC<IViewerPageProps> = ({ pageIndex, registerPage
   const { scale } = usePdfState();
 
   const { handleHighlightOnInteraction } = useSelectionHighlight({ pageIndex, pdfCanvas });
+  useAddText(containerEl, pageIndex);
 
   const { isDialogOpen, setIsDialogOpen, onSignatureReady } = useAddSignature(
     containerEl,

@@ -8,6 +8,7 @@
 export const ANNOTATION_COLORS = {
   HIGHLIGHT: 'rgb(248, 196, 72)',
   DRAW: 'rgb(0, 0, 0)',
+  TEXT: 'rgb(0, 0, 0)',
 } as const;
 
 /**
@@ -60,6 +61,34 @@ export const HIGHLIGHT_COLOR_PRESETS = [
   'rgb(248, 153, 193)',
   'rgb(248, 168, 104)',
   'rgb(193, 153, 248)',
+] as const;
+
+/**
+ * Text annotation defaults
+ */
+export const TEXT_ANNOTATION_DEFAULTS = {
+  FONT_SIZE: 16,
+  FONT_COLOR: 'rgb(0, 0, 0)',
+  /** RGB values for PDFium commit */
+  FONT_COLOR_RGB: { r: 0, g: 0, b: 0 },
+  FONT_WEIGHT: 'normal',
+  FONT_STYLE: 'normal',
+  MIN_WIDTH: 50,
+  /** Bounds for the font-size control (in points / logical px at scale=1) */
+  MIN_FONT_SIZE: 6,
+  MAX_FONT_SIZE: 96,
+} as const;
+
+/**
+ * Preset swatches shown in the text styling toolbar.
+ */
+export const TEXT_COLOR_PRESETS = [
+  'rgb(0, 0, 0)',
+  'rgb(224, 49, 49)',
+  'rgb(240, 140, 0)',
+  'rgb(47, 158, 68)',
+  'rgb(25, 113, 194)',
+  'rgb(156, 54, 181)',
 ] as const;
 
 /**
