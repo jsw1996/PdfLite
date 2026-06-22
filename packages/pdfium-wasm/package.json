@@ -18,9 +18,10 @@
     "wasm"
   ],
   "scripts": {
-    "build": "pnpm run build:wasm && pnpm run build:ts",
+    "build": "pnpm run build:ts",
     "build:wasm": "powershell -ExecutionPolicy Bypass -File ./build.ps1",
     "build:ts": "tsc",
+    "rebuild:wasm": "pnpm run build:wasm && pnpm run build:ts",
     "dev": "tsc -w --preserveWatchOutput",
     "build:docker": "docker build -t pdfium-wasm-builder ./build",
     "run:docker": "docker run --rm -v \"%cd%/wasm:/build/output\" pdfium-wasm-builder",

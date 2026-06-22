@@ -35,8 +35,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
-      - name: Build pdfium-wasm (TypeScript only, wasm is pre-committed)
-        run: pnpm --filter @pdfviewer/pdfium-wasm run build:ts
+      - name: Build pdfium-wasm wrapper
+        run: pnpm --filter @pdfviewer/pdfium-wasm build
 
       - name: Build controller
         run: pnpm --filter @pdfviewer/controller build

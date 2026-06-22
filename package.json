@@ -2,6 +2,7 @@
   "name": "pdfviewer",
   "version": "1.0.0",
   "private": true,
+  "type": "module",
   "description": "Web PDF Viewer with PDFium",
   "scripts": {
     "lint": "eslint .",
@@ -12,7 +13,7 @@
     "build": "pnpm exec turbo build",
     "commit": "git-cz",
     "prepare": "husky",
-    "build:pdfium": "pnpm --filter @pdfviewer/pdfium-wasm build"
+    "build:pdfium": "pnpm --filter @pdfviewer/pdfium-wasm rebuild:wasm"
   },
   "config": {
     "commitizen": {

@@ -50,7 +50,7 @@ export default defineConfig([
     },
     settings: {
       react: {
-        version: 'detect',
+        version: '19.2',
       },
     },
     rules: {
@@ -74,6 +74,16 @@ export default defineConfig([
           prefix: ['I'],
         },
       ],
+    },
+  },
+  {
+    files: [
+      'packages/pdf-viewer/src/providers/**/*.{ts,tsx}',
+      'packages/pdf-viewer/src/components/ToolButtons/SidebarTriggerButton.tsx',
+      'packages/ui/src/components/**/*.{ts,tsx}',
+    ],
+    rules: {
+      'react-refresh/only-export-components': 'off',
     },
   },
   {
