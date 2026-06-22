@@ -1,8 +1,14 @@
 import React, { useEffect, useState } from 'react';
-import { Bold, Italic, Minus, Plus, Trash2 } from 'lucide-react';
+import { Bold, Italic, Minus, Plus } from 'lucide-react';
 import { cn } from '@pdfviewer/ui/lib/utils';
 import { TEXT_ANNOTATION_DEFAULTS, TEXT_COLOR_PRESETS } from '../../annotations';
 import { colorKey, hexToRgbString, rgbStringToHex } from '../../utils/color';
+import {
+  AnnotationToolbar,
+  ToolbarDeleteButton,
+  ToolbarDivider,
+  toolbarIconBtn,
+} from './AnnotationToolbar';
 
 export interface ITextStyleToolbarProps {
   /** Current font size in logical points (scale-independent) */
@@ -19,9 +25,6 @@ export interface ITextStyleToolbarProps {
   /** Render above or below the text box, depending on available room */
   placement: 'above' | 'below';
 }
-
-const iconBtn =
-  'flex h-7 w-7 items-center justify-center rounded-md text-foreground/80 transition-colors hover:bg-foreground/10';
 
 export const TextStyleToolbar: React.FC<ITextStyleToolbarProps> = ({
   fontSizePt,
@@ -72,23 +75,12 @@ export const TextStyleToolbar: React.FC<ITextStyleToolbarProps> = ({
   const keepFocus = (e: React.MouseEvent) => e.preventDefault();
 
   return (
-    <div
-      // Stop drag/selection logic in the parent box from firing, but allow the
-      // controls themselves to receive focus/click (no preventDefault).
-      onPointerDown={(e) => e.stopPropagation()}
-      onClick={(e) => e.stopPropagation()}
-      className={cn(
-        'absolute left-0 z-1001 flex items-center gap-1 rounded-lg border border-border/60',
-        'bg-popover/95 p-1 shadow-md backdrop-blur-sm',
-        placement === 'above' ? 'bottom-[calc(100%+8px)]' : 'top-[calc(100%+8px)]',
-      )}
-      style={{ cursor: 'default' }}
-    >
+    <AnnotationToolbar placement={placement}>
       {/* Font size stepper */}
       <div className="flex items-center">
         <button
           type="button"
-          className={iconBtn}
+          className={toolbarIconBtn}
           onMouseDown={keepFocus}
           onClick={() => step(-1)}
           aria-label="Decrease font size"
@@ -109,7 +101,7 @@ export const TextStyleToolbar: React.FC<ITextStyleToolbarProps> = ({
         />
         <button
           type="button"
-          className={iconBtn}
+          className={toolbarIconBtn}
           onMouseDown={keepFocus}
           onClick={() => step(1)}
           aria-label="Increase font size"
@@ -118,12 +110,12 @@ export const TextStyleToolbar: React.FC<ITextStyleToolbarProps> = ({
         </button>
       </div>
 
-      <div className="mx-0.5 h-5 w-px bg-border/60" />
+      <ToolbarDivider />
 
       {/* Bold / Italic */}
       <button
         type="button"
-        className={cn(iconBtn, bold && 'bg-foreground/10 text-foreground')}
+        className={cn(toolbarIconBtn, bold && 'bg-foreground/10 text-foreground')}
         onMouseDown={keepFocus}
         onClick={onToggleBold}
         aria-pressed={bold}
@@ -133,7 +125,7 @@ export const TextStyleToolbar: React.FC<ITextStyleToolbarProps> = ({
       </button>
       <button
         type="button"
-        className={cn(iconBtn, italic && 'bg-foreground/10 text-foreground')}
+        className={cn(toolbarIconBtn, italic && 'bg-foreground/10 text-foreground')}
         onMouseDown={keepFocus}
         onClick={onToggleItalic}
         aria-pressed={italic}
@@ -142,7 +134,7 @@ export const TextStyleToolbar: React.FC<ITextStyleToolbarProps> = ({
         <Italic size={15} />
       </button>
 
-      <div className="mx-0.5 h-5 w-px bg-border/60" />
+      <ToolbarDivider />
 
       {/* Color presets */}
       <div className="flex items-center gap-1">
@@ -180,17 +172,9 @@ export const TextStyleToolbar: React.FC<ITextStyleToolbarProps> = ({
         </label>
       </div>
 
-      <div className="mx-0.5 h-5 w-px bg-border/60" />
+      <ToolbarDivider />
 
-      <button
-        type="button"
-        className={cn(iconBtn, 'hover:bg-destructive/15 hover:text-destructive')}
-        onMouseDown={keepFocus}
-        onClick={onDelete}
-        aria-label="Delete text"
-      >
-        <Trash2 size={15} />
-      </button>
-    </div>
+      <ToolbarDeleteButton onDelete={onDelete} label="Delete text" />
+    </AnnotationToolbar>
   );
 };
