@@ -91,6 +91,34 @@ export function collectCodepoints(texts: string[]): number[] {
   return [...set];
 }
 
+// CJK code-point ranges (kept in sync with the controller's reflow detection):
+// symbols/kana/ideographs, Hangul, compatibility ideographs, fullwidth forms.
+const CJK_RANGES: readonly (readonly [number, number])[] = [
+  [0x3000, 0x9fff],
+  [0xac00, 0xd7af],
+  [0xf900, 0xfaff],
+  [0xff00, 0xffef],
+];
+
+/** True if the text contains any CJK character. */
+export function textHasCjk(text: string): boolean {
+  for (const ch of text) {
+    const cp = ch.codePointAt(0)!;
+    if (CJK_RANGES.some(([a, b]) => cp >= a && cp <= b)) return true;
+  }
+  return false;
+}
+
+/**
+ * Code points to subset+embed so edited paragraphs that contain CJK render. Only
+ * the texts that actually contain CJK contribute (so a pure-Latin edit needs no
+ * embedding); returns [] when none do.
+ */
+export function collectCjkSubsetCodepoints(texts: string[]): number[] {
+  const cjkTexts = texts.filter(textHasCjk);
+  return cjkTexts.length > 0 ? collectCodepoints(cjkTexts) : [];
+}
+
 /**
  * Produce a subset of the bundled CJK font containing the given code points
  * (plus printable ASCII), suitable for PdfController.loadEmbeddedFont(). Using

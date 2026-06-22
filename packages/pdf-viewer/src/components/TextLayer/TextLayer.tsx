@@ -7,36 +7,92 @@ import React, {
   useRef,
   useState,
 } from 'react';
+import { createPortal } from 'react-dom';
 import { usePdfController } from '@/providers/PdfControllerContextProvider';
-import { useAnnotation } from '@/providers/AnnotationContextProvider';
-import type { IEditableTextObject } from '@pdfviewer/controller';
 import {
+  useAnnotation,
+  type IParagraphFormatOverride,
+} from '@/providers/AnnotationContextProvider';
+import type { IEditableTextObject } from '@pdfviewer/controller';
+import type { IEditableParagraph } from './TextLayerEditingUtils';
+import {
+  applyFormatOverrideToEditor,
   buildEditableParagraphsFromTextRects,
   buildEditorHtml,
   buildEditorHtmlFromText,
+  convertEditorToFlowing,
   convertRectsToBaseSpans,
   extractTextFromEditor,
+  groupParagraphRuns,
+  isFormatOverrideEmpty,
   mapParagraphLinesToObjectGroups,
+  mapStandardFontFamily,
   normalizeEditableText,
+  paragraphEditorText,
   parseCssRgba,
   resolveParagraphEditorStyle,
   wordWrapText,
 } from './TextLayerEditingUtils';
+import { measureTextWidthAtBaseSize } from './TextMeasurementUtils';
+import { EditTextFormatToolbar, type TextAlign } from './EditTextFormatToolbar';
 
 export interface ITextLayerProps {
   pageIndex: number;
   scale?: number;
 }
 
+/** Place the caret inside `el` at the document point (clientX/clientY), or at the end. */
+function placeCaretFromPoint(el: HTMLElement, x: number, y: number): void {
+  const sel = window.getSelection();
+  if (!sel) return;
+  const doc = document as Document & {
+    caretRangeFromPoint?: (x: number, y: number) => Range | null;
+    caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
+  };
+  let range: Range | null = null;
+  if (typeof doc.caretRangeFromPoint === 'function') {
+    range = doc.caretRangeFromPoint(x, y);
+  } else if (typeof doc.caretPositionFromPoint === 'function') {
+    const pos = doc.caretPositionFromPoint(x, y);
+    if (pos) {
+      range = document.createRange();
+      range.setStart(pos.offsetNode, pos.offset);
+    }
+  }
+  if (range && el.contains(range.startContainer)) {
+    range.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(range);
+    return;
+  }
+  const end = document.createRange();
+  end.selectNodeContents(el);
+  end.collapse(false);
+  sel.removeAllRanges();
+  sel.addRange(end);
+}
+
 /**
- * TextLayer component renders invisible but selectable text over the PDF canvas.
- * This enables text selection, copy/paste, and search functionality.
- * In edit mode, all paragraphs are rendered as contentEditable editors.
+ * TextLayer renders invisible but selectable text over the PDF canvas, enabling
+ * selection, copy/paste, and search.
+ *
+ * In Edit Text mode each reconstructed paragraph is a "block": transparent and
+ * subtly highlighted on hover. Clicking a block turns it into a contentEditable
+ * text box with a floating formatting toolbar. A block that has been edited
+ * stays rendered as a box (covering the canvas) so its changes remain visible
+ * until they are committed on edit-mode exit.
  */
 export const TextLayer: React.FC<ITextLayerProps> = ({ pageIndex, scale = 1.5 }) => {
   const { controller, isInitialized } = usePdfController();
-  const { isEditMode, renderVersion, editSessionData } = useAnnotation();
-  const { savedEditorText, savedLineColors } = editSessionData;
+  const {
+    isEditMode,
+    renderVersion,
+    editSessionData,
+    activeEditor,
+    setActiveEditor,
+    markPageEdited,
+  } = useAnnotation();
+  const { savedEditorText, savedLineColors, savedFormatOverrides } = editSessionData;
   const layerRef = useRef<HTMLDivElement | null>(null);
 
   // Pre-computed commit data for all paragraphs (populated on entering edit mode)
@@ -44,6 +100,16 @@ export const TextLayer: React.FC<ITextLayerProps> = ({ pageIndex, scale = 1.5 })
   const originalTextsRef = useRef<Map<number, string>>(new Map());
   // Live text from each editor, updated on every input event
   const editorTextsRef = useRef<Map<number, string>>(new Map());
+  // Per-paragraph formatting overrides applied this session (local mirror of
+  // savedFormatOverrides so commits read from a ref the provider can't clear
+  // out from under them on edit-mode exit).
+  const formatOverridesRef = useRef<Map<number, IParagraphFormatOverride>>(new Map());
+  // Live editor DOM nodes, so the floating toolbar can mutate the focused
+  // paragraph's styles directly (keeping the caret intact) and so we can focus
+  // a block right after it becomes editable.
+  const editorElsRef = useRef<Map<number, HTMLElement>>(new Map());
+  // A block just clicked, awaiting focus/caret placement once it mounts as a box.
+  const pendingFocusRef = useRef<{ idx: number; x: number; y: number } | null>(null);
   // True while an IME composition is in progress so onInput doesn't stage
   // half-composed (CJK) buffers.
   const composingRef = useRef(false);
@@ -98,6 +164,26 @@ export const TextLayer: React.FC<ITextLayerProps> = ({ pageIndex, scale = 1.5 })
     return buildEditableParagraphsFromTextRects(textContent.textRects, 1);
   }, [isEditMode, textContent]);
 
+  // Apply saved per-line colors to a paragraph so style resolution (and the
+  // toolbar's "current color") reflects the original colors even after
+  // FPDFPage_GenerateContent corrupts the content stream's color data.
+  const colorSafeParagraphAt = useCallback(
+    (idx: number): IEditableParagraph | null => {
+      const paragraph = editableParagraphs[idx];
+      if (!paragraph) return null;
+      const savedColors = savedLineColors.get(`${pageIndex}:${idx}`);
+      if (!savedColors) return paragraph;
+      return {
+        ...paragraph,
+        lines: paragraph.lines.map((line, li) => ({
+          ...line,
+          color: savedColors[Math.min(li, savedColors.length - 1)] ?? line.color,
+        })),
+      };
+    },
+    [editableParagraphs, pageIndex, savedLineColors],
+  );
+
   const refreshParagraphObjectGroups = useCallback(() => {
     const editableObjects = controller.listEditableTextObjects(pageIndex, {
       scale: 1,
@@ -119,23 +205,26 @@ export const TextLayer: React.FC<ITextLayerProps> = ({ pageIndex, scale = 1.5 })
           claimedIndices.add(obj.objectIndex);
         }
       }
+      // Baseline for the commit-time equality check (nextText === originalText).
+      // Prefer the text already committed in a prior session (savedEditorText) so
+      // re-entering and exiting without a change does NOT re-commit. Falls back to
+      // the paragraph's clean text. Normalized so it compares like-for-like with
+      // staged editor text (which is always normalized).
+      const baselineKey = `${pageIndex}:${i}`;
+      const committedText = savedEditorText.get(baselineKey);
+      const baselineText = committedText ?? normalizeEditableText(paragraphEditorText(paragraph));
       if (!originalTextsRef.current.has(i)) {
-        // Store the normalized form so the commit-time equality check
-        // (nextText === originalText) compares like-for-like — staged editor
-        // text is always normalized. Otherwise an untouched paragraph whose raw
-        // text differs only by NBSP/\r normalization would be needlessly
-        // reflowed (and could corrupt text the user never edited).
-        originalTextsRef.current.set(i, normalizeEditableText(paragraph.text));
+        originalTextsRef.current.set(i, baselineText);
       }
       if (!editorTextsRef.current.has(i)) {
-        const key = `${pageIndex}:${i}`;
-        editorTextsRef.current.set(
-          i,
-          savedEditorText.get(key) ?? normalizeEditableText(paragraph.text),
-        );
+        editorTextsRef.current.set(i, baselineText);
+      }
+      if (!formatOverridesRef.current.has(i)) {
+        const saved = savedFormatOverrides.get(`${pageIndex}:${i}`);
+        if (saved) formatOverridesRef.current.set(i, saved);
       }
     }
-  }, [controller, editableParagraphs, pageIndex, savedEditorText]);
+  }, [controller, editableParagraphs, pageIndex, savedEditorText, savedFormatOverrides]);
 
   // Pre-compute lineObjectGroups for all paragraphs when entering edit mode.
   // NOTE: We do NOT clear refs here when isEditMode becomes false — the exit-mode
@@ -179,37 +268,31 @@ export const TextLayer: React.FC<ITextLayerProps> = ({ pageIndex, scale = 1.5 })
     [controller, editableParagraphs, pageIndex],
   );
 
-  // Commit a single paragraph with word-wrap reflow
+  // Commit a single paragraph with word-wrap reflow plus any formatting override.
   const commitParagraphText = useCallback(
     (paragraphIndex: number, nextText: string, skipGenerateContent = false) => {
       const lineObjectGroups = resolveLineObjectGroups(paragraphIndex);
       const originalText = originalTextsRef.current.get(paragraphIndex);
       if (!lineObjectGroups || originalText === undefined) return;
-      if (nextText === originalText) return;
+
+      const override = formatOverridesRef.current.get(paragraphIndex);
+      const hasFormat = !isFormatOverrideEmpty(override);
+      // Skip only when neither the text nor the formatting changed.
+      if (nextText === originalText && !hasFormat) return;
 
       const paragraph = editableParagraphs[paragraphIndex];
       if (!paragraph) return;
 
       try {
         const style = resolveParagraphEditorStyle(paragraph);
+        const fontScale = override?.fontScale && override.fontScale > 0 ? override.fontScale : 1;
+        const scaledFontSizePx = style.fontSizePx * fontScale;
+
         const savedColors = savedLineColors.get(`${pageIndex}:${paragraphIndex}`);
-        const dominantColor = savedColors?.[0] ?? style.color;
+        const dominantColor = override?.color ?? savedColors?.[0] ?? style.color;
 
         // Effective content width (before CSS scaleX transform)
         const effectiveWidth = paragraph.rect.width / style.scaleX;
-
-        // Split on hard newlines, then word-wrap each segment
-        const hardLines = nextText.replace(/\r\n/g, '\n').split('\n');
-        const wrappedLines: string[] = [];
-        for (const hardLine of hardLines) {
-          const subLines = wordWrapText(
-            hardLine,
-            effectiveWidth,
-            style.fontFamily,
-            style.fontSizePx,
-          );
-          wrappedLines.push(...subLines);
-        }
 
         const existingObjectIndices = lineObjectGroups.flatMap((group) =>
           group.map((obj) => obj.objectIndex),
@@ -220,11 +303,76 @@ export const TextLayer: React.FC<ITextLayerProps> = ({ pageIndex, scale = 1.5 })
           return;
         }
 
-        // Build reflow line updates with per-line colors
-        const reflowLines = wrappedLines.map((text, i) => {
-          const colorCss = savedColors?.[Math.min(i, savedColors.length - 1)] ?? dominantColor;
-          return { text, color: parseCssRgba(colorCss) };
-        });
+        const align: TextAlign = override?.align ?? 'left';
+        const alignFactor = align === 'center' ? 0.5 : align === 'right' ? 1 : 0;
+
+        // Each hard line (separated by a newline in the editor) is now one
+        // logical paragraph — the editor merges the source's soft-wrapped lines
+        // into a single flowing run, so a newline only appears at a real
+        // paragraph break. Word-wrap each paragraph at the (possibly scaled) font
+        // size and build the per-line reflow updates. Each wrapped line carries
+        // its color and a horizontal offset: alignment (center/right) when set,
+        // otherwise the paragraph's first-line indent — preserved for
+        // left-aligned text so committing doesn't flatten indented paragraphs.
+        const hardLines = nextText.replace(/\r\n/g, '\n').split('\n');
+        const runs = groupParagraphRuns(paragraph);
+        const reflowLines: {
+          text: string;
+          color: ReturnType<typeof parseCssRgba>;
+          xOffsetDevicePx: number;
+          isParagraphEnd: boolean;
+        }[] = [];
+        for (let h = 0; h < hardLines.length; h++) {
+          const subLines = wordWrapText(
+            hardLines[h],
+            effectiveWidth,
+            style.fontFamily,
+            scaledFontSizePx,
+          );
+          // The h-th hard line maps to the h-th run (clamped if the user added or
+          // removed paragraph breaks). The run supplies this paragraph's indent.
+          const run = runs[Math.min(h, runs.length - 1)];
+          const lineIndent = alignFactor === 0 ? (run?.indent ?? 0) : 0;
+          for (let si = 0; si < subLines.length; si++) {
+            const text = subLines[si];
+            const idx = reflowLines.length;
+            const colorCss =
+              override?.color ??
+              savedColors?.[Math.min(idx, (savedColors?.length ?? 1) - 1)] ??
+              dominantColor;
+            let xOffsetDevicePx = 0;
+            if (alignFactor > 0 && text) {
+              const lineWidth =
+                measureTextWidthAtBaseSize(text, style.fontFamily) * scaledFontSizePx;
+              xOffsetDevicePx = Math.max(0, (paragraph.rect.width - lineWidth) * alignFactor);
+            } else if (si === 0) {
+              xOffsetDevicePx = lineIndent;
+            }
+            // Each hard line is a whole paragraph, so only its final sub-line
+            // ends the paragraph (and stays ragged); earlier sub-lines are
+            // interior and justify to the column edge.
+            const isParagraphEnd = si === subLines.length - 1;
+            reflowLines.push({
+              text,
+              color: parseCssRgba(colorCss),
+              xOffsetDevicePx,
+              isParagraphEnd,
+            });
+          }
+        }
+
+        const standardFontFamily = mapStandardFontFamily(override?.fontFamily);
+        const needsFormatting =
+          !!override &&
+          (!!override.bold || !!override.italic || fontScale !== 1 || !!standardFontFamily);
+        const formatting = needsFormatting
+          ? {
+              fontSizeScale: fontScale !== 1 ? fontScale : undefined,
+              bold: override?.bold,
+              italic: override?.italic,
+              standardFontFamily,
+            }
+          : undefined;
 
         const result = controller.reflowEditableTextObjects(pageIndex, {
           referenceObjectIndex: existingObjectIndices[0],
@@ -232,14 +380,15 @@ export const TextLayer: React.FC<ITextLayerProps> = ({ pageIndex, scale = 1.5 })
           existingObjectIndices,
           scale: 1,
           paragraphRect: paragraph.rect,
-          lineHeightDevicePx: style.lineHeightPx,
+          lineHeightDevicePx: style.lineHeightPx * fontScale,
           skipGenerateContent,
+          formatting,
         });
 
         if (result.usedFallbackFont) {
           console.warn(
             `[TextLayer] Page ${pageIndex + 1}: the original font was not available; ` +
-              `Helvetica was used as a fallback. Some glyphs or metrics may differ.`,
+              `a fallback was used. Some glyphs or metrics may differ.`,
           );
         }
 
@@ -282,6 +431,8 @@ export const TextLayer: React.FC<ITextLayerProps> = ({ pageIndex, scale = 1.5 })
     const textsRef = editorTextsRef.current;
     const objectGroupsRef = paragraphObjectGroupsRef.current;
     const origsRef = originalTextsRef.current;
+    const overridesRef = formatOverridesRef.current;
+    const elsRef = editorElsRef.current;
     const ctrl = controller;
     const page = pageIndex;
     return () => {
@@ -304,6 +455,8 @@ export const TextLayer: React.FC<ITextLayerProps> = ({ pageIndex, scale = 1.5 })
       textsRef.clear();
       objectGroupsRef.clear();
       origsRef.clear();
+      overridesRef.clear();
+      elsRef.clear();
     };
   }, [isEditMode, controller, pageIndex]);
 
@@ -314,11 +467,38 @@ export const TextLayer: React.FC<ITextLayerProps> = ({ pageIndex, scale = 1.5 })
   // re-injected via contentEditable rehydration.
   const stageEditorContent = useCallback(
     (editor: HTMLElement, idx: number) => {
+      // Only flowed editors carry edited text. An un-flowed editor is still in the
+      // exact per-line layout the user never typed into; its innerText is the
+      // per-line form (newline per visual line), which must NOT overwrite the
+      // run-based baseline staged at mount or the commit would treat each soft
+      // wrap as a hard paragraph break.
+      if (editor.dataset.flowed !== '1') return;
       const text = normalizeEditableText(extractTextFromEditor(editor));
       editorTextsRef.current.set(idx, text);
       savedEditorText.set(`${pageIndex}:${idx}`, text);
+      // Pin this page in the viewer once it has a real change, so its edits
+      // still commit on exit even if it scrolls out of the virtualized window.
+      const original = originalTextsRef.current.get(idx);
+      if (original !== undefined && text !== original) markPageEdited(pageIndex);
     },
-    [pageIndex, savedEditorText],
+    [markPageEdited, pageIndex, savedEditorText],
+  );
+
+  // Convert a freshly-opened per-line editor (exact original line breaks) to the
+  // flowing per-paragraph layout on the user's first edit, so subsequent typing
+  // reflows naturally. The caret is preserved across the rebuild. Idempotent.
+  const ensureEditorFlowed = useCallback(
+    (editor: HTMLElement, idx: number) => {
+      if (editor.dataset.flowed === '1') return;
+      const paragraph = editableParagraphs[idx];
+      if (paragraph) {
+        const style = resolveParagraphEditorStyle(colorSafeParagraphAt(idx) ?? paragraph);
+        convertEditorToFlowing(editor, paragraph, style.lineHeightPx);
+        applyFormatOverrideToEditor(editor, formatOverridesRef.current.get(idx));
+      }
+      editor.dataset.flowed = '1';
+    },
+    [colorSafeParagraphAt, editableParagraphs],
   );
 
   // Stage immediately (clearing any pending debounced stage). Used on blur and
@@ -354,6 +534,8 @@ export const TextLayer: React.FC<ITextLayerProps> = ({ pageIndex, scale = 1.5 })
       event.preventDefault();
       const text = event.clipboardData.getData('text/plain');
       const target = event.currentTarget as HTMLElement;
+      // Flow the editor before inserting so the paste lands in the flowing layout.
+      ensureEditorFlowed(target, idx);
       // execCommand is deprecated but widely supported and handles multi-line
       // insertion natively. Fall back to a Range-based insert if it no-ops so
       // paste never silently fails.
@@ -376,12 +558,120 @@ export const TextLayer: React.FC<ITextLayerProps> = ({ pageIndex, scale = 1.5 })
       }
       queueMicrotask(() => flushStageEditorContent(target, idx));
     },
-    [flushStageEditorContent],
+    [ensureEditorFlowed, flushStageEditorContent],
   );
+
+  // ─── Block activation + floating formatting toolbar ─────────────────────────
+
+  // Only the page holding the focused editor renders the (single) toolbar.
+  const activeIdx =
+    isEditMode && activeEditor?.pageIndex === pageIndex ? activeEditor.paragraphIndex : null;
+
+  // A bump counter that forces the toolbar to re-read the active override from
+  // savedFormatOverrides (a plain Map, safe to read during render) after a
+  // formatting change. The override also lives in a ref for commit-time reads,
+  // which the render path must never touch (react-hooks/refs).
+  const [formatTick, setFormatTick] = useState(0);
+
+  // Turn a (possibly idle) block into the active editable box. Flush the
+  // previously-active editor first so its edited/idle render decision is correct.
+  const activateBlock = useCallback(
+    (idx: number, clientX: number, clientY: number) => {
+      if (activeIdx != null && activeIdx !== idx) {
+        const prevEl = editorElsRef.current.get(activeIdx);
+        if (prevEl) flushStageEditorContent(prevEl, activeIdx);
+      }
+      pendingFocusRef.current = { idx, x: clientX, y: clientY };
+      setActiveEditor({ pageIndex, paragraphIndex: idx });
+    },
+    [activeIdx, flushStageEditorContent, pageIndex, setActiveEditor],
+  );
+
+  // Focus + place the caret once a clicked block has mounted as a contentEditable box.
+  useEffect(() => {
+    const pending = pendingFocusRef.current;
+    if (activeIdx == null || pending?.idx !== activeIdx) return;
+    pendingFocusRef.current = null;
+    const el = editorElsRef.current.get(activeIdx);
+    if (!el) return;
+    el.focus({ preventScroll: true });
+    placeCaretFromPoint(el, pending.x, pending.y);
+  }, [activeIdx]);
+
+  const updateActiveOverride = useCallback(
+    (patch: Partial<IParagraphFormatOverride>) => {
+      if (activeIdx == null) return;
+      const key = `${pageIndex}:${activeIdx}`;
+      const current = formatOverridesRef.current.get(activeIdx) ?? {};
+      const next = { ...current, ...patch };
+      formatOverridesRef.current.set(activeIdx, next);
+      savedFormatOverrides.set(key, next);
+      const el = editorElsRef.current.get(activeIdx);
+      if (el) applyFormatOverrideToEditor(el, next);
+      markPageEdited(pageIndex);
+      setFormatTick((t) => t + 1);
+    },
+    [activeIdx, markPageEdited, pageIndex, savedFormatOverrides],
+  );
+
+  // Position the toolbar over the focused editor (viewport coordinates). The
+  // editor box lives inside an overflow-hidden layer, so the toolbar is
+  // portaled to <body> and tracked on scroll/resize instead.
+  const [toolbarPos, setToolbarPos] = useState<{
+    left: number;
+    top: number;
+    placement: 'above' | 'below';
+  } | null>(null);
+  useLayoutEffect(() => {
+    // Measure the focused editor and place the toolbar above/below it. setState
+    // is only ever invoked asynchronously (microtask for the initial measure,
+    // then scroll/resize callbacks), so this effect never triggers a synchronous
+    // cascading render.
+    const update = () => {
+      const el = activeIdx != null ? editorElsRef.current.get(activeIdx) : null;
+      if (!el?.isConnected) {
+        setToolbarPos(null);
+        return;
+      }
+      const r = el.getBoundingClientRect();
+      const gap = 8;
+      const estHeight = 46;
+      const placeAbove = r.top - gap - estHeight > 8;
+      setToolbarPos({
+        left: Math.max(8, r.left),
+        top: placeAbove ? r.top - gap : r.bottom + gap,
+        placement: placeAbove ? 'above' : 'below',
+      });
+    };
+    queueMicrotask(update);
+    if (activeIdx == null) return;
+    window.addEventListener('scroll', update, true);
+    window.addEventListener('resize', update);
+    return () => {
+      window.removeEventListener('scroll', update, true);
+      window.removeEventListener('resize', update);
+    };
+  }, [activeIdx, deferredScale, renderVersion, formatTick]);
+
+  // Derive the toolbar's "current style" from the active paragraph's resolved
+  // (original) style plus its override. The override is read from
+  // savedFormatOverrides (a plain Map — safe during render); formatTick forces a
+  // re-read after each change.
+  void formatTick;
+  const activeOverride: IParagraphFormatOverride =
+    activeIdx != null ? (savedFormatOverrides.get(`${pageIndex}:${activeIdx}`) ?? {}) : {};
+  const activeColorSafeParagraph = activeIdx != null ? colorSafeParagraphAt(activeIdx) : null;
+  const activeBaseStyle = activeColorSafeParagraph
+    ? resolveParagraphEditorStyle(activeColorSafeParagraph)
+    : null;
+  const activeFontScale =
+    activeOverride.fontScale && activeOverride.fontScale > 0 ? activeOverride.fontScale : 1;
 
   if (!textContent) {
     return null;
   }
+
+  const showToolbar = activeIdx != null && activeBaseStyle != null && toolbarPos != null;
 
   return (
     <div
@@ -438,47 +728,85 @@ export const TextLayer: React.FC<ITextLayerProps> = ({ pageIndex, scale = 1.5 })
         </>
       )}
 
-      {/* Edit mode — all paragraphs as contentEditable editors.
-          Paragraphs are computed at scale=1; the wrapper applies CSS transform
-          so editor inner HTML stays valid across zoom changes. */}
+      {/* Edit mode — each paragraph is a block. Idle blocks are transparent and
+          highlight on hover; clicking (or any prior edit) promotes a block to a
+          contentEditable box. Paragraphs are computed at scale=1; the wrapper
+          applies CSS transform so editor inner HTML stays valid across zoom. */}
       {isEditMode && (
         <div style={{ transform: `scale(${deferredScale})`, transformOrigin: '0 0' }}>
           {editableParagraphs.map((paragraph, idx) => {
-            const savedColors = savedLineColors.get(`${pageIndex}:${idx}`);
-            const colorSafeParagraph = savedColors
-              ? {
-                  ...paragraph,
-                  lines: paragraph.lines.map((line, li) => ({
-                    ...line,
-                    color: savedColors[Math.min(li, savedColors.length - 1)] ?? line.color,
-                  })),
-                }
-              : paragraph;
+            const key = `${pageIndex}:${idx}`;
+            const colorSafeParagraph = colorSafeParagraphAt(idx) ?? paragraph;
             const style = resolveParagraphEditorStyle(colorSafeParagraph);
-            const savedText = savedEditorText.get(`${pageIndex}:${idx}`);
+            const firstLineFontSize = paragraph.lines[0]?.fontSizePx ?? 0;
+            const halfLeading = (style.lineHeightPx - firstLineFontSize) / 2;
+
+            const isActive = activeIdx === idx;
+            const original = normalizeEditableText(paragraphEditorText(paragraph));
+            const savedText = savedEditorText.get(key);
+            const override = savedFormatOverrides.get(key);
+            const isEdited =
+              (savedText !== undefined && savedText !== original) ||
+              !isFormatOverrideEmpty(override);
+            const asBox = isActive || isEdited;
+
+            // Stable identity (page-space rect) keyed per render mode so a block
+            // remounts when it flips between overlay and editable box.
+            const paraKey = `${Math.round(paragraph.rect.left)}-${Math.round(
+              paragraph.rect.top,
+            )}-${Math.round(paragraph.rect.width)}-${idx}`;
+
+            const blockTop = paragraph.rect.top - halfLeading;
+            const blockHeight = paragraph.rect.height + halfLeading;
+
+            if (!asBox) {
+              // Idle block: transparent, subtle hover highlight, click to edit.
+              return (
+                <div
+                  key={`idle-${paraKey}`}
+                  role="button"
+                  tabIndex={-1}
+                  aria-label="Edit text block"
+                  className="absolute z-30 cursor-text rounded-[2px] pointer-events-auto bg-transparent transition-colors hover:bg-[rgba(37,99,235,0.12)] hover:ring-1 hover:ring-inset hover:ring-[rgba(37,99,235,0.55)]"
+                  style={{
+                    left: `${paragraph.rect.left}px`,
+                    top: `${blockTop}px`,
+                    width: `${paragraph.rect.width}px`,
+                    height: `${blockHeight}px`,
+                  }}
+                  onMouseDown={(e) => {
+                    if (e.button !== 0) return;
+                    // Prevent starting a text selection on the transparent block;
+                    // we place the caret ourselves once it becomes editable.
+                    e.preventDefault();
+                    activateBlock(idx, e.clientX, e.clientY);
+                  }}
+                />
+              );
+            }
+
             const html =
               savedText !== undefined
                 ? buildEditorHtmlFromText(colorSafeParagraph, style.lineHeightPx, savedText)
                 : buildEditorHtml(colorSafeParagraph, style.lineHeightPx);
-            const firstLineFontSize = paragraph.lines[0]?.fontSizePx ?? 0;
-            const halfLeading = (style.lineHeightPx - firstLineFontSize) / 2;
-
-            // Key by a stable paragraph identity (page-space rect) rather than
-            // the array index. If the paragraph set is recomputed mid-session,
-            // index keys would reuse a DOM node for a different paragraph while
-            // the editorInit guard blocks re-initialization, desyncing the
-            // editor content from the paragraph model.
-            const paraKey = `p-${Math.round(paragraph.rect.left)}-${Math.round(
-              paragraph.rect.top,
-            )}-${Math.round(paragraph.rect.width)}-${idx}`;
 
             return (
               <div
-                key={paraKey}
+                key={`box-${paraKey}`}
                 ref={(el) => {
-                  if (el && !el.dataset.editorInit) {
-                    el.innerHTML = html;
-                    el.dataset.editorInit = '1';
+                  if (el) {
+                    editorElsRef.current.set(idx, el);
+                    if (!el.dataset.editorInit) {
+                      el.innerHTML = html;
+                      el.dataset.editorInit = '1';
+                      // Rehydrated edited paragraphs are already in the flowing
+                      // layout; a freshly-opened one renders per-line (exact) and
+                      // flows on the first edit.
+                      if (savedText !== undefined) el.dataset.flowed = '1';
+                      applyFormatOverrideToEditor(el, formatOverridesRef.current.get(idx));
+                    }
+                  } else {
+                    editorElsRef.current.delete(idx);
                   }
                 }}
                 contentEditable
@@ -486,26 +814,33 @@ export const TextLayer: React.FC<ITextLayerProps> = ({ pageIndex, scale = 1.5 })
                 className="absolute z-30 pointer-events-auto outline-none"
                 style={{
                   left: `${paragraph.rect.left}px`,
-                  top: `${paragraph.rect.top - halfLeading}px`,
+                  top: `${blockTop}px`,
                   width: `${paragraph.rect.width}px`,
-                  minHeight: `${paragraph.rect.height + halfLeading}px`,
+                  minHeight: `${blockHeight}px`,
                   padding: 0,
                   margin: 0,
                   boxSizing: 'border-box',
                   backgroundColor: 'white',
-                  outline: '1px dotted rgba(0, 0, 0, 0.4)',
+                  outline: isActive
+                    ? '1.5px solid rgba(37, 99, 235, 0.9)'
+                    : '1px dotted rgba(0, 0, 0, 0.4)',
                 }}
+                onFocus={() => setActiveEditor({ pageIndex, paragraphIndex: idx })}
                 onBlur={(e) => flushStageEditorContent(e.currentTarget, idx)}
                 onInput={(e) => {
                   if (composingRef.current) return;
-                  scheduleStageEditorContent(e.currentTarget as HTMLElement, idx);
+                  const el = e.currentTarget as HTMLElement;
+                  ensureEditorFlowed(el, idx);
+                  scheduleStageEditorContent(el, idx);
                 }}
                 onCompositionStart={() => {
                   composingRef.current = true;
                 }}
                 onCompositionEnd={(e) => {
                   composingRef.current = false;
-                  flushStageEditorContent(e.currentTarget as HTMLElement, idx);
+                  const el = e.currentTarget as HTMLElement;
+                  ensureEditorFlowed(el, idx);
+                  flushStageEditorContent(el, idx);
                 }}
                 onPaste={(e) => handleEditorPaste(e, idx)}
               />
@@ -513,6 +848,41 @@ export const TextLayer: React.FC<ITextLayerProps> = ({ pageIndex, scale = 1.5 })
           })}
         </div>
       )}
+
+      {/* Floating formatting toolbar for the focused paragraph (portaled to
+          <body> so the overflow-hidden layer doesn't clip it). */}
+      {showToolbar &&
+        createPortal(
+          <div
+            style={{
+              position: 'fixed',
+              left: `${toolbarPos.left}px`,
+              top: `${toolbarPos.top}px`,
+              transform: toolbarPos.placement === 'above' ? 'translateY(-100%)' : undefined,
+              zIndex: 1001,
+            }}
+          >
+            <EditTextFormatToolbar
+              fontSizePt={Math.round(activeBaseStyle.fontSizePx * activeFontScale)}
+              fontFamily={activeOverride.fontFamily ?? 'original'}
+              color={activeOverride.color ?? activeBaseStyle.color}
+              bold={!!activeOverride.bold}
+              italic={!!activeOverride.italic}
+              align={activeOverride.align ?? 'left'}
+              onFontSizeChange={(pt) =>
+                updateActiveOverride({
+                  fontScale: activeBaseStyle.fontSizePx > 0 ? pt / activeBaseStyle.fontSizePx : 1,
+                })
+              }
+              onFontFamilyChange={(family) => updateActiveOverride({ fontFamily: family })}
+              onColorChange={(color) => updateActiveOverride({ color })}
+              onToggleBold={() => updateActiveOverride({ bold: !activeOverride.bold })}
+              onToggleItalic={() => updateActiveOverride({ italic: !activeOverride.italic })}
+              onAlignChange={(align) => updateActiveOverride({ align })}
+            />
+          </div>,
+          document.body,
+        )}
     </div>
   );
 };

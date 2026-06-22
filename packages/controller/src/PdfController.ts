@@ -140,6 +140,38 @@ export interface IReflowLineUpdate {
   text: string;
   /** Fill color as RGBA 0-255 values */
   color: { r: number; g: number; b: number; a: number };
+  /**
+   * Horizontal offset (device px at the requested scale) applied to this line's
+   * left position, on top of the paragraph's left edge. Used to realize
+   * paragraph alignment (center/right) by shifting individual wrapped lines.
+   * Defaults to 0 (left-aligned).
+   */
+  xOffsetDevicePx?: number;
+  /**
+   * True when this line ends a paragraph (the original line did not fill the
+   * column, or it is the last line). Used by the space-less word-split path to
+   * full-justify interior lines while leaving paragraph-final lines ragged —
+   * reproducing the source document's justified layout.
+   */
+  isParagraphEnd?: boolean;
+}
+
+/** Standard PDF font families selectable when changing an edited paragraph's font. */
+export type StandardFontFamily = 'Helvetica' | 'Times-Roman' | 'Courier';
+
+/** Optional formatting overrides applied when reflowing an edited paragraph. */
+export interface IReflowFormatting {
+  /** Multiplier applied to the reference object's font size (1 = unchanged). */
+  fontSizeScale?: number;
+  /** Render glyphs with a faux-bold stroke. */
+  bold?: boolean;
+  /** Apply a faux-italic shear to the text matrix. */
+  italic?: boolean;
+  /**
+   * Replace the paragraph's font with a standard (base-14) family. When omitted,
+   * the original font of the reference object is reused. Latin-only.
+   */
+  standardFontFamily?: StandardFontFamily;
 }
 
 /** Result returned by text-editing operations */
@@ -272,6 +304,7 @@ export interface IPdfController {
       scale: number;
       paragraphRect: { left: number; top: number; width: number; height: number };
       lineHeightDevicePx: number;
+      formatting?: IReflowFormatting;
     },
   ): ITextEditResult;
   releaseEditPages(): void;
@@ -326,6 +359,45 @@ export class PdfController implements IPdfController {
    */
   private editPageReplaceOnly = new Set<number>();
   /**
+   * Page object indices hidden behind a white cover during a space-less-font
+   * edit. The originals are left in place (so untouched text on the same content
+   * stream is not collapsed by GenerateContent), but they must be skipped during
+   * text extraction so the editor doesn't see the stale text. Keyed by page
+   * index; cleared on document close.
+   */
+  private hiddenObjectIndices = new Map<number, Set<number>>();
+  /**
+   * Whether a page's body text uses a space-less font (LaTeX / Computer-Modern
+   * style, where word spacing comes from TJ positioning rather than space
+   * glyphs). Detected once per page by sampling its text objects — NOT from a
+   * single paragraph's reference object, which can be a subscript/math glyph or
+   * an unmapped object and mislead the check. Determines whether an edit must use
+   * the additive-overlay path (cover + add, never remove); removing an object on
+   * such a page dirties the shared content stream and GenerateContent then drops
+   * the TJ spacing of *all* text on it, corrupting the whole page.
+   */
+  private pageSpacelessCache = new Map<number, boolean>();
+  /** Per-font-handle memo for {@link fontLacksSpaceGlyph}; cleared on doc close. */
+  private fontSpacelessCache = new Map<number, boolean>();
+  /**
+   * Clean text extraction (from {@link getPageTextContentViaGetText}) captured
+   * while a page is still un-edited. After FPDFPage_GenerateContent the only
+   * extraction that still segments lines is object-based, but it reads object
+   * text geometrically and a re-generated content stream fragments untouched text
+   * objects — so the merge stitches them back with spurious in-word spaces
+   * ("Duis" → "D uis"). On re-entry we return this cached clean copy instead:
+   * untouched paragraphs stay correct (their objects never moved) and edited
+   * paragraphs are overridden by the editor's saved text. Cleared on doc close.
+   */
+  private cleanTextContentCache = new Map<number, IPageTextContent>();
+  /**
+   * Subsetted embedded font (CJK/non-Latin) the caller loaded for the current
+   * edit-mode commit, or 0. reflowEditableTextObjects rebuilds any paragraph that
+   * contains characters the original font can't encode with this font. The caller
+   * sets it just before exit and clears+closes it once all commits land.
+   */
+  private editEmbeddedFontPtr = 0;
+  /**
    * Cache of page media-box dimensions, keyed by page index. Page dimensions are
    * immutable for the lifetime of a loaded document, so they can be cached to
    * avoid a synchronous LoadPage/ClosePage round-trip on every call.
@@ -368,6 +440,494 @@ export class PdfController implements IPdfController {
     const ptr = pdfium._malloc(len);
     pdfium.stringToUTF16(s, ptr, len);
     return ptr;
+  }
+
+  /**
+   * Detect whether a font renders the space character with width. Compares the
+   * bounds width of "A B" against "AB" using throwaway text objects: if adding a
+   * space barely widens the run, the font has no usable space glyph (typical of
+   * LaTeX / Computer-Modern PDFs, which space words via TJ adjustments). Such
+   * text collapses after FPDFPage_GenerateContent, so the caller word-splits it.
+   * Returns false on any measurement failure (treat as "renders spaces").
+   */
+  private fontLacksSpaceGlyph(
+    pdfium: IPDFiumModule,
+    docPtr: number,
+    font: number,
+    fontSize: number,
+  ): boolean {
+    const measure = (text: string): number => {
+      const obj = pdfium._FPDFPageObj_CreateTextObj_W(docPtr, font, fontSize > 0 ? fontSize : 12);
+      if (!obj) return -1;
+      const textPtr = this.allocUtf16(text);
+      let width = -1;
+      try {
+        if (pdfium._FPDFText_SetText_W(obj, textPtr)) {
+          const l = pdfium._malloc(4);
+          const b = pdfium._malloc(4);
+          const r = pdfium._malloc(4);
+          const t = pdfium._malloc(4);
+          try {
+            if (pdfium._FPDFPageObj_GetBounds_W(obj, l, b, r, t)) {
+              width = pdfium.getValue(r, 'float') - pdfium.getValue(l, 'float');
+            }
+          } finally {
+            pdfium._free(l);
+            pdfium._free(b);
+            pdfium._free(r);
+            pdfium._free(t);
+          }
+        }
+      } catch {
+        width = -1;
+      } finally {
+        pdfium._free(textPtr);
+        pdfium._FPDFPageObj_Destroy_W(obj);
+      }
+      return width;
+    };
+
+    // Only trust the result for fonts that actually contain real Latin 'A'/'B'
+    // glyphs. A CJK (or otherwise Latin-less) subset maps 'A'/'B' to .notdef,
+    // which would make this measurement meaningless — and CJK text has no spaces
+    // to preserve anyway, so it must stay on the normal commit path.
+    const aWidth = measure('A');
+    const absentWidth = measure(String.fromCharCode(0xe000)); // PUA: renders as .notdef
+    const hasRealLatin = aWidth > 0 && Math.abs(aWidth - absentWidth) > aWidth * 0.1;
+    if (!hasRealLatin) return false;
+
+    const noSpace = measure('AB');
+    const withSpace = measure('A B');
+    if (noSpace <= 0 || withSpace <= 0) return false;
+    return withSpace <= noSpace * 1.05;
+  }
+
+  /**
+   * Measure a font's ascent (baseline → glyph-box top) at the given size, in page
+   * units, via a probe text object created at the origin (baseline at y=0, so its
+   * GetBounds top IS the ascent). Used to place rebuilt rows by their top edge so
+   * committed text sits where the original line did instead of a leading too low.
+   * Falls back to 0.75·size when the probe can't be measured.
+   */
+  private measureAscentPage(
+    pdfium: IPDFiumModule,
+    docPtr: number,
+    font: number,
+    size: number,
+  ): number {
+    const fallback = Math.max(1, size) * 0.75;
+    if (!font) return fallback;
+    const probe = pdfium._FPDFPageObj_CreateTextObj_W(docPtr, font, size > 0 ? size : 12);
+    if (!probe) return fallback;
+    const textPtr = this.allocUtf16('Eh');
+    const l = pdfium._malloc(4);
+    const b = pdfium._malloc(4);
+    const r = pdfium._malloc(4);
+    const t = pdfium._malloc(4);
+    try {
+      if (
+        pdfium._FPDFText_SetText_W(probe, textPtr) &&
+        pdfium._FPDFPageObj_GetBounds_W(probe, l, b, r, t)
+      ) {
+        const top = pdfium.getValue(t, 'float');
+        if (top > 0) return top;
+      }
+      return fallback;
+    } finally {
+      pdfium._free(textPtr);
+      pdfium._free(l);
+      pdfium._free(b);
+      pdfium._free(r);
+      pdfium._free(t);
+      pdfium._FPDFPageObj_Destroy_W(probe);
+    }
+  }
+
+  /**
+   * Whether the page's body text uses a space-less font (see
+   * {@link pageSpacelessCache}). Samples the page's text objects rather than
+   * trusting a single paragraph's reference object: a paragraph may start with a
+   * subscript/superscript (a math font that DOES carry a space glyph) or have an
+   * incompletely mapped object set, either of which would make a per-paragraph
+   * check report "has spaces" and wrongly route the edit through the
+   * page-corrupting removal path. A page counts as space-less once a few of its
+   * text objects use a real-Latin font with no usable space glyph.
+   */
+  private pageUsesSpacelessFont(
+    pdfium: IPDFiumModule,
+    docPtr: number,
+    pagePtr: number,
+    pageIndex: number,
+  ): boolean {
+    const cached = this.pageSpacelessCache.get(pageIndex);
+    if (cached !== undefined) return cached;
+
+    const api = pdfium as IPDFiumModule & {
+      _FPDFPage_CountObjects_W?: (page: number) => number;
+      _FPDFPage_GetObject_W?: (page: number, index: number) => number;
+      _FPDFPageObj_GetType_W?: (obj: number) => number;
+    };
+    if (
+      typeof api._FPDFPage_CountObjects_W !== 'function' ||
+      typeof api._FPDFPage_GetObject_W !== 'function' ||
+      typeof api._FPDFPageObj_GetType_W !== 'function'
+    ) {
+      return false;
+    }
+
+    const count = api._FPDFPage_CountObjects_W(pagePtr);
+    let spacelessLatinObjs = 0;
+    let examinedText = 0;
+    for (let i = 0; i < count && examinedText < 80 && spacelessLatinObjs < 3; i++) {
+      const ptr = api._FPDFPage_GetObject_W(pagePtr, i);
+      if (!ptr) continue;
+      if (api._FPDFPageObj_GetType_W(ptr) !== FPDF_PAGE_OBJECT_TYPE.TEXT) continue;
+      examinedText++;
+      const font = pdfium._FPDFTextObj_GetFont_W(ptr);
+      if (!font) continue;
+      let sl = this.fontSpacelessCache.get(font);
+      if (sl === undefined) {
+        const info = this.readTextObjectFontInfo(pdfium, ptr);
+        sl = this.fontLacksSpaceGlyph(pdfium, docPtr, font, info.size > 0 ? info.size : 12);
+        this.fontSpacelessCache.set(font, sl);
+      }
+      if (sl) spacelessLatinObjs++;
+    }
+    // Require a few independent votes so a stray symbol glyph on an otherwise
+    // normal page can't flip it.
+    const result = spacelessLatinObjs >= 3;
+    this.pageSpacelessCache.set(pageIndex, result);
+    return result;
+  }
+
+  /**
+   * Find the dominant text style (font handle + representative size) among the
+   * page's text objects whose center falls inside `rect` (page coordinates).
+   * "Dominant" = the font used by the most objects; the size is the largest seen
+   * for that font (so a body paragraph that contains a few subscripts resolves to
+   * the body font/size, not the subscript's small math font). Used to recreate a
+   * paragraph faithfully when its first object — the one a per-paragraph check
+   * would pick as the reference — happens to be a subscript/superscript glyph
+   * whose font cannot render the Latin body text.
+   */
+  private dominantTextStyleInRect(
+    pdfium: IPDFiumModule,
+    docPtr: number,
+    pagePtr: number,
+    rect: { left: number; right: number; top: number; bottom: number },
+  ): { font: number; size: number; visualSize: number } | null {
+    const api = pdfium as IPDFiumModule & {
+      _FPDFPage_CountObjects_W?: (page: number) => number;
+      _FPDFPage_GetObject_W?: (page: number, index: number) => number;
+      _FPDFPageObj_GetType_W?: (obj: number) => number;
+    };
+    if (
+      typeof api._FPDFPage_CountObjects_W !== 'function' ||
+      typeof api._FPDFPage_GetObject_W !== 'function' ||
+      typeof api._FPDFPageObj_GetType_W !== 'function'
+    ) {
+      return null;
+    }
+    const count = api._FPDFPage_CountObjects_W(pagePtr);
+    // Per font: object count, and the representative (largest-area, i.e. the body
+    // line rather than a subscript) object's OWN nominal size + rendered height,
+    // which together recover the matrix-corrected visual size.
+    const tally = new Map<
+      number,
+      {
+        count: number;
+        maxSize: number;
+        repPtr: number;
+        repHeight: number;
+        repSize: number;
+        repArea: number;
+      }
+    >();
+    const lp = pdfium._malloc(4);
+    const bp = pdfium._malloc(4);
+    const rp = pdfium._malloc(4);
+    const tp = pdfium._malloc(4);
+    try {
+      for (let i = 0; i < count; i++) {
+        const ptr = api._FPDFPage_GetObject_W(pagePtr, i);
+        if (!ptr) continue;
+        if (api._FPDFPageObj_GetType_W(ptr) !== FPDF_PAGE_OBJECT_TYPE.TEXT) continue;
+        if (!pdfium._FPDFPageObj_GetBounds_W(ptr, lp, bp, rp, tp)) continue;
+        const left = pdfium.getValue(lp, 'float');
+        const bottom = pdfium.getValue(bp, 'float');
+        const right = pdfium.getValue(rp, 'float');
+        const top = pdfium.getValue(tp, 'float');
+        const cx = (left + right) / 2;
+        const cy = (bottom + top) / 2;
+        if (cx < rect.left || cx > rect.right || cy < rect.bottom || cy > rect.top) continue;
+        const font = pdfium._FPDFTextObj_GetFont_W(ptr);
+        if (!font) continue;
+        const size = this.readTextObjectFontInfo(pdfium, ptr).size;
+        const entry = tally.get(font) ?? {
+          count: 0,
+          maxSize: 0,
+          repPtr: 0,
+          repHeight: 0,
+          repSize: 0,
+          repArea: 0,
+        };
+        entry.count++;
+        if (size > entry.maxSize) entry.maxSize = size;
+        const area = (right - left) * (top - bottom);
+        if (area > entry.repArea) {
+          entry.repArea = area;
+          entry.repPtr = ptr;
+          entry.repHeight = top - bottom;
+          entry.repSize = size;
+        }
+        tally.set(font, entry);
+      }
+    } finally {
+      pdfium._free(lp);
+      pdfium._free(bp);
+      pdfium._free(rp);
+      pdfium._free(tp);
+    }
+    let best: {
+      count: number;
+      maxSize: number;
+      repPtr: number;
+      repHeight: number;
+      repSize: number;
+    } | null = null;
+    let bestFont = 0;
+    for (const [font, e] of tally) {
+      if (!best || e.count > best.count || (e.count === best.count && e.maxSize > best.maxSize)) {
+        best = e;
+        bestFont = font;
+      }
+    }
+    if (!best || best.maxSize <= 0) return null;
+
+    // `size` is the NOMINAL size (max GetFontSize) — the proven value for the
+    // normal recreate. `visualSize` additionally corrects for a scaling text
+    // matrix (GetFontSize ignores it), used only when swapping in the embedded
+    // CJK font, by rebuilding the representative object's OWN text at its OWN
+    // nominal size and comparing heights (same glyphs → ratio = matrix scale).
+    let visualSize = best.repSize > 0 ? best.repSize : best.maxSize;
+    const textPage = pdfium._PDFium_LoadPageText(pagePtr);
+    try {
+      if (textPage && best.repPtr && best.repHeight > 0 && best.repSize > 0) {
+        const text = this.readTextObjectString(
+          pdfium as IPDFiumModule & {
+            _FPDFTextObj_GetText_W: (o: number, tp: number, b: number, l: number) => number;
+          },
+          best.repPtr,
+          textPage,
+        );
+        const probeHeight = text
+          ? this.measureGlyphBoxHeight(pdfium, docPtr, bestFont, best.repSize, text)
+          : 0;
+        if (probeHeight > 0) {
+          const scale = best.repHeight / probeHeight;
+          visualSize = best.repSize * Math.min(Math.max(scale, 0.25), 2);
+        }
+      }
+    } finally {
+      if (textPage) pdfium._PDFium_ClosePageText(textPage);
+    }
+    return { font: bestFont, size: best.maxSize, visualSize };
+  }
+
+  /** Glyph-box height (page units) of `text` rendered in `font` at `size`, via a
+   *  probe object at the origin. 0 on failure. */
+  private measureGlyphBoxHeight(
+    pdfium: IPDFiumModule,
+    docPtr: number,
+    font: number,
+    size: number,
+    text: string,
+  ): number {
+    if (!font || !text) return 0;
+    const probe = pdfium._FPDFPageObj_CreateTextObj_W(docPtr, font, size > 0 ? size : 12);
+    if (!probe) return 0;
+    const textPtr = this.allocUtf16(text);
+    const l = pdfium._malloc(4);
+    const b = pdfium._malloc(4);
+    const r = pdfium._malloc(4);
+    const t = pdfium._malloc(4);
+    try {
+      if (
+        pdfium._FPDFText_SetText_W(probe, textPtr) &&
+        pdfium._FPDFPageObj_GetBounds_W(probe, l, b, r, t)
+      ) {
+        return pdfium.getValue(t, 'float') - pdfium.getValue(b, 'float');
+      }
+      return 0;
+    } finally {
+      pdfium._free(textPtr);
+      pdfium._free(l);
+      pdfium._free(b);
+      pdfium._free(r);
+      pdfium._free(t);
+      pdfium._FPDFPageObj_Destroy_W(probe);
+    }
+  }
+
+  /**
+   * Right edge (page units) of `text` laid out at the origin in the given font
+   * and size. This is the rightmost *inked* x — trailing whitespace contributes
+   * no ink, so it is excluded. Used as a building block for advance-width
+   * measurement (see `measureAdvanceWidth`). Returns null on failure.
+   */
+  private measureInkRight(
+    pdfium: IPDFiumModule,
+    docPtr: number,
+    font: number,
+    size: number,
+    text: string,
+  ): number | null {
+    if (!font || !text) return null;
+    const probe = pdfium._FPDFPageObj_CreateTextObj_W(docPtr, font, size > 0 ? size : 12);
+    if (!probe) return null;
+    const textPtr = this.allocUtf16(text);
+    const l = pdfium._malloc(4);
+    const b = pdfium._malloc(4);
+    const r = pdfium._malloc(4);
+    const t = pdfium._malloc(4);
+    try {
+      if (
+        pdfium._FPDFText_SetText_W(probe, textPtr) &&
+        pdfium._FPDFPageObj_GetBounds_W(probe, l, b, r, t)
+      ) {
+        return pdfium.getValue(r, 'float');
+      }
+      return null;
+    } finally {
+      pdfium._free(textPtr);
+      pdfium._free(l);
+      pdfium._free(b);
+      pdfium._free(r);
+      pdfium._free(t);
+      pdfium._FPDFPageObj_Destroy_W(probe);
+    }
+  }
+
+  /**
+   * Advance width of `text` — the x distance to where the *next* glyph starts,
+   * i.e. including the advance of trailing (and leading) whitespace, which
+   * `GetBounds` (an ink box) omits. Computed by appending an inked sentinel: the
+   * sentinel is laid down at `advance(text)`, so
+   *   advance(text) = inkRight(text + sentinel) - inkRight(sentinel).
+   * `sentinelInkRight` is `inkRight(sentinel)` precomputed for this font/size.
+   * Falls back to `fallback` (typically the plain ink width) when measurement
+   * fails. Needed when placing runs sequentially (mixed Latin/CJK), so spaces
+   * between characters are preserved.
+   */
+  private measureAdvanceWidth(
+    pdfium: IPDFiumModule,
+    docPtr: number,
+    font: number,
+    size: number,
+    text: string,
+    sentinelInkRight: number | null,
+    fallback: number,
+  ): number {
+    if (sentinelInkRight === null) return fallback;
+    const withSentinel = this.measureInkRight(pdfium, docPtr, font, size, text + 'M');
+    if (withSentinel === null) return fallback;
+    const advance = withSentinel - sentinelInkRight;
+    return advance > 0 ? advance : fallback;
+  }
+
+  /**
+   * Insert an opaque white image object covering the union bounds of the given
+   * page objects. Used to hide the old (un-removed) text of an edited paragraph
+   * on a space-less-font page without modifying any existing object — so the
+   * rest of the page's content stream is left byte-identical. Assumes a white
+   * page background (true for the vast majority of text documents).
+   */
+  private addWhiteCoverOverObjects(
+    pdfium: IPDFiumModule,
+    docPtr: number,
+    pagePtr: number,
+    objectPtrs: number[],
+    // Extra rect (page coordinates) to union into the cover. Used to span the
+    // whole paragraph region so any original line whose object was not mapped
+    // into this paragraph's group still gets hidden (otherwise it shows through
+    // beneath the re-added text as a duplicated line).
+    extraRect?: { left: number; bottom: number; right: number; top: number } | null,
+  ): void {
+    if (objectPtrs.length === 0 && !extraRect) return;
+
+    // Union bounds (page coordinates).
+    let left = Number.POSITIVE_INFINITY;
+    let bottom = Number.POSITIVE_INFINITY;
+    let right = Number.NEGATIVE_INFINITY;
+    let top = Number.NEGATIVE_INFINITY;
+    const lp = pdfium._malloc(4);
+    const bp = pdfium._malloc(4);
+    const rp = pdfium._malloc(4);
+    const tpp = pdfium._malloc(4);
+    try {
+      for (const ptr of objectPtrs) {
+        if (pdfium._FPDFPageObj_GetBounds_W(ptr, lp, bp, rp, tpp)) {
+          left = Math.min(left, pdfium.getValue(lp, 'float'));
+          bottom = Math.min(bottom, pdfium.getValue(bp, 'float'));
+          right = Math.max(right, pdfium.getValue(rp, 'float'));
+          top = Math.max(top, pdfium.getValue(tpp, 'float'));
+        }
+      }
+    } finally {
+      pdfium._free(lp);
+      pdfium._free(bp);
+      pdfium._free(rp);
+      pdfium._free(tpp);
+    }
+    if (extraRect) {
+      left = Math.min(left, extraRect.left);
+      bottom = Math.min(bottom, extraRect.bottom);
+      right = Math.max(right, extraRect.right);
+      top = Math.max(top, extraRect.top);
+    }
+    if (!Number.isFinite(left) || right <= left || top <= bottom) return;
+
+    // Small pad so anti-aliased glyph fringes are fully covered.
+    const pad = 1.5;
+    left -= pad;
+    bottom -= pad;
+    right += pad;
+    top += pad;
+    const width = right - left;
+    const height = top - bottom;
+
+    let bitmap = 0;
+    let imageObj = 0;
+    let pagesPtr = 0;
+    try {
+      bitmap = pdfium._PDFium_BitmapCreate(2, 2, 1);
+      if (!bitmap) return;
+      const buffer = pdfium._PDFium_BitmapGetBuffer(bitmap);
+      const stride = pdfium._PDFium_BitmapGetStride(bitmap);
+      const heap = pdfium.HEAPU8;
+      for (let y = 0; y < 2; y++) {
+        for (let x = 0; x < 2; x++) {
+          const d = buffer + y * stride + x * 4;
+          heap[d] = 255;
+          heap[d + 1] = 255;
+          heap[d + 2] = 255;
+          heap[d + 3] = 255;
+        }
+      }
+      imageObj = pdfium._FPDFPageObj_NewImageObj_W(docPtr);
+      if (!imageObj) return;
+      pagesPtr = pdfium._malloc(4);
+      pdfium.HEAP32[pagesPtr / 4] = pagePtr;
+      const img = PdfController.toImagePdfium(pdfium);
+      if (!img._FPDFImageObj_SetBitmap_W(pagesPtr, 1, imageObj, bitmap)) return;
+      pdfium._FPDFImageObj_SetMatrix_W(imageObj, width, 0, 0, height, left, bottom);
+      pdfium._FPDFPage_InsertObject_W(pagePtr, imageObj);
+      imageObj = 0; // ownership transferred to the page
+    } finally {
+      if (imageObj) pdfium._FPDFPageObj_Destroy_W(imageObj);
+      if (bitmap) pdfium._PDFium_BitmapDestroy(bitmap);
+      if (pagesPtr) pdfium._free(pagesPtr);
+    }
   }
 
   /**
@@ -707,6 +1267,10 @@ export class PdfController implements IPdfController {
     this.releaseEditPages();
     this.editPageReplaceOnly.clear();
     this.generatedPages.clear();
+    this.hiddenObjectIndices.clear();
+    this.pageSpacelessCache.clear();
+    this.fontSpacelessCache.clear();
+    this.cleanTextContentCache.clear();
     this.pageDimensionCache.clear();
     this.closeFormFillEnvironment();
     if (this.docPtr) {
@@ -1115,14 +1679,21 @@ export class PdfController implements IPdfController {
     }
 
     // After FPDFPage_GenerateContent, the text-page parser (FPDFText_GetRect etc.)
-    // returns corrupted rects. Use page-object APIs for any page that has been
-    // through GenerateContent — the generatedPages set persists even after
-    // releaseEditPages() clears the page-pointer cache.
+    // returns corrupted rects, so an edited page can only be read object-based —
+    // but that path reconstructs in-word spaces geometrically and a regenerated
+    // content stream fragments untouched text objects, producing "D uis a utem".
+    // Prefer the clean copy captured before the edit; untouched paragraphs stay
+    // correct and edited ones are overridden by the editor's saved text. Fall
+    // back to object-based only when no clean copy was ever captured.
     if (this.editPageCache.has(pageIndex) || this.generatedPages.has(pageIndex)) {
-      return this.getPageTextContentFromObjects(pageIndex);
+      return (
+        this.cleanTextContentCache.get(pageIndex) ?? this.getPageTextContentFromObjects(pageIndex)
+      );
     }
 
-    return this.getPageTextContentViaGetText(pageIndex);
+    const clean = this.getPageTextContentViaGetText(pageIndex);
+    if (clean) this.cleanTextContentCache.set(pageIndex, clean);
+    return clean;
   }
 
   /**
@@ -1879,6 +2450,8 @@ export class PdfController implements IPdfController {
       /** When true, skip FPDFPage_GenerateContent so the caller can batch multiple
        *  reflows and regenerate the content stream once at the end. */
       skipGenerateContent?: boolean;
+      /** Optional font-size / bold / italic / family overrides for the paragraph. */
+      formatting?: IReflowFormatting;
     },
   ): ITextEditResult {
     const {
@@ -1889,7 +2462,12 @@ export class PdfController implements IPdfController {
       paragraphRect,
       lineHeightDevicePx,
       skipGenerateContent,
+      formatting,
     } = opts;
+    // Subsetted CJK/non-Latin font for this commit (set by the caller via
+    // setEditEmbeddedFontPtr just before exit). A paragraph containing characters
+    // the original font can't encode is rebuilt with it so the glyphs render.
+    const embeddedFontPtr = this.editEmbeddedFontPtr;
     if (lines.length === 0 && existingObjectIndices.length === 0)
       return { usedFallbackFont: false };
 
@@ -1953,11 +2531,25 @@ export class PdfController implements IPdfController {
       if (lastFont) overflowFontHandle = lastFont;
     }
 
-    // Helper: compute page-coord position for line at given index
+    // Helper: compute page-coord position for line at given index. The per-line
+    // xOffset (device px) realizes paragraph alignment by shifting wrapped lines.
     const linePagePosition = (lineIndex: number): { x: number; y: number } => {
-      const deviceX = paragraphRect.left;
+      const xOffset = lines[lineIndex]?.xOffsetDevicePx ?? 0;
+      const deviceX = paragraphRect.left + xOffset;
       // Bottom of the line in device coords (top + (lineIndex+1) * lineHeight)
       const deviceY = paragraphRect.top + (lineIndex + 1) * lineHeightDevicePx;
+      return this.canvasToPagePoint(pagePtr, pageW, pageH, scale, deviceX, deviceY);
+    };
+
+    // Page position of the GLYPH-BOX TOP of line i (device top + i*lineHeight).
+    // The original line i's glyphs sit here; aligning a reused object's box top to
+    // it keeps the text vertically put. linePagePosition targets the line BOX
+    // bottom (top+(i+1)*lineHeight), a full leading lower than the glyph box — so
+    // aligning a glyph BOTTOM there pushes the text down by (lineHeight - glyphH).
+    const lineTopPagePosition = (lineIndex: number): { x: number; y: number } => {
+      const xOffset = lines[lineIndex]?.xOffsetDevicePx ?? 0;
+      const deviceX = paragraphRect.left + xOffset;
+      const deviceY = paragraphRect.top + lineIndex * lineHeightDevicePx;
       return this.canvasToPagePoint(pagePtr, pageW, pageH, scale, deviceX, deviceY);
     };
 
@@ -1980,10 +2572,493 @@ export class PdfController implements IPdfController {
       throw new Error('Failed to load any font for text object creation');
     };
 
+    // ─── Recreate path: rebuild every line when formatting changes ───
+    // The in-place reuse path below only updates text/color/position, so a font
+    // size, faux bold/italic, or family change requires recreating each line's
+    // text object. New objects are created BEFORE the originals are removed so
+    // the reference font handle stays valid throughout.
+    const fontSizeScale =
+      formatting?.fontSizeScale && formatting.fontSizeScale > 0 ? formatting.fontSizeScale : 1;
+
+    // LaTeX / Computer-Modern PDFs position words via TJ adjustments and have no
+    // usable space glyph. Setting "word word" on such a font collapses after
+    // GenerateContent (the TJ kerning is dropped and the space glyph is empty),
+    // and — more dangerously — removing any object dirties the shared content
+    // stream so GenerateContent re-emits the whole page WITHOUT its TJ spacing,
+    // corrupting every paragraph. Detect this at the PAGE level (sampling body
+    // text, not this paragraph's reference object which may be a subscript/math
+    // glyph) and route through the recreate path: it emits one object per word at
+    // an explicit x-position (spacing survives GenerateContent) and never removes
+    // an original (the additive white-cover overlay hides them instead).
+    const spacelessFont = this.pageUsesSpacelessFont(pdfium, docPtr, pagePtr, pageIndex);
+
+    // A paragraph the user added CJK (or other non-Latin) text to can only render
+    // with the embedded font the caller subsetted+loaded; the original Latin font
+    // maps those code points to .notdef. Rebuild the whole paragraph with the
+    // embedded font (its subset also includes ASCII, so mixed text renders).
+    const isCjkCodePoint = (cp: number): boolean =>
+      (cp >= 0x3000 && cp <= 0x9fff) || // CJK symbols, kana, CJK ideographs
+      (cp >= 0xac00 && cp <= 0xd7af) || // Hangul syllables
+      (cp >= 0xf900 && cp <= 0xfaff) || // CJK compatibility ideographs
+      (cp >= 0xff00 && cp <= 0xffef); // halfwidth/fullwidth forms
+    const textHasCjk = (s: string): boolean => {
+      for (let i = 0; i < s.length; i++) if (isCjkCodePoint(s.charCodeAt(i))) return true;
+      return false;
+    };
+    const useEmbedded = !!embeddedFontPtr && lines.some((l) => textHasCjk(l.text));
+
+    const wantsRecreate =
+      spacelessFont ||
+      useEmbedded ||
+      (!!formatting &&
+        (!!formatting.bold ||
+          !!formatting.italic ||
+          !!formatting.standardFontFamily ||
+          fontSizeScale !== 1));
+
+    if (wantsRecreate) {
+      // Paragraph region in page coordinates (spans every line). Computed first
+      // because both the dominant-style resolution and the white cover need it.
+      const paraTL = this.canvasToPagePoint(
+        pagePtr,
+        pageW,
+        pageH,
+        scale,
+        paragraphRect.left,
+        paragraphRect.top,
+      );
+      const paraBR = this.canvasToPagePoint(
+        pagePtr,
+        pageW,
+        pageH,
+        scale,
+        paragraphRect.left + paragraphRect.width,
+        paragraphRect.top + paragraphRect.height,
+      );
+      const paragraphPageRect = {
+        left: Math.min(paraTL.x, paraBR.x),
+        right: Math.max(paraTL.x, paraBR.x),
+        top: Math.max(paraTL.y, paraBR.y),
+        bottom: Math.min(paraTL.y, paraBR.y),
+      };
+
+      // Resolve the paragraph's dominant body font/size so a paragraph whose
+      // first object is a subscript (a math font that cannot render Latin) is
+      // still rebuilt in the body font at the body size. Falls back to the
+      // reference object when the region scan finds nothing.
+      const dominant = this.dominantTextStyleInRect(pdfium, docPtr, pagePtr, paragraphPageRect);
+      const baseFont = dominant?.font ?? fontHandle;
+      // Normal/space-less recreate keeps the proven nominal size. The CJK path
+      // swaps in the embedded font, so it needs the matrix-corrected VISUAL size
+      // (the nominal can be inflated by a scaling text matrix) to size the Latin
+      // runs correctly.
+      const baseSize = !dominant
+        ? pageFontSize
+        : useEmbedded && dominant.visualSize > 0
+          ? dominant.visualSize
+          : dominant.size > 0
+            ? dominant.size
+            : pageFontSize;
+
+      const effectiveSize = Math.max(1, (baseSize || 12) * fontSizeScale);
+      const shear = formatting?.italic ? 0.21 : 0; // ~12° slant (matches addTextAnnotation)
+      const FILL = 0;
+      const FILL_STROKE = 2;
+
+      // Resolve the font for the rebuilt objects. A requested standard family
+      // replaces the original; otherwise the reference object's font is reused.
+      // For CJK the ORIGINAL font is still resolved here — it stays on the Latin
+      // runs; only the CJK runs are emitted in the embedded font (mixed path).
+      let font = 0;
+      let mustClose = false;
+      if (formatting?.standardFontFamily) {
+        const namePtr = this.allocUtf8(formatting.standardFontFamily);
+        try {
+          font = pdfium._FPDFText_LoadStandardFont_W(docPtr, namePtr);
+        } finally {
+          pdfium._free(namePtr);
+        }
+        if (font) {
+          mustClose = true;
+          usedFallbackFont = true; // original font intentionally swapped out
+        }
+      }
+      if (!font && baseFont) {
+        font = baseFont;
+        mustClose = false;
+      }
+      if (!font) {
+        const namePtr = this.allocUtf8('Helvetica');
+        try {
+          font = pdfium._FPDFText_LoadStandardFont_W(docPtr, namePtr);
+        } finally {
+          pdfium._free(namePtr);
+        }
+        if (font) {
+          mustClose = true;
+          usedFallbackFont = true;
+        }
+      }
+      if (!font) throw new Error('Failed to resolve a font for text reflow');
+
+      // The embedded CJK font (Noto Sans SC) renders taller per point than a
+      // typical Latin body font, so emit CJK at a reduced size whose glyph height
+      // matches the original Latin font at the original size. Keeps mixed
+      // Latin/CJK lines visually consistent instead of ballooning the CJK.
+      let cjkSize = effectiveSize;
+      if (useEmbedded) {
+        const origAscent = this.measureAscentPage(pdfium, docPtr, font, effectiveSize);
+        const embAscent = this.measureAscentPage(pdfium, docPtr, embeddedFontPtr, effectiveSize);
+        if (origAscent > 0 && embAscent > 0) {
+          cjkSize = Math.max(1, (effectiveSize * origAscent) / embAscent);
+        }
+      }
+
+      // Word-split only when the original space-less font is reused. A swapped-in
+      // standard family or the embedded CJK font has real space glyphs, so a
+      // single object per line is correct there.
+      const useWordSplit = spacelessFont && !formatting?.standardFontFamily && !useEmbedded;
+      const wordGap = effectiveSize * 0.25; // fallback inter-word gap (page units)
+
+      // Space-less fonts keep their originals (see removal note below), so cover
+      // the old paragraph with a white image first; the new text is drawn on top.
+      // The cover spans both the mapped objects AND the full paragraph rect, so a
+      // first/last line whose object was not mapped into this group is still
+      // hidden (otherwise it shows through beneath the re-added text).
+      if (spacelessFont) {
+        this.addWhiteCoverOverObjects(
+          pdfium,
+          docPtr,
+          pagePtr,
+          existingPointers.map((p) => p.ptr),
+          paragraphPageRect,
+        );
+      }
+
+      // Create a text object for `text` (faux bold/italic applied, but NOT yet
+      // positioned) and measure its rendered width at the origin. Returns null
+      // on failure. The caller positions it with `placeObject`.
+      const makeObject = (
+        text: string,
+        color: { r: number; g: number; b: number; a: number },
+        objFont: number = font,
+        objSize: number = effectiveSize,
+      ): { obj: number; width: number } | null => {
+        if (!text) return null;
+        const newObj = pdfium._FPDFPageObj_CreateTextObj_W(docPtr, objFont, objSize);
+        if (!newObj) return null;
+        const textPtr = this.allocUtf16(text);
+        let ok = false;
+        try {
+          ok = !!pdfium._FPDFText_SetText_W(newObj, textPtr);
+        } finally {
+          pdfium._free(textPtr);
+        }
+        if (!ok) {
+          pdfium._FPDFPageObj_Destroy_W(newObj);
+          return null;
+        }
+        pdfium._FPDFPageObj_SetFillColor_W(newObj, color.r, color.g, color.b, color.a);
+        // Faux bold: outline each glyph via FILL_STROKE so the weight survives
+        // any viewer (base-14 bold relies on font substitution).
+        if (formatting?.bold) {
+          pdfium._FPDFTextObj_SetTextRenderMode_W(newObj, FILL_STROKE);
+          pdfium._FPDFPageObj_SetStrokeColor_W(newObj, color.r, color.g, color.b, color.a);
+          pdfium._FPDFPageObj_SetStrokeWidth_W(newObj, objSize * 0.03);
+        } else {
+          pdfium._FPDFTextObj_SetTextRenderMode_W(newObj, FILL);
+        }
+        let width = 0;
+        const lp = pdfium._malloc(4);
+        const bp = pdfium._malloc(4);
+        const rp = pdfium._malloc(4);
+        const tp = pdfium._malloc(4);
+        try {
+          if (pdfium._FPDFPageObj_GetBounds_W(newObj, lp, bp, rp, tp)) {
+            width = pdfium.getValue(rp, 'float') - pdfium.getValue(lp, 'float');
+          }
+        } finally {
+          pdfium._free(lp);
+          pdfium._free(bp);
+          pdfium._free(rp);
+          pdfium._free(tp);
+        }
+        return { obj: newObj, width };
+      };
+
+      // Position a created object at page (x, y) and insert it. Matrix
+      // [a b c d e f]: c = shear (faux italic), e/f = baseline origin.
+      const placeObject = (obj: number, x: number, y: number): void => {
+        pdfium._FPDFPageObj_Transform_W(obj, 1, 0, shear, 1, x, y);
+        pdfium._FPDFPage_InsertObject_W(pagePtr, obj);
+      };
+
+      // Font ascent (baseline → glyph-box top, page units). Rows are placed by
+      // their TOP (lineTopPagePosition) so the rebuilt text sits where the
+      // original line did; without this the baseline lands a full leading too low
+      // and the paragraph drifts down on commit.
+      const ascentPage = this.measureAscentPage(pdfium, docPtr, font, effectiveSize);
+      const lineBaselineY = (lineIndex: number): number =>
+        lineTopPagePosition(lineIndex).y - ascentPage;
+
+      // Split a line into consecutive runs of CJK vs non-CJK so each can be drawn
+      // with its own font (mixed path). Whitespace stays with the preceding
+      // non-CJK run, so its width is measured in the Latin font.
+      const splitByScript = (s: string): { text: string; isCjk: boolean }[] => {
+        const segs: { text: string; isCjk: boolean }[] = [];
+        for (const ch of s) {
+          const cjk = isCjkCodePoint(ch.codePointAt(0) ?? 0);
+          const last = segs[segs.length - 1];
+          if (last?.isCjk === cjk) last.text += ch;
+          else segs.push({ text: ch, isCjk: cjk });
+        }
+        return segs;
+      };
+
+      try {
+        if (useWordSplit) {
+          // Re-wrap the whole paragraph using PDFium's *actual* glyph widths.
+          // The caller's word-wrap measures with a substitute font (the real
+          // LaTeX font isn't installed in the browser), so it can produce a
+          // different line count — extra lines then overflow into the paragraph
+          // below. Re-wrapping here against the real metrics keeps the committed
+          // line count faithful to the rendered font.
+          const lineStartX = this.canvasToPagePoint(
+            pagePtr,
+            pageW,
+            pageH,
+            scale,
+            paragraphRect.left,
+            paragraphRect.top,
+          ).x;
+          const lineRightX = this.canvasToPagePoint(
+            pagePtr,
+            pageW,
+            pageH,
+            scale,
+            paragraphRect.left + paragraphRect.width,
+            paragraphRect.top,
+          ).x;
+
+          const columnWidth = lineRightX - lineStartX;
+
+          // Convert a per-line device-space x offset (the source's first-line
+          // indent) into a page-space indent, consistent with linePagePosition.
+          const indentToPage = (indentDevice: number): number =>
+            indentDevice > 0
+              ? this.canvasToPagePoint(
+                  pagePtr,
+                  pageW,
+                  pageH,
+                  scale,
+                  paragraphRect.left + indentDevice,
+                  paragraphRect.top,
+                ).x - lineStartX
+              : 0;
+
+          // Create each word object (measured at the origin), flag the last word
+          // of any paragraph-ending source line, and tag the first word of each
+          // paragraph with that paragraph's first-line indent (so an indented new
+          // paragraph keeps its indent through the re-wrap).
+          const items: {
+            obj: number;
+            width: number;
+            breakAfter: boolean;
+            indentPage: number;
+          }[] = [];
+          let startsParagraph = true; // the first source line begins a paragraph
+          for (const lineUpdate of lines) {
+            if (!lineUpdate.text) continue;
+            const lineIndent = startsParagraph ? indentToPage(lineUpdate.xOffsetDevicePx ?? 0) : 0;
+            let lastIdx = -1;
+            let firstWord = true;
+            for (const word of lineUpdate.text.split(' ')) {
+              if (!word) continue;
+              const made = makeObject(word, lineUpdate.color);
+              if (!made) continue;
+              items.push({
+                obj: made.obj,
+                width: made.width,
+                breakAfter: false,
+                indentPage: startsParagraph && firstWord ? lineIndent : 0,
+              });
+              firstWord = false;
+              lastIdx = items.length - 1;
+            }
+            if (lineUpdate.isParagraphEnd && lastIdx >= 0) items[lastIdx].breakAfter = true;
+            startsParagraph = !!lineUpdate.isParagraphEnd;
+          }
+
+          // Greedily pack words into rows; wrap on the column edge or a forced
+          // paragraph break. A paragraph's first row carries that paragraph's
+          // indent (its first word's indentPage), which narrows that row.
+          const rows: (typeof items)[] = [[]];
+          let rowWidth = 0;
+          for (const item of items) {
+            const row = rows[rows.length - 1];
+            const rowIndent = row.length > 0 ? row[0].indentPage : item.indentPage;
+            const projected = rowWidth + (row.length > 0 ? wordGap : 0) + item.width;
+            if (row.length > 0 && projected > columnWidth - rowIndent) {
+              rows.push([item]);
+              rowWidth = item.width;
+            } else {
+              row.push(item);
+              rowWidth = projected;
+            }
+            if (item.breakAfter) {
+              rows.push([]);
+              rowWidth = 0;
+            }
+          }
+          if (rows.length > 0 && rows[rows.length - 1].length === 0) rows.pop();
+
+          // Place each row. Full-justify interior rows — distribute the slack
+          // across the inter-word gaps so the line fills the column, matching the
+          // source's justified layout — and leave the last row and any
+          // paragraph-final row ragged with the natural word gap. The first row
+          // of an indented paragraph starts at lineStartX + indent.
+          for (let r = 0; r < rows.length; r++) {
+            const row = rows[r];
+            if (row.length === 0) continue;
+            const rowIndent = row[0].indentPage;
+            const available = columnWidth - rowIndent;
+            const endsParagraph = row[row.length - 1].breakAfter;
+            const isLastRow = r === rows.length - 1;
+            let gap = wordGap;
+            if (!isLastRow && !endsParagraph && row.length > 1) {
+              const sumWidth = row.reduce((sum, item) => sum + item.width, 0);
+              const justifiedGap = (available - sumWidth) / (row.length - 1);
+              // Bound the gap so a sparse line doesn't get cartoonishly wide spaces.
+              gap = Math.min(Math.max(justifiedGap, wordGap * 0.6), wordGap * 5);
+            }
+            const y = lineBaselineY(r);
+            let cursorX = lineStartX + rowIndent;
+            for (const item of row) {
+              placeObject(item.obj, cursorX, y);
+              cursorX += item.width + gap;
+            }
+          }
+        } else if (useEmbedded) {
+          // Mixed-font path: keep each Latin run on the original font/size and
+          // emit each CJK run with the embedded font at the matched (smaller)
+          // size. Segments are placed left to right on a shared baseline, so the
+          // Latin text is unchanged and only the CJK glyphs use the new font.
+          //
+          // The cursor must advance by each run's *advance* width, not its ink
+          // width: a run can begin or end with a space (e.g. "你好 世界" splits
+          // into CJK / " " / CJK), and a space has no ink, so advancing by
+          // GetBounds collapses inter-character spaces. Precompute the sentinel's
+          // ink-right per font/size so advance measurement is one extra probe.
+          const latinSentinel = this.measureInkRight(pdfium, docPtr, font, effectiveSize, 'M');
+          const cjkSentinel = this.measureInkRight(pdfium, docPtr, embeddedFontPtr, cjkSize, 'M');
+          for (let i = 0; i < lines.length; i++) {
+            const lineUpdate = lines[i];
+            if (!lineUpdate.text) continue;
+            const y = lineBaselineY(i);
+            let cursorX = linePagePosition(i).x;
+            for (const seg of splitByScript(lineUpdate.text)) {
+              const segFont = seg.isCjk ? embeddedFontPtr : font;
+              const segSize = seg.isCjk ? cjkSize : effectiveSize;
+              const made = makeObject(seg.text, lineUpdate.color, segFont, segSize);
+              if (!made) continue;
+              placeObject(made.obj, cursorX, y);
+              cursorX += this.measureAdvanceWidth(
+                pdfium,
+                docPtr,
+                segFont,
+                segSize,
+                seg.text,
+                seg.isCjk ? cjkSentinel : latinSentinel,
+                made.width,
+              );
+            }
+          }
+        } else {
+          // One object per (already-wrapped) line — used for formatting changes
+          // on fonts that render spaces normally.
+          for (let i = 0; i < lines.length; i++) {
+            const lineUpdate = lines[i];
+            if (!lineUpdate.text) continue;
+            const made = makeObject(lineUpdate.text, lineUpdate.color);
+            if (!made) continue;
+            placeObject(made.obj, linePagePosition(i).x, lineBaselineY(i));
+          }
+        }
+      } finally {
+        if (mustClose) pdfium._FPDFFont_Close_W(font);
+      }
+
+      // Remove the originals — EXCEPT for space-less fonts. Removing an object
+      // dirties its content stream, and FPDFPage_GenerateContent then re-emits
+      // every object in that stream, dropping the TJ-positioned spacing of the
+      // *untouched* text that shares it. Adding objects is safe (new stream), so
+      // for space-less pages we instead cover the old paragraph with a white
+      // image (added above) and leave the originals in place — keeping the rest
+      // of the page byte-identical. The covered originals are hidden from text
+      // extraction via `hiddenObjectIndices`.
+      if (spacelessFont) {
+        let hidden = this.hiddenObjectIndices.get(pageIndex);
+        if (!hidden) {
+          hidden = new Set<number>();
+          this.hiddenObjectIndices.set(pageIndex, hidden);
+        }
+        for (const idx of existingObjectIndices) hidden.add(idx);
+        // Also hide any ORIGINAL text object (index < objectCount, i.e. created
+        // before this reflow's additions) whose center falls inside the covered
+        // paragraph rect but was not mapped into the group — otherwise it is
+        // covered on the canvas yet still extracted as a duplicate selectable
+        // span on re-entry. New per-word/cover objects (index >= objectCount)
+        // are excluded so the just-committed text is never hidden.
+        const bl = pdfium._malloc(4);
+        const bb = pdfium._malloc(4);
+        const br2 = pdfium._malloc(4);
+        const bt = pdfium._malloc(4);
+        try {
+          for (let i = 0; i < objectCount; i++) {
+            if (hidden.has(i)) continue;
+            const ptr = pageObjectApi._FPDFPage_GetObject_W(pagePtr, i);
+            if (!ptr) continue;
+            if (pageObjectApi._FPDFPageObj_GetType_W(ptr) !== FPDF_PAGE_OBJECT_TYPE.TEXT) continue;
+            if (!pdfium._FPDFPageObj_GetBounds_W(ptr, bl, bb, br2, bt)) continue;
+            const cx = (pdfium.getValue(bl, 'float') + pdfium.getValue(br2, 'float')) / 2;
+            const cy = (pdfium.getValue(bb, 'float') + pdfium.getValue(bt, 'float')) / 2;
+            if (
+              cx >= paragraphPageRect.left &&
+              cx <= paragraphPageRect.right &&
+              cy >= paragraphPageRect.bottom &&
+              cy <= paragraphPageRect.top
+            ) {
+              hidden.add(i);
+            }
+          }
+        } finally {
+          pdfium._free(bl);
+          pdfium._free(bb);
+          pdfium._free(br2);
+          pdfium._free(bt);
+        }
+      } else {
+        for (const { ptr } of existingPointers) {
+          pdfium._FPDFPage_RemoveObject_W(pagePtr, ptr);
+          pdfium._FPDFPageObj_Destroy_W(ptr);
+        }
+      }
+
+      if (!skipGenerateContent) {
+        if (!pdfium._FPDFPage_GenerateContent_W(pagePtr)) {
+          console.warn('[PdfController] Failed to generate page content after reflow (recreate)');
+        }
+        this.generatedPages.add(pageIndex);
+      }
+
+      return { usedFallbackFont };
+    }
+
     // ─── Phase 1: Create overflow objects (BEFORE removals, so font handle stays valid) ───
     const newObjects: number[] = [];
     if (lines.length > existingPointers.length) {
       const { font, mustClose } = loadFont();
+      const overflowAscentPage = this.measureAscentPage(pdfium, docPtr, font, overflowFontSize);
       try {
         for (let i = existingPointers.length; i < lines.length; i++) {
           const lineUpdate = lines[i];
@@ -2010,8 +3085,10 @@ export class PdfController implements IPdfController {
           const { r, g, b, a } = lineUpdate.color;
           pdfium._FPDFPageObj_SetFillColor_W(newObj, r, g, b, a);
 
-          const pos = linePagePosition(i);
-          pdfium._FPDFPageObj_Transform_W(newObj, 1, 0, 0, 1, pos.x, pos.y);
+          // Place by the line's TOP (glyph box) so the new line sits where it
+          // should, not a leading lower (baseline = top - ascent).
+          const top = lineTopPagePosition(i);
+          pdfium._FPDFPageObj_Transform_W(newObj, 1, 0, 0, 1, top.x, top.y - overflowAscentPage);
           pdfium._FPDFPage_InsertObject_W(pagePtr, newObj);
           newObjects.push(newObj);
         }
@@ -2064,10 +3141,12 @@ export class PdfController implements IPdfController {
         );
         if (ok) {
           const currentLeft = pdfium.getValue(leftPtr, 'float');
-          const currentBottom = pdfium.getValue(bottomPtr, 'float');
-          const desired = linePagePosition(i);
+          const currentTop = pdfium.getValue(topPtr, 'float');
+          // Align the glyph-box TOP to the line's top, not its bottom to the line
+          // box bottom — otherwise the text sinks by one leading every commit.
+          const desired = lineTopPagePosition(i);
           const dx = desired.x - currentLeft;
-          const dy = desired.y - currentBottom;
+          const dy = desired.y - currentTop;
           if (Math.abs(dx) > 0.1 || Math.abs(dy) > 0.1) {
             pdfium._FPDFPageObj_Transform_W(pageObject, 1, 0, 0, 1, dx, dy);
           }
@@ -2168,9 +3247,13 @@ export class PdfController implements IPdfController {
       const topPtr = pdfium._malloc(4);
 
       const textRects: ITextRect[] = [];
+      // Old paragraph objects covered by a white image during a space-less-font
+      // edit — skip them so the editor sees only the new text, not the stale one.
+      const hiddenIndices = this.hiddenObjectIndices.get(pageIndex);
 
       try {
         for (let i = 0; i < objectCount; i++) {
+          if (hiddenIndices?.has(i)) continue;
           const pageObject = pageObjectApi._FPDFPage_GetObject_W(pagePtr, i);
           if (!pageObject) continue;
 
@@ -3896,6 +4979,15 @@ export class PdfController implements IPdfController {
     if (!fontPtr) return;
     const { pdfium } = this.requireDoc();
     pdfium._FPDFFont_Close_W(fontPtr);
+  }
+
+  /**
+   * Provide (or clear with 0) the embedded font used by reflowEditableTextObjects
+   * to render edited paragraphs containing CJK/non-Latin text in the current
+   * edit-mode commit. The caller owns the handle and closeFont()s it afterwards.
+   */
+  public setEditEmbeddedFontPtr(fontPtr: number): void {
+    this.editEmbeddedFontPtr = fontPtr;
   }
 
   public addTextAnnotation(

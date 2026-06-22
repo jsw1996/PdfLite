@@ -12,6 +12,8 @@ export {
   type IPageTextContent,
   type IEditableTextObject,
   type IReflowLineUpdate,
+  type IReflowFormatting,
+  type StandardFontFamily,
   type ITextEditResult,
   type ISearchResult,
   type IFormField,
