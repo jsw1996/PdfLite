@@ -14,7 +14,6 @@ export const useAddSignature = (pageElement: HTMLDivElement | null, pageIndex: n
   const { selectedTool, addAnnotation, setSelectedTool } = useAnnotation();
   const [clickPosition, setClickPosition] = useState<{ x: number; y: number } | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [pendingSignature, setPendingSignature] = useState<ISignatureData | null>(null);
 
   const handleClick = useCallback(
     (e: MouseEvent) => {
@@ -41,49 +40,47 @@ export const useAddSignature = (pageElement: HTMLDivElement | null, pageIndex: n
     };
   }, [pageElement, handleClick]);
 
+  // Create the annotation directly in the apply handler. This runs from the
+  // dialog's Apply button (a user event), where setState is batched and safe.
+  // Doing it in an effect keyed on `addAnnotation` caused an infinite update
+  // loop: addAnnotation calls history.run(), which changes the history context
+  // identity, which gives addAnnotation a new identity, which re-fired the
+  // effect while clickPosition/pendingSignature were still set — adding a fresh
+  // signature each pass until React hit "Maximum update depth exceeded".
   const handleSignatureReady = useCallback(
     (signatureData: ISignatureData) => {
       if (!clickPosition) return;
+      // Guard against a cleared/empty canvas (widthPx/heightPx === 0), which
+      // would otherwise yield a NaN aspect ratio and a broken annotation.
+      if (signatureData.widthPx <= 0 || signatureData.heightPx <= 0) return;
 
-      setPendingSignature(signatureData);
-    },
-    [clickPosition],
-  );
+      const aspectRatio = signatureData.widthPx / signatureData.heightPx;
+      const defaultHeight = 100; // 默认高度 100px
+      const defaultWidth = defaultHeight * aspectRatio;
 
-  // Apply signature when both position and signature data are ready
-  useEffect(() => {
-    if (!clickPosition || !pendingSignature) return;
+      // Create signature annotation
+      const annotation: ISignatureAnnotation = {
+        id: generateAnnotationId('signature'),
+        type: 'signature',
+        source: 'overlay',
+        pageIndex,
+        position: clickPosition,
+        imageDataUrl: signatureData.pngDataUrl,
+        imageRgbaBytes: signatureData.rgbaBytes,
+        imageWidthPx: signatureData.widthPx,
+        imageHeightPx: signatureData.heightPx,
+        width: defaultWidth,
+        height: defaultHeight,
+        createdAt: Date.now(),
+      };
 
-    const aspectRatio = pendingSignature.widthPx / pendingSignature.heightPx;
-    const defaultHeight = 100; // 默认高度 100px
-    const defaultWidth = defaultHeight * aspectRatio;
-
-    // Create signature annotation
-    const annotation: ISignatureAnnotation = {
-      id: generateAnnotationId('signature'),
-      type: 'signature',
-      source: 'overlay',
-      pageIndex,
-      position: clickPosition,
-      imageDataUrl: pendingSignature.pngDataUrl,
-      imageRgbaBytes: pendingSignature.rgbaBytes,
-      imageWidthPx: pendingSignature.widthPx,
-      imageHeightPx: pendingSignature.heightPx,
-      width: defaultWidth,
-      height: defaultHeight,
-      createdAt: Date.now(),
-    };
-
-    addAnnotation(annotation as IAnnotation);
-    setSelectedTool(null);
-
-    // Use setTimeout to avoid calling setState synchronously in effect
-    setTimeout(() => {
+      addAnnotation(annotation as IAnnotation);
+      setSelectedTool(null);
       setIsDialogOpen(false);
       setClickPosition(null);
-      setPendingSignature(null);
-    }, 0);
-  }, [clickPosition, pendingSignature, pageIndex, addAnnotation, setSelectedTool]);
+    },
+    [clickPosition, pageIndex, addAnnotation, setSelectedTool],
+  );
 
   return {
     isDialogOpen,

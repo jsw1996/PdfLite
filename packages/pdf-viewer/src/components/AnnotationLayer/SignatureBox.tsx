@@ -3,6 +3,7 @@ import type { IPoint, ISignatureAnnotation } from '../../annotations';
 import { useAnnotation } from '../../providers/AnnotationContextProvider';
 import { Draggable } from './Draggable';
 import { Resizable } from './Resizable';
+import { AnnotationToolbar, ToolbarDeleteButton } from './AnnotationToolbar';
 
 export interface ISignatureBoxProps {
   id: string;
@@ -19,7 +20,7 @@ export const SignatureBox: React.FC<ISignatureBoxProps> = ({
   width,
   height,
 }) => {
-  const { updateAnnotation } = useAnnotation();
+  const { updateAnnotation, removeAnnotation } = useAnnotation();
   const [isSelected, setIsSelected] = useState(false);
   const [localPosition, setLocalPosition] = useState<IPoint>(position);
   const [localSize, setLocalSize] = useState({ width, height });
@@ -84,6 +85,33 @@ export const SignatureBox: React.FC<ISignatureBoxProps> = ({
     };
   }, [isSelected]);
 
+  const handleDelete = useCallback(() => {
+    removeAnnotation(id, true);
+  }, [id, removeAnnotation]);
+
+  // Keyboard: Delete/Backspace removes the selected signature, Escape deselects.
+  // Ignored while a field is focused so it never hijacks the caret elsewhere.
+  useEffect(() => {
+    if (!isSelected) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target) {
+        const tag = target.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable) {
+          return;
+        }
+      }
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        e.preventDefault();
+        removeAnnotation(id, true);
+      } else if (e.key === 'Escape') {
+        setIsSelected(false);
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [isSelected, id, removeAnnotation]);
+
   const handlePositionChange = useCallback((newPosition: IPoint) => {
     setLocalPosition(newPosition);
   }, []);
@@ -114,6 +142,10 @@ export const SignatureBox: React.FC<ISignatureBoxProps> = ({
       userSelect: 'none' as const,
     };
   }, []);
+
+  // Place the toolbar above the box unless it sits too close to the page top
+  // (mirrors the text box so both annotations behave identically).
+  const toolbarPlacement = localPosition.y > 56 ? 'above' : 'below';
 
   return (
     <Draggable
@@ -151,17 +183,22 @@ export const SignatureBox: React.FC<ISignatureBoxProps> = ({
         >
           <img src={imageDataUrl} alt="Signature" style={imageStyle} draggable={false} />
           {isSelected && (
-            <div
-              style={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                right: 0,
-                bottom: 0,
-                border: '2px dashed #3b82f6',
-                pointerEvents: 'none',
-              }}
-            />
+            <>
+              <AnnotationToolbar placement={toolbarPlacement}>
+                <ToolbarDeleteButton onDelete={handleDelete} label="Delete signature" />
+              </AnnotationToolbar>
+              <div
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  border: '2px dashed #3b82f6',
+                  pointerEvents: 'none',
+                }}
+              />
+            </>
           )}
         </div>
       </Resizable>
