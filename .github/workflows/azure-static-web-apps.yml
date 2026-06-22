@@ -1,0 +1,77 @@
+name: Azure Static Web Apps CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write # let the deploy action comment the preview URL on PRs
+
+concurrency:
+  # One run per branch/PR; cancel superseded runs to save CI minutes.
+  group: swa-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build_and_deploy:
+    # Skip on PR "closed" — that event is handled by the close job below.
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.action != 'closed')
+    runs-on: ubuntu-latest
+    name: Build and Deploy
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 8.12.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install
+
+      # The pdfium WASM binary is pre-committed under packages/pdfium-wasm/wasm,
+      # so CI only needs the TypeScript build — no Emscripten/Docker recompile.
+      - name: Build pdfium-wasm (TypeScript only)
+        run: pnpm --filter @pdfviewer/pdfium-wasm run build:ts
+
+      - name: Build controller
+        run: pnpm --filter @pdfviewer/controller build
+
+      # No GITHUB_PAGES env here, so Vite builds with base "/" for the SWA root
+      # (the Pages workflow sets GITHUB_PAGES to use the "/PdfLite/" subpath).
+      - name: Build pdf-viewer
+        run: pnpm --filter pdf-viewer build
+
+      - name: Deploy to Azure Static Web Apps
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          action: upload
+          # dist is already built above; skip the action's Oryx build and just
+          # upload it (staticwebapp.config.json ships inside dist via public/).
+          skip_app_build: true
+          skip_api_build: true
+          app_location: packages/pdf-viewer/dist
+          output_location: ''
+
+  close_pull_request:
+    if: github.event_name == 'pull_request' && github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    name: Close PR preview environment
+    steps:
+      - name: Close staging environment
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          action: close
