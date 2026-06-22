@@ -151,8 +151,8 @@ export const PdfEditor: React.FC<IPdfEditorProps> = ({ file }) => {
   }, []);
 
   // Fingerprint the file so opening a different PDF fully resets per-document
-  // annotation state. React.useState inside the provider would otherwise persist
-  // across documents.
+  // state (annotation stack, editSessionData maps). React.useState inside the
+  // provider would otherwise persist across documents and leak edits between them.
   const annotationProviderKey = `${file.name}:${file.size}:${file.lastModified}`;
 
   return (

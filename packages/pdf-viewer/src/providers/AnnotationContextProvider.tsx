@@ -19,6 +19,39 @@ import {
 import { usePdfState } from './PdfStateContextProvider';
 import { usePdfController } from './PdfControllerContextProvider';
 import { useEditHistory } from './EditHistoryContextProvider';
+import { collectCjkSubsetCodepoints, subsetEmbeddedFont } from '../utils/fontEmbedding';
+
+/** Selectable font family for an edited paragraph. `original` keeps the source font. */
+export type EditFontFamily = 'original' | 'sans' | 'serif' | 'mono';
+
+/**
+ * Block-level formatting overrides applied to a single paragraph during an edit
+ * session. Each field is optional; an absent field means "unchanged from the
+ * paragraph's resolved original style".
+ */
+export interface IParagraphFormatOverride {
+  /** Multiplier on the paragraph's original display font size (1 = unchanged). */
+  fontScale?: number;
+  /** Faux-bold rendering. */
+  bold?: boolean;
+  /** Faux-italic rendering. */
+  italic?: boolean;
+  /** CSS color applied uniformly to every line of the paragraph. */
+  color?: string;
+  /** Horizontal alignment of wrapped lines within the paragraph box. */
+  align?: 'left' | 'center' | 'right';
+  /** Font family selection. */
+  fontFamily?: EditFontFamily;
+}
+
+export interface IEditSessionData {
+  /** Editor plain text saved across virtualized unmount/remount cycles. Key: `${pageIndex}:${paragraphIndex}` */
+  savedEditorText: Map<string, string>;
+  /** Original per-line CSS color strings saved before FPDFPage_GenerateContent corrupts them. Key: `${pageIndex}:${paragraphIndex}` */
+  savedLineColors: Map<string, string[]>;
+  /** Per-paragraph formatting overrides applied during the edit session. Key: `${pageIndex}:${paragraphIndex}` */
+  savedFormatOverrides: Map<string, IParagraphFormatOverride>;
+}
 
 export interface IAnnotationContextValue {
   /** Currently selected annotation tool */
@@ -41,6 +74,27 @@ export interface IAnnotationContextValue {
   highlightColor: string;
   /** Set the highlight tool color */
   setHighlightColor: (color: string) => void;
+  /** Whether inline text-editing mode is active */
+  isEditMode: boolean;
+  /** Toggle inline text-editing mode */
+  setIsEditMode: (mode: boolean) => void;
+  /**
+   * The paragraph editor currently focused in Edit Text mode (across all
+   * virtualized pages), or null. Drives which page renders the single floating
+   * formatting toolbar.
+   */
+  activeEditor: { pageIndex: number; paragraphIndex: number } | null;
+  /** Set (or clear) the focused paragraph editor. */
+  setActiveEditor: (value: { pageIndex: number; paragraphIndex: number } | null) => void;
+  /**
+   * Pages that have an actual staged edit this session. The viewer keeps these
+   * mounted (pinned) even when scrolled out of view so their changes still
+   * commit on edit-mode exit — letting edit mode stay virtualized for large
+   * documents instead of mounting every page.
+   */
+  editedPageIndices: Set<number>;
+  /** Mark a page as edited (idempotent). */
+  markPageEdited: (pageIndex: number) => void;
   /** Add an annotation (will be normalized for scale-independent storage) */
   addAnnotation: (annotation: IAnnotation) => void;
   /** All annotations in the stack */
@@ -73,6 +127,8 @@ export interface IAnnotationContextValue {
   renderVersion: number;
   /** Force a canvas re-render after direct page-content edits */
   bumpRenderVersion: () => void;
+  /** Mutable session data for text-editing mode, scoped to the current document */
+  editSessionData: IEditSessionData;
 }
 
 const AnnotationContext = createContext<IAnnotationContextValue | null>(null);
@@ -93,6 +149,12 @@ export function AnnotationContextProvider({ children }: { children: React.ReactN
   const [drawStrokeWidth, setDrawStrokeWidth] = useState<number>(DRAW_TOOL_DEFAULTS.STROKE_WIDTH);
   const [selectedDrawId, setSelectedDrawId] = useState<string | null>(null);
   const [highlightColor, setHighlightColor] = useState<string>(HIGHLIGHT_TOOL_DEFAULTS.COLOR);
+  const [isEditMode, _setIsEditMode] = useState(false);
+  const [activeEditor, setActiveEditor] = useState<{
+    pageIndex: number;
+    paragraphIndex: number;
+  } | null>(null);
+  const [editedPageIndices, setEditedPageIndices] = useState<Set<number>>(() => new Set());
   const [annotationStack, setAnnotationStack] = useState<IAnnotation[]>([]);
   const [renderVersion, setRenderVersion] = useState(0);
   const scale = usePdfState().scale;
@@ -103,11 +165,99 @@ export function AnnotationContextProvider({ children }: { children: React.ReactN
     annotationStackRef.current = annotationStack;
   }, [annotationStack]);
 
+  // Mutable session data for text-editing mode. Created once via lazy
+  // initializer so mutations don't trigger React re-renders (we never call
+  // the setter). Using useState instead of useRef avoids "ref access during
+  // render" errors from the React Compiler.
+  const [editSessionData] = useState<IEditSessionData>(() => ({
+    savedEditorText: new Map(),
+    savedLineColors: new Map(),
+    savedFormatOverrides: new Map(),
+  }));
+  // Handle to the subsetted CJK font embedded for the current commit (0 when
+  // none). A ref so the value can be mutated outside React's render cycle.
+  const embeddedFontHandleRef = useRef(0);
+
   const setSelectedTool = useCallback((tool: AnnotationType | null) => {
     _setSelectedTool(tool);
+    if (tool) _setIsEditMode(false);
     // A draw selection only makes sense while the draw tool is active.
     if (tool !== 'draw') setSelectedDrawId(null);
   }, []);
+
+  const markPageEdited = useCallback((pageIndex: number) => {
+    setEditedPageIndices((prev) => (prev.has(pageIndex) ? prev : new Set(prev).add(pageIndex)));
+  }, []);
+
+  const setIsEditMode = useCallback(
+    (mode: boolean) => {
+      if (mode) {
+        _setIsEditMode(true);
+        _setSelectedTool(null);
+        return;
+      }
+      setActiveEditor(null);
+      // Exiting commits the edits synchronously (child TextLayer effect cleanups
+      // run the moment edit mode turns off). Any edited paragraph that now
+      // contains CJK can only render with an embedded font, so subset+load it
+      // BEFORE flipping the flag. Pure-Latin sessions skip the async path
+      // entirely. (savedEditorText is already up to date — the active editor
+      // flushed on the blur that preceded this toolbar click.) The doc-level
+      // teardown closes the handle once every per-page commit has landed.
+      void (async () => {
+        try {
+          const cps = collectCjkSubsetCodepoints([...editSessionData.savedEditorText.values()]);
+          if (cps.length > 0) {
+            const subset = await subsetEmbeddedFont(cps);
+            const handle = controller.loadEmbeddedFont(subset);
+            embeddedFontHandleRef.current = handle;
+            controller.setEditEmbeddedFontPtr(handle);
+          }
+        } catch (e) {
+          console.warn('Failed to embed a font for CJK text; it may not render.', e);
+        }
+        _setIsEditMode(false);
+      })();
+      // savedEditorText / savedFormatOverrides / savedLineColors persist across
+      // edit sessions (cleared only on document close): after GenerateContent the
+      // page is re-extracted from the clean pre-edit copy, which doesn't reflect
+      // committed edits, so these maps carry each edit back into its editor box.
+    },
+    [controller, editSessionData],
+  );
+
+  // Document-level edit-mode teardown.
+  // Child TextLayer effects fire before parent effects, so by the time this
+  // runs every per-page commit has already landed. Owning the doc-wide
+  // teardown here prevents the race that occurred when each virtualized
+  // TextLayer called releaseEditPages/bumpRenderVersion in parallel.
+  // setRenderVersion is queued via microtask to avoid the cascading-render
+  // pattern the lint rule rejects (and to let the current commit phase finish
+  // releasing edit-page pointers before invalidating canvases).
+  const wasEditModeRef = useRef(false);
+  useEffect(() => {
+    if (isEditMode) {
+      wasEditModeRef.current = true;
+      return;
+    }
+    if (!wasEditModeRef.current) return;
+    wasEditModeRef.current = false;
+    // Per-page commits have already consumed the embedded CJK font (child effects
+    // fire first); release its handle now that it's embedded in the document.
+    if (embeddedFontHandleRef.current) {
+      controller.closeFont(embeddedFontHandleRef.current);
+      embeddedFontHandleRef.current = 0;
+      controller.setEditEmbeddedFontPtr(0);
+    }
+    controller.releaseEditPages();
+    // Per-page commits have already run (child effects fire first), so it's safe
+    // to unpin the edited pages now — deferred to a microtask alongside the
+    // canvas invalidation to avoid the cascading-render lint pattern.
+    queueMicrotask(() => {
+      setRenderVersion((v) => v + 1);
+      setEditedPageIndices(new Set());
+    });
+  }, [isEditMode, controller]);
 
   const annotationsByPage = useMemo(() => {
     const map = new Map<number, IAnnotation[]>();
@@ -339,6 +489,12 @@ export function AnnotationContextProvider({ children }: { children: React.ReactN
       setSelectedDrawId,
       highlightColor,
       setHighlightColor,
+      isEditMode,
+      setIsEditMode,
+      activeEditor,
+      setActiveEditor,
+      editedPageIndices,
+      markPageEdited,
       addAnnotation,
       getAnnotationsForPage,
       consumeNewAnnotation,
@@ -351,6 +507,7 @@ export function AnnotationContextProvider({ children }: { children: React.ReactN
       updateAnnotation,
       renderVersion,
       bumpRenderVersion,
+      editSessionData,
     }),
     [
       addAnnotation,
@@ -362,6 +519,11 @@ export function AnnotationContextProvider({ children }: { children: React.ReactN
       drawStrokeWidth,
       selectedDrawId,
       highlightColor,
+      isEditMode,
+      setIsEditMode,
+      activeEditor,
+      editedPageIndices,
+      markPageEdited,
       setNativeAnnotationsForPage,
       annotationStack,
       popAnnotation,
@@ -371,6 +533,7 @@ export function AnnotationContextProvider({ children }: { children: React.ReactN
       commitAnnotations,
       commitAnnotationsToPdfium,
       updateAnnotation,
+      editSessionData,
     ],
   );
 

@@ -34,14 +34,19 @@ export const ViewerPage: React.FC<IViewerPageProps> = ({ pageIndex, registerPage
   const [pdfCanvas, setPdfCanvas] = useState<HTMLCanvasElement | null>(null);
   const [containerEl, setContainerEl] = useState<HTMLDivElement | null>(null);
   const { controller, goToPage } = usePdfController();
-  const { setNativeAnnotationsForPage, selectedTool, getAnnotationsForPage, setSelectedDrawId } =
-    useAnnotation();
+  const {
+    setNativeAnnotationsForPage,
+    selectedTool,
+    isEditMode,
+    getAnnotationsForPage,
+    setSelectedDrawId,
+  } = useAnnotation();
 
-  // Select tool (no annotation tool) lets the user click a stroke
+  // Select tool (no annotation tool, not editing) lets the user click a stroke
   // to select it. Hit-testing happens here, in the page's capture phase, so a
   // miss falls through to links/forms/text/text-boxes instead of being eaten by
   // a full-page canvas overlay.
-  const isSelectMode = selectedTool === null;
+  const isSelectMode = selectedTool === null && !isEditMode;
   const handleSelectPointerDown = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
       if (!isSelectMode || !pdfCanvas) return;

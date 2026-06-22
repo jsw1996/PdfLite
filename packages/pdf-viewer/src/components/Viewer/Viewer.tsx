@@ -8,6 +8,7 @@ import { usePdfState } from '@/providers/PdfStateContextProvider';
 import { useUndo } from '../../hooks/useUndo';
 import { useCurrentPageTracker } from '../../hooks/useCurrentPageTracker';
 import { OBSERVER_CONFIG, VIEWER_CONFIG } from '@/utils/config';
+import { useAnnotation } from '@/providers/AnnotationContextProvider';
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 const PAGE_GAP_PX = 16; // Matches previous mb-4 spacing on pages
@@ -41,6 +42,7 @@ export interface IViewerProps {
 export const Viewer: React.FC<IViewerProps> = ({ pageCount }) => {
   const { goToPage, controller, registerScrollToIndex } = usePdfController();
   const { scale, setScale } = usePdfState();
+  const { editedPageIndices } = useAnnotation();
 
   const scrollElementRef = useRef<HTMLDivElement | null>(null);
   const [scrollContainer, setScrollContainer] = useState<HTMLDivElement | null>(null);
@@ -312,7 +314,13 @@ export const Viewer: React.FC<IViewerProps> = ({ pageCount }) => {
     for (const item of virtualItems) {
       itemsByIndex.set(item.index, { index: item.index, start: item.start, size: item.size });
     }
-    for (const idx of pinnedIndices) {
+    // Always keep zoom-pinned pages mounted. Also keep any page with a staged
+    // edit mounted (even when scrolled off-screen) so its changes still commit
+    // on edit-mode exit — `editedPageIndices` is populated only while editing
+    // and cleared after the commit, so this lets edit mode stay virtualized for
+    // large documents instead of mounting every page at once.
+    const extraIndices = [...pinnedIndices, ...editedPageIndices];
+    for (const idx of extraIndices) {
       if (idx < 0 || idx >= pageCount) continue;
       if (itemsByIndex.has(idx)) continue;
       const size = (pageHeights[idx] ?? 0) * scale + PAGE_GAP_PX;
@@ -320,7 +328,15 @@ export const Viewer: React.FC<IViewerProps> = ({ pageCount }) => {
       itemsByIndex.set(idx, { index: idx, start, size });
     }
     return Array.from(itemsByIndex.values()).sort((a, b) => a.index - b.index);
-  }, [getScaledStart, pageCount, pageHeights, pinnedIndices, scale, virtualItems]);
+  }, [
+    getScaledStart,
+    editedPageIndices,
+    pageCount,
+    pageHeights,
+    pinnedIndices,
+    scale,
+    virtualItems,
+  ]);
   const currentDevicePixelRatio = getDevicePixelRatio();
 
   return (
