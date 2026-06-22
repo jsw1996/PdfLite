@@ -3,7 +3,6 @@
   "compilerOptions": {
     "noEmit": true,
     "allowJs": true,
-    "baseUrl": ".",
     "paths": {
       "@pdfviewer/controller": ["./packages/controller/src/index.ts"],
       "@pdfviewer/pdfium-wasm": ["./packages/pdfium-wasm/src/index.ts"],

@@ -18,7 +18,6 @@ interface IDownloadDialogContextValue {
 }
 
 const DownloadDialogContext = createContext<IDownloadDialogContextValue | null>(null);
-// eslint-disable-next-line react-refresh/only-export-components
 export function useDownloadDialog(): IDownloadDialogContextValue {
   const ctx = useContext(DownloadDialogContext);
   if (!ctx) {
