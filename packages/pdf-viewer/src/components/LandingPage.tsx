@@ -357,7 +357,16 @@ export const LandingPage: React.FC<ILandingPageProps> = ({ onFileSelect }) => {
       </main>
 
       <footer className="text-muted-foreground relative z-10 mx-auto w-full max-w-6xl px-6 py-6 text-center font-mono text-[0.7rem] md:px-10 lg:text-left">
-        Rendered with PDFium · WebAssembly · no server in the loop
+        <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 lg:justify-start">
+          <span>Rendered with PDFium · WebAssembly · no server in the loop</span>
+          <span aria-hidden>·</span>
+          <a
+            href="#licenses"
+            className="hover:text-foreground focus-visible:ring-ring rounded-sm underline-offset-4 transition-colors hover:underline focus-visible:ring-2 focus-visible:outline-none"
+          >
+            Licenses
+          </a>
+        </div>
       </footer>
     </div>
   );
