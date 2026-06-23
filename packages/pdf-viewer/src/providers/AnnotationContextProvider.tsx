@@ -19,7 +19,6 @@ import {
 import { usePdfState } from './PdfStateContextProvider';
 import { usePdfController } from './PdfControllerContextProvider';
 import { useEditHistory } from './EditHistoryContextProvider';
-import { collectCjkSubsetCodepoints, subsetEmbeddedFont } from '../utils/fontEmbedding';
 
 /** Selectable font family for an edited paragraph. `original` keeps the source font. */
 export type EditFontFamily = 'original' | 'sans' | 'serif' | 'mono';
@@ -206,6 +205,8 @@ export function AnnotationContextProvider({ children }: { children: React.ReactN
       // teardown closes the handle once every per-page commit has landed.
       void (async () => {
         try {
+          const { collectCjkSubsetCodepoints, subsetEmbeddedFont } =
+            await import('../utils/fontEmbedding');
           const cps = collectCjkSubsetCodepoints([...editSessionData.savedEditorText.values()]);
           if (cps.length > 0) {
             const subset = await subsetEmbeddedFont(cps);

@@ -7,11 +7,13 @@ import { useFormContext } from '@/providers/FormContextProvider';
 import { encryptPdf } from '@/utils/pdfEncrypt';
 import { applyFormValues } from '@/utils/applyFormValues';
 import { isTextAnnotation } from '@/annotations';
-import {
-  collectCodepoints,
-  subsetEmbeddedFont,
-  textNeedsEmbeddedFont,
-} from '@/utils/fontEmbedding';
+
+function textNeedsEmbeddedFont(text: string): boolean {
+  for (const char of text) {
+    if (char.codePointAt(0)! > 0x7f) return true;
+  }
+  return false;
+}
 
 interface IDownloadDialogContextValue {
   openDownloadDialog: () => void;
@@ -72,6 +74,8 @@ export function DownloadDialogProvider({
             .map((a) => a.content);
           if (overlayText.some(textNeedsEmbeddedFont)) {
             try {
+              const { collectCodepoints, subsetEmbeddedFont } =
+                await import('@/utils/fontEmbedding');
               const subset = await subsetEmbeddedFont(collectCodepoints(overlayText));
               embeddedFontPtr = controller.loadEmbeddedFont(subset);
             } catch (fontError) {

@@ -13,6 +13,56 @@ const pdfiumWasmPath = path.resolve(__dirname, 'node_modules/@pdfviewer/pdfium-w
 // https://vite.dev/config/
 export default defineConfig({
   base: process.env.GITHUB_PAGES ? '/PdfLite/' : '/',
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          const normalizedId = id.replace(/\\/g, '/');
+
+          if (
+            normalizedId.includes('/packages/controller/') ||
+            normalizedId.includes('/packages/pdfium-wasm/')
+          ) {
+            return 'pdf-engine';
+          }
+          if (
+            normalizedId.includes('/node_modules/@pdf-lib/') ||
+            normalizedId.includes('/node_modules/fontkit/')
+          ) {
+            return 'pdf-export-support';
+          }
+          if (normalizedId.includes('/node_modules/pako/')) {
+            return 'pdf-compression';
+          }
+          if (normalizedId.includes('/node_modules/pdf-lib-with-encrypt/')) {
+            return 'pdf-lib';
+          }
+          if (
+            normalizedId.includes('/node_modules/react-virtuoso/') ||
+            normalizedId.includes('/node_modules/@tanstack/react-virtual/')
+          ) {
+            return 'virtualization';
+          }
+          if (
+            normalizedId.includes('/node_modules/@radix-ui/') ||
+            normalizedId.includes('/packages/ui/src/')
+          ) {
+            return 'ui-vendor';
+          }
+          if (normalizedId.includes('/node_modules/lucide-react/')) {
+            return 'icons';
+          }
+          if (
+            normalizedId.includes('/node_modules/react/') ||
+            normalizedId.includes('/node_modules/react-dom/') ||
+            normalizedId.includes('/node_modules/scheduler/')
+          ) {
+            return 'react-vendor';
+          }
+        },
+      },
+    },
+  },
   plugins: [
     react(),
     tailwindcss(),
