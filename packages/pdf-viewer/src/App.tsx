@@ -1,18 +1,35 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
+
 import { LandingPage } from './components/LandingPage';
-import { PdfEditor } from './components/PdfEditor';
-import { ErrorBoundary } from './components/ErrorBoundary';
-import { SidebarProvider } from '@pdfviewer/ui/components/sidebar';
-import type { CSSProperties } from 'react';
-import { PdfControllerContextProvider } from './providers/PdfControllerContextProvider';
-import { ThemeContextProvider } from './providers/ThemeContextProvider';
-import { ThirdPartyNoticesPage } from './components/ThirdPartyNoticesPage';
+
+const PdfEditorRoute = lazy(() =>
+  import('./components/PdfEditorRoute').then((module) => ({
+    default: module.PdfEditorRoute,
+  })),
+);
+
+const ThirdPartyNoticesRoute = lazy(() =>
+  import('./components/ThirdPartyNoticesRoute').then((module) => ({
+    default: module.ThirdPartyNoticesRoute,
+  })),
+);
 
 type AppRoute = 'app' | 'licenses';
 
 function getAppRoute(): AppRoute {
   if (typeof window === 'undefined') return 'app';
   return window.location.hash === '#licenses' ? 'licenses' : 'app';
+}
+
+function AppLoadingFallback({ label }: { label: string }) {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-background text-foreground">
+      <div className="flex items-center gap-3" role="status" aria-live="polite">
+        <span className="size-2 rounded-full bg-primary motion-safe:animate-pulse" />
+        <span className="text-sm text-muted-foreground">{label}</span>
+      </div>
+    </div>
+  );
 }
 
 function App() {
@@ -41,27 +58,18 @@ function App() {
 
   if (route === 'licenses') {
     return (
-      <ThemeContextProvider>
-        <ThirdPartyNoticesPage onBack={onCloseLicenses} />
-      </ThemeContextProvider>
+      <Suspense fallback={<AppLoadingFallback label="Opening notices..." />}>
+        <ThirdPartyNoticesRoute onBack={onCloseLicenses} />
+      </Suspense>
     );
   }
 
   return !isFileOpened ? (
     <LandingPage onFileSelect={onFileSelected} />
   ) : (
-    <ErrorBoundary>
-      <ThemeContextProvider>
-        <PdfControllerContextProvider>
-          <SidebarProvider
-            defaultOpen={false}
-            style={{ '--sidebar-width': '16rem' } as CSSProperties}
-          >
-            <PdfEditor file={file!} />
-          </SidebarProvider>
-        </PdfControllerContextProvider>
-      </ThemeContextProvider>
-    </ErrorBoundary>
+    <Suspense fallback={<AppLoadingFallback label="Opening document..." />}>
+      <PdfEditorRoute file={file!} />
+    </Suspense>
   );
 }
 

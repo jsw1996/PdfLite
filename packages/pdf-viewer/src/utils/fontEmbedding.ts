@@ -13,8 +13,6 @@
  * drops the outlines. Noto Sans SC ships as a glyf variable font; we pin its
  * axes to the default at subset time to emit a clean static instance.
  */
-import notoFontUrl from '@/assets/fonts/NotoSansSC.ttf?url';
-import hbSubsetWasmUrl from '@/assets/fonts/harfbuzz-subset.wasm?url';
 
 interface IHbSubsetExports {
   memory: WebAssembly.Memory;
@@ -60,6 +58,7 @@ let fontPromise: Promise<Uint8Array> | null = null;
 
 async function getHbSubset(): Promise<IHbSubsetExports> {
   hbPromise ??= (async () => {
+    const { default: hbSubsetWasmUrl } = await import('@/assets/fonts/harfbuzz-subset.wasm?url');
     const res = await fetch(hbSubsetWasmUrl);
     const { instance } = await WebAssembly.instantiate(await res.arrayBuffer(), {});
     return instance.exports as unknown as IHbSubsetExports;
@@ -68,9 +67,11 @@ async function getHbSubset(): Promise<IHbSubsetExports> {
 }
 
 async function getSourceFont(): Promise<Uint8Array> {
-  fontPromise ??= fetch(notoFontUrl)
-    .then((r) => r.arrayBuffer())
-    .then((b) => new Uint8Array(b));
+  fontPromise ??= (async () => {
+    const { default: notoFontUrl } = await import('@/assets/fonts/NotoSansSC.ttf?url');
+    const response = await fetch(notoFontUrl);
+    return new Uint8Array(await response.arrayBuffer());
+  })();
   return fontPromise;
 }
 
